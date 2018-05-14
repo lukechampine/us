@@ -338,8 +338,13 @@ func ExtractMetaFile(filename string) (_ *MetaFile, err error) {
 	}
 	defer f.Close()
 
-	// create working directory
+	// check that we aren't clobbering an existing workdir
 	workdir := filename + "_workdir"
+	if _, err := os.Stat(workdir); err == nil {
+		return nil, errors.New("refusing to overwrite " + workdir)
+	}
+
+	// create working directory
 	err = os.MkdirAll(workdir, 0700)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not create working directory")
