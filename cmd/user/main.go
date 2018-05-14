@@ -183,7 +183,7 @@ func main() {
 
 	rootCmd := flagg.Root
 	rootCmd.StringVar(&config.SiadAddr, "a", config.SiadAddr, "host:port that the siad API is running on")
-	rootCmd.StringVar(&config.SiadAddr, "p", config.SiadPassword, "password required by siad API")
+	rootCmd.StringVar(&config.SiadPassword, "p", config.SiadPassword, "password required by siad API")
 	rootCmd.StringVar(&config.Contracts, "c", config.Contracts, "directory where contracts are stored")
 	rootCmd.Usage = flagg.SimpleUsage(rootCmd, rootUsage)
 
