@@ -77,8 +77,8 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 		return crypto.Hash{}, errors.Errorf("contract has insufficient funds to support upload: needed %v, have %v", sectorPrice, txn.RenterFunds())
 	}
 	sectorCollateral := u.host.Collateral.Mul(blockBytes)
-	// hosts tend to be picky about collateral, so shave off 10%
-	sectorCollateral = sectorCollateral.MulFloat(0.90)
+	// hosts tend to be picky about collateral, so shave off 15%
+	sectorCollateral = sectorCollateral.MulFloat(0.85)
 	if txn.CurrentRevision().NewMissedProofOutputs[1].Value.Cmp(sectorCollateral) < 0 {
 		return crypto.Hash{}, errors.New("contract has insufficient collateral to support upload")
 	}
