@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/NebulousLabs/Sia/build"
 	"github.com/lukechampine/us/renter"
 
 	"github.com/lukechampine/flagg"
@@ -233,7 +234,8 @@ func main() {
 		fallthrough
 	case versionCmd:
 		goversion = strings.TrimPrefix(goversion, "go version ")
-		log.Printf("user v%s\nCommit: %s\nGo version: %s\nBuild Date: %s\n", version, githash, goversion, builddate)
+		log.Printf("user v%s\nCommit:     %s\nRelease:    %s\nGo version: %s\nBuild Date: %s\n",
+			version, githash, build.Release, goversion, builddate)
 
 	case scanCmd:
 		if len(args) == 0 {
