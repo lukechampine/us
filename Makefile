@@ -7,6 +7,10 @@ ldflags = -X 'main.version=0.1.0' \
 all:
 	go install -ldflags "$(ldflags)" ./...
 
+# dev builds a binary with dev constants
+dev:
+	go install -ldflags "$(ldflags)" -tags='dev' ./...
+
 lint:
 	@gometalinter --disable-all \
 		--enable=ineffassign \
