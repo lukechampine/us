@@ -76,7 +76,7 @@ func (c *siadClient) Hosts() []hostdb.HostPublicKey {
 }
 
 func (c *siadClient) Scan(pubkey hostdb.HostPublicKey) (hostdb.ScannedHost, error) {
-	hhg, err := c.siad.HostDbHostsGet(string(pubkey))
+	hhg, err := c.siad.HostDbHostsGet(pubkey.SiaPublicKey())
 	check("Could not lookup host:", err) // TODO: what if host does not exist?
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
