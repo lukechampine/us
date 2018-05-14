@@ -12,13 +12,13 @@ situations. If the contributor and maintainer disagree on something, they can
 arrive at a decision before any code is written, saving everyone time and
 frustration.
 
-Note that this rule does not apply to small PRs. Small PRs are more likely to
-be accepted, and if they are rejected, the amount of wasted effort isn't
-terribly large. Please note, however, that "small" in this context does not
-mean "under 100 lines of code changed." Adding a test, correcting a bunch of
-spelling errors, or running existing code through a linter are all small PRs,
-even though they may change hundreds of lines. Conversely, you may invest days
-of effort optimizing a 50-line function, only to find out later that your
+This rule does not apply to small PRs. Small PRs are more likely to be
+accepted, and if they are rejected, the amount of wasted effort isn't terribly
+large. Please note, however, that "small" in this context does not mean "under
+100 lines of code changed." Adding a test, correcting a bunch of spelling
+errors, or running existing code through a linter are all small PRs, even
+though they may change hundreds of lines. Conversely, you may invest days of
+effort optimizing a 50-line function, only to find out later that your
 optimization backfires under real-world conditions, or that the function was
 slated to be removed entirely as part of a larger refactor. Use your best
 judgment when deciding what counts as "small," but when in doubt, err on the
