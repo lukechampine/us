@@ -152,6 +152,9 @@ func HTTPFile(name string, downloaders *downloaderSet) (http.File, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "could not extract meta file")
 	}
+	if len(shards) == 0 {
+		return nil, errors.New("empty file")
+	}
 
 	dr, err := newDownloadReader(index, shards, downloaders)
 	if err != nil {
