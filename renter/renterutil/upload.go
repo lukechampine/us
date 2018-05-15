@@ -23,6 +23,11 @@ func Upload(f *os.File, contracts renter.ContractSet, m *renter.MetaFile, scan r
 }
 
 func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn, currentHeight types.BlockHeight) {
+	if m.Filesize == 0 {
+		op.die(nil)
+		return
+	}
+
 	// determine chunkIndex
 	chunkIndex, err := func() (int64, error) {
 		min := -1
@@ -266,6 +271,11 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 			f.Close()
 			return fileEntry{}, err
 		}
+		if m.Filesize == 0 {
+			f.Close()
+			m.Archive(metaPath)
+			goto retry
+		}
 		return fileEntry{
 			f: f,
 			m: m,
@@ -278,7 +288,10 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 	}
 
 	curEntry, err := nextEntry()
-	if err != nil && err != io.EOF {
+	if err == io.EOF {
+		op.die(nil)
+		return
+	} else if err != nil {
 		op.die(err)
 		return
 	}
