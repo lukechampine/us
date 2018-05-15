@@ -1,12 +1,13 @@
 package renter
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"unsafe"
 
 	"github.com/NebulousLabs/Sia/crypto"
 	"github.com/NebulousLabs/Sia/types"
@@ -259,10 +260,16 @@ func SaveRenewedContract(oldContract *Contract, newContract proto.ContractTransa
 	}
 
 	// write sector roots
-	for _, root := range oldContract.sectorRoots {
-		if _, err := f.Write(root[:]); err != nil {
-			return errors.Wrap(err, "could not write sector root")
-		}
+	roots := oldContract.sectorRoots
+	rootsBytes := *(*[]byte)(unsafe.Pointer(&reflect.SliceHeader{
+		Len:  len(roots) * crypto.HashSize,
+		Cap:  len(roots) * crypto.HashSize,
+		Data: (*reflect.SliceHeader)(unsafe.Pointer(&roots)).Data,
+	}))
+	if _, err := f.Write(rootsBytes); err != nil {
+		return errors.Wrap(err, "could not write sector roots")
+	} else if err := f.Sync(); err != nil {
+		return errors.Wrap(err, "could not sync contract file")
 	}
 
 	return nil
@@ -271,11 +278,11 @@ func SaveRenewedContract(oldContract *Contract, newContract proto.ContractTransa
 // LoadContract loads a contract file, including all of its sector Merkle
 // roots, into memory.
 func LoadContract(filename string) (*Contract, error) {
-	file, err := os.OpenFile(filename, os.O_RDWR, 0)
+	f, err := os.OpenFile(filename, os.O_RDWR, 0)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not open contract file")
 	}
-	stat, err := file.Stat()
+	stat, err := f.Stat()
 	if err != nil {
 		return nil, errors.Wrap(err, "could not stat contract file")
 	}
@@ -285,13 +292,13 @@ func LoadContract(filename string) (*Contract, error) {
 	numSectors := (stat.Size() - ContractRootOffset) / crypto.HashSize
 	if stat.Size() != ContractRootOffset+numSectors*crypto.HashSize {
 		// truncate to nearest sector
-		if err = file.Truncate(ContractRootOffset + numSectors*crypto.HashSize); err != nil {
+		if err = f.Truncate(ContractRootOffset + numSectors*crypto.HashSize); err != nil {
 			return nil, errors.Wrap(err, "could not repair contract")
 		}
 	}
 
 	// read header
-	header, err := readContractHeader(file)
+	header, err := readContractHeader(f)
 	if err != nil {
 		return nil, err
 	} else if err := header.Validate(); err != nil {
@@ -299,7 +306,7 @@ func LoadContract(filename string) (*Contract, error) {
 	}
 	// read transaction
 	// TODO: try to recover if txn is invalid?
-	txn, err := readContractTransaction(file)
+	txn, err := readContractTransaction(f)
 	if err != nil {
 		return nil, err
 	} else if ct := (proto.ContractTransaction{Transaction: txn}); !ct.IsValid() {
@@ -309,18 +316,18 @@ func LoadContract(filename string) (*Contract, error) {
 	}
 
 	// read sector roots
-	if _, err := file.Seek(ContractRootOffset, io.SeekStart); err != nil {
+	if _, err := f.Seek(ContractRootOffset, io.SeekStart); err != nil {
 		return nil, errors.Wrap(err, "could not seek to contract sector roots")
 	}
-	bf := bufio.NewReader(file)
-	roots := make([]crypto.Hash, numSectors)
-	for i := range roots {
-		if _, err := io.ReadFull(bf, roots[i][:]); err == io.EOF {
-			break
-		} else if err != nil {
-			return nil, errors.Wrap(err, "could not read sector roots")
-		}
+	rootsBytes := make([]byte, numSectors*crypto.HashSize)
+	if _, err := io.ReadFull(f, rootsBytes); err != nil {
+		return nil, errors.Wrap(err, "could not read sector roots")
 	}
+	roots := *(*[]crypto.Hash)(unsafe.Pointer(&reflect.SliceHeader{
+		Len:  int(numSectors),
+		Cap:  int(numSectors),
+		Data: (*reflect.SliceHeader)(unsafe.Pointer(&rootsBytes)).Data,
+	}))
 
 	return &Contract{
 		ContractTransaction: proto.ContractTransaction{
@@ -330,7 +337,7 @@ func LoadContract(filename string) (*Contract, error) {
 		header:      header,
 		sectorRoots: roots,
 		diskRoot:    proto.CachedMerkleRoot(roots),
-		f:           file,
+		f:           f,
 	}, nil
 }
 
