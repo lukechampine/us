@@ -269,10 +269,6 @@ Define min_shards in your config file or supply the -m flag.`)
 			err = resumeuploadmetafile(f, config.Contracts, meta)
 		} else {
 			err = uploadmetafile(f, config.MinShards, config.Contracts, meta)
-			// if we didn't upload anything, delete the meta file
-			if index, merr := renter.ReadMetaIndex(meta); merr == nil && index.Filesize == 0 {
-				os.RemoveAll(meta)
-			}
 		}
 		f.Close()
 		check("Upload failed:", err)
@@ -287,10 +283,6 @@ Define min_shards in your config file or supply the -m flag.`)
 		} else {
 			err = downloadmetafile(f, config.Contracts, meta)
 			f.Close()
-			// if we didn't download anything, delete the file
-			if stat, statErr := os.Stat(f.Name()); statErr == nil && stat.Size() == 0 {
-				os.RemoveAll(f.Name())
-			}
 		}
 		check("Download failed:", err)
 
