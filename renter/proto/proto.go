@@ -2,9 +2,7 @@
 package proto
 
 import (
-	"encoding/json"
 	"errors"
-	"unsafe"
 
 	"github.com/lukechampine/us/hostdb"
 
@@ -101,64 +99,4 @@ func (c ContractTransaction) IsValid() bool {
 	return len(c.Transaction.FileContractRevisions) > 0 &&
 		len(c.Transaction.FileContractRevisions[0].NewValidProofOutputs) > 0 &&
 		len(c.Transaction.FileContractRevisions[0].UnlockConditions.PublicKeys) == 2
-}
-
-// helper types for encoding ContractTransactions more efficiently (omitting
-// empty fields in Transaction and encoding RenterKey as base64 rather than an
-// array of numbers).
-type (
-	encodedContract struct {
-		Transaction encodedTransaction `json:"transaction"`
-		RenterKey   []byte             `json:"renterKey"`
-	}
-	encodedTransaction struct {
-		SiacoinInputs         []types.SiacoinInput         `json:"siacoinInputs,omitempty"`
-		SiacoinOutputs        []types.SiacoinOutput        `json:"siacoinOutputs,omitempty"`
-		FileContracts         []types.FileContract         `json:"fileContracts,omitempty"`
-		FileContractRevisions []types.FileContractRevision `json:"fileContractRevisions,omitempty"`
-		StorageProofs         []types.StorageProof         `json:"storageProofs,omitempty"`
-		SiafundInputs         []types.SiafundInput         `json:"siafundInputs,omitempty"`
-		SiafundOutputs        []types.SiafundOutput        `json:"siafundOutputs,omitempty"`
-		MinerFees             []types.Currency             `json:"minerFees,omitempty"`
-		ArbitraryData         [][]byte                     `json:"arbitraryData,omitempty"`
-		TransactionSignatures []struct {
-			ParentID       crypto.Hash       `json:"parentID"`
-			PublicKeyIndex uint64            `json:"publicKeyIndex"`
-			Timelock       types.BlockHeight `json:"timelock,omitempty"`
-			CoveredFields  struct {
-				WholeTransaction      bool     `json:"wholeTransaction,omitempty"`
-				SiacoinInputs         []uint64 `json:"siacoinInputs,omitempty"`
-				SiacoinOutputs        []uint64 `json:"siacoinOutputs,omitempty"`
-				FileContracts         []uint64 `json:"fileContracts,omitempty"`
-				FileContractRevisions []uint64 `json:"fileContractRevisions,omitempty"`
-				StorageProofs         []uint64 `json:"storageProofs,omitempty"`
-				SiafundInputs         []uint64 `json:"siafundInputs,omitempty"`
-				SiafundOutputs        []uint64 `json:"siafundOutputs,omitempty"`
-				MinerFees             []uint64 `json:"minerFees,omitempty"`
-				ArbitraryData         []uint64 `json:"arbitraryData,omitempty"`
-				TransactionSignatures []uint64 `json:"transactionSignatures,omitempty"`
-			} `json:"coveredFields"`
-			Signature []byte `json:"signature"`
-		} `json:"transactionSignatures,omitempty"`
-	}
-)
-
-// MarshalJSON implements the json.Marshaler interface.
-func (c ContractTransaction) MarshalJSON() ([]byte, error) {
-	return json.Marshal(encodedContract{
-		Transaction: *(*encodedTransaction)(unsafe.Pointer(&c.Transaction)),
-		RenterKey:   c.RenterKey[:],
-	})
-}
-
-// UnmarshalJSON implements the json.Unmarshaler interface.
-func (c *ContractTransaction) UnmarshalJSON(b []byte) error {
-	var ec encodedContract
-	err := json.Unmarshal(b, &ec)
-	if err != nil {
-		return err
-	}
-	c.Transaction = *(*types.Transaction)(unsafe.Pointer(&ec.Transaction))
-	copy(c.RenterKey[:], ec.RenterKey)
-	return nil
 }
