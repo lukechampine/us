@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/lukechampine/us/renter/renterutil"
@@ -12,7 +13,7 @@ import (
 
 func trackUpload(filename string, op *renterutil.Operation) error {
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 
 	var uploadStart time.Time
 	for {
@@ -41,7 +42,7 @@ func trackUpload(filename string, op *renterutil.Operation) error {
 
 func trackDownload(filename string, op *renterutil.Operation) error {
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 
 	var downloadStart time.Time
 	for {
@@ -70,7 +71,7 @@ func trackDownload(filename string, op *renterutil.Operation) error {
 
 func trackDownloadStream(op *renterutil.Operation) error {
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 	for {
 		select {
 		case _, ok := <-op.Updates():
@@ -88,7 +89,7 @@ func trackDownloadStream(op *renterutil.Operation) error {
 
 func trackDownloadDir(op *renterutil.Operation) error {
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 
 	var filename string
 	var downloadStart time.Time
@@ -131,7 +132,7 @@ func trackDownloadDir(op *renterutil.Operation) error {
 
 func trackUploadDir(op *renterutil.Operation) error {
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 
 	var queue []renterutil.DirQueueUpdate
 	var uploadStart time.Time
@@ -176,7 +177,7 @@ func trackUploadDir(op *renterutil.Operation) error {
 
 func trackMigrateFile(filename string, op *renterutil.Operation) error {
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 
 	migrateStart := time.Now()
 	for {
@@ -202,7 +203,7 @@ func trackMigrateFile(filename string, op *renterutil.Operation) error {
 
 func trackMigrateDir(op *renterutil.Operation) error {
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 
 	var filename string
 	var migrateStart time.Time

@@ -4,11 +4,13 @@ import (
 	"log"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/NebulousLabs/Sia/build"
 	"github.com/lukechampine/us/renter"
 
 	"github.com/lukechampine/flagg"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -280,6 +282,14 @@ Define min_shards in your config file or supply the -m flag.`)
 			err = downloadmetadir(f.Name(), config.Contracts, meta)
 		} else if f == os.Stdout {
 			err = downloadmetastream(f, config.Contracts, meta)
+			// if the pipe we're writing to breaks, it was probably
+			// intentional (e.g. 'head' exiting after reading 10 lines), so
+			// suppress the error.
+			if pe, ok := errors.Cause(err).(*os.PathError); ok {
+				if errno, ok := pe.Err.(syscall.Errno); ok && errno == syscall.EPIPE {
+					err = nil
+				}
+			}
 		} else {
 			err = downloadmetafile(f, config.Contracts, meta)
 			f.Close()
