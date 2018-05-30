@@ -126,17 +126,6 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 		return ContractTransaction{}, errors.New("not enough coins to fund contract transaction")
 	}
 
-	// NOTE: an oversight in the host-renter protocol means that, when we send
-	// the transaction to the host, it must contain the unlock conditions for
-	// the inputs we are going to sign later. This means we must call
-	// SignTransaction twice: first just to get the unlock conditions, and
-	// second to add the actual signatures.
-	err = w.SignTransaction(&txn, toSign)
-	if err != nil {
-		return ContractTransaction{}, errors.Wrap(err, "failed to sign transaction")
-	}
-	txn.TransactionSignatures = nil
-
 	// initiate connection
 	conn, err := net.DialTimeout("tcp", string(host.NetAddress), 15*time.Second)
 	if err != nil {
@@ -298,14 +287,15 @@ func fundSiacoins(txn *types.Transaction, outputs []modules.SpendableOutput, amo
 			break
 		}
 	}
-	if fundingOutputs == nil {
+	if outputSum.Cmp(amount) < 0 {
 		return nil, false
 	}
 
 	toSign := make(map[types.OutputID]types.UnlockHash)
 	for _, o := range fundingOutputs {
 		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
-			ParentID: types.SiacoinOutputID(o.ID),
+			ParentID:         types.SiacoinOutputID(o.ID),
+			UnlockConditions: o.UnlockConditions,
 		})
 		toSign[o.ID] = o.UnlockHash
 	}
