@@ -12,6 +12,9 @@ import (
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host.
 func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractTransaction, error) {
+	if endHeight < startHeight {
+		return ContractTransaction{}, errors.New("end height must be greater than start height")
+	}
 	// get two renter addresses: one for the renter refund output, one for the
 	// change output
 	refundAddr, err := w.NewWalletAddress()
@@ -24,10 +27,14 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 	}
 
 	// estimate collateral
-	bytes := renterPayout.Div(host.UploadBandwidthPrice.Add(host.StoragePrice).Add(host.DownloadBandwidthPrice).Mul64(uint64(endHeight - startHeight)))
-	hostCollateral := host.Collateral.Mul(bytes).Mul64(uint64(endHeight - startHeight))
-	if hostCollateral.Cmp(host.MaxCollateral) > 0 {
-		hostCollateral = host.MaxCollateral
+	var hostCollateral types.Currency
+	blockBytes := host.UploadBandwidthPrice.Add(host.StoragePrice).Add(host.DownloadBandwidthPrice).Mul64(uint64(endHeight - startHeight))
+	if !blockBytes.IsZero() {
+		bytes := renterPayout.Div(blockBytes)
+		hostCollateral := host.Collateral.Mul(bytes).Mul64(uint64(endHeight - startHeight))
+		if hostCollateral.Cmp(host.MaxCollateral) > 0 {
+			hostCollateral = host.MaxCollateral
+		}
 	}
 
 	// Calculate additional basePrice and baseCollateral. If the contract
