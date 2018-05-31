@@ -103,14 +103,8 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 	}
 	rev := newUploadRevision(txn.CurrentRevision(), merkleRoot, sectorPrice, sectorCollateral)
 
-	// update contract revision
-	err = u.contract.Revise(rev)
-	if err != nil {
-		return crypto.Hash{}, errors.Wrap(err, "could not update contract revision")
-	}
-
 	// send revision to host and exchange signatures
-	_, err = negotiateRevision(u.conn, rev, txn.RenterKey)
+	signedTxn, err := negotiateRevision(u.conn, rev, txn.RenterKey)
 	if err != nil {
 		u.conn.Close()
 		if err == modules.ErrStopResponse {
@@ -126,6 +120,12 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 			return crypto.Hash{}, errors.Errorf("failed to revert contract after revision error: %v (revision error was: %v)", revertErr, err)
 		}
 		return crypto.Hash{}, err
+	}
+
+	// update contract revision
+	err = u.contract.Revise(signedTxn.FileContractRevisions[0], signedTxn.TransactionSignatures)
+	if err != nil {
+		return crypto.Hash{}, errors.Wrap(err, "could not update contract transaction")
 	}
 
 	return sectorRoot, nil

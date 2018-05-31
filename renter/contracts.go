@@ -103,8 +103,9 @@ func (c *Contract) AppendRoot(root crypto.Hash) (crypto.Hash, error) {
 }
 
 // Revise sets the latest revision of the file contract.
-func (c *Contract) Revise(rev types.FileContractRevision) error {
+func (c *Contract) Revise(rev types.FileContractRevision, hostSignatures []types.TransactionSignature) error {
 	c.ContractTransaction.Transaction.FileContractRevisions[0] = rev
+	c.ContractTransaction.Transaction.TransactionSignatures = hostSignatures
 	if _, err := c.f.Seek(ContractHeaderSize, io.SeekStart); err != nil {
 		return errors.Wrap(err, "could not seek to transaction")
 	} else if err := writeContractTransaction(c.f, c.ContractTransaction.Transaction); err != nil {
@@ -167,8 +168,7 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 	// The Merkle roots should match now, so overwrite our revision with the
 	// host's version. Since we signed the revision, this can't conceivably
 	// hurt us.
-	c.ContractTransaction.Transaction.TransactionSignatures = hostSignatures
-	err := c.Revise(hostRevision)
+	err := c.Revise(hostRevision, hostSignatures)
 	if err != nil {
 		return errors.Wrap(err, "could not update revision to match host's")
 	}

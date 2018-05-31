@@ -145,14 +145,8 @@ func (d *Downloader) partialSector(root crypto.Hash, offset, length uint32) ([]b
 	// create the download revision
 	rev := newDownloadRevision(txn.CurrentRevision(), sectorPrice)
 
-	// update contract revision
-	err = d.contract.Revise(rev)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not update contract transaction")
-	}
-
 	// send the revision to the host for approval
-	_, err = negotiateRevision(d.conn, rev, txn.RenterKey)
+	signedTxn, err := negotiateRevision(d.conn, rev, txn.RenterKey)
 	if err != nil {
 		d.conn.Close()
 		// if host gracefully closed, ignore the error. The subsequent
@@ -160,6 +154,12 @@ func (d *Downloader) partialSector(root crypto.Hash, offset, length uint32) ([]b
 		if err != modules.ErrStopResponse {
 			return nil, err
 		}
+	}
+
+	// update contract revision
+	err = d.contract.Revise(signedTxn.FileContractRevisions[0], signedTxn.TransactionSignatures)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not update contract transaction")
 	}
 
 	// read sector data, completing one iteration of the download loop
