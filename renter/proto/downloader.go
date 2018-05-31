@@ -147,13 +147,12 @@ func (d *Downloader) partialSector(root crypto.Hash, offset, length uint32) ([]b
 
 	// send the revision to the host for approval
 	signedTxn, err := negotiateRevision(d.conn, rev, txn.RenterKey)
-	if err != nil {
+	if err == modules.ErrStopResponse {
+		// if host gracefully closed, ignore the error. The next download
+		// attempt will return an error that satisfies IsHostDisconnect.
+	} else if err != nil {
 		d.conn.Close()
-		// if host gracefully closed, ignore the error. The subsequent
-		// conn.Read will return an error that satisfies IsHostDisconnect.
-		if err != modules.ErrStopResponse {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	// update contract revision

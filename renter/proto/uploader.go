@@ -105,20 +105,18 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 
 	// send revision to host and exchange signatures
 	signedTxn, err := negotiateRevision(u.conn, rev, txn.RenterKey)
-	if err != nil {
+	if err == modules.ErrStopResponse {
+		// if host gracefully closed, close our side too and suppress the
+		// error. The next call to Upload will return an error that
+		// satisfies IsHostDisconnect.
 		u.conn.Close()
-		if err == modules.ErrStopResponse {
-			// if host gracefully closed, close our side too and suppress the
-			// error. The next call to Upload will return an error that
-			// satisfies IsHostDisconnect.
-			return sectorRoot, nil
-		}
-		// host rejected revision; revert any changes to the contract
-		oldTxn := txn.Transaction
-		revertErr := u.contract.SyncWithHost(oldTxn.FileContractRevisions[0], oldTxn.TransactionSignatures)
-		if revertErr != nil {
-			return crypto.Hash{}, errors.Errorf("failed to revert contract after revision error: %v (revision error was: %v)", revertErr, err)
-		}
+		return sectorRoot, nil
+	} else if err != nil {
+		// the host rejected revision for some reason. It may also have lost
+		// power. In the latter case, the host may have accepted the revision.
+		// Since we cannot be sure, don't revert the AppendRoot yet; that will
+		// be handled by SyncWithHost the next time we connect to the host.
+		u.conn.Close()
 		return crypto.Hash{}, err
 	}
 
