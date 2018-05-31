@@ -156,7 +156,7 @@ func (d *Downloader) partialSector(root crypto.Hash, offset, length uint32) ([]b
 	}
 
 	// update contract revision
-	err = d.contract.Revise(signedTxn.FileContractRevisions[0], signedTxn.TransactionSignatures)
+	err = d.contract.SyncWithHost(signedTxn.FileContractRevisions[0], signedTxn.TransactionSignatures)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not update contract transaction")
 	}

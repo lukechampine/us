@@ -121,7 +121,7 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 	}
 
 	// update contract revision
-	err = u.contract.Revise(signedTxn.FileContractRevisions[0], signedTxn.TransactionSignatures)
+	err = u.contract.SyncWithHost(signedTxn.FileContractRevisions[0], signedTxn.TransactionSignatures)
 	if err != nil {
 		return crypto.Hash{}, errors.Wrap(err, "could not update contract transaction")
 	}

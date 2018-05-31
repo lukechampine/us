@@ -38,9 +38,6 @@ type ContractEditor interface {
 	// the file contract.
 	Transaction() ContractTransaction
 
-	// Revise sets the latest revision of the contract.
-	Revise(rev types.FileContractRevision, hostSignatures []types.TransactionSignature) error
-
 	// AppendRoot appends a sector root to the contract, returning the new
 	// top-level Merkle root. The root should be written to durable storage.
 	AppendRoot(root crypto.Hash) (crypto.Hash, error)
