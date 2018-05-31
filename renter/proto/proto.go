@@ -2,13 +2,13 @@
 package proto
 
 import (
-	"errors"
-
-	"github.com/lukechampine/us/hostdb"
-
 	"github.com/NebulousLabs/Sia/crypto"
+	"github.com/NebulousLabs/Sia/encoding"
 	"github.com/NebulousLabs/Sia/modules"
 	"github.com/NebulousLabs/Sia/types"
+	"github.com/lukechampine/us/hostdb"
+
+	"github.com/pkg/errors"
 )
 
 // ErrDesynchronized is returned by ContractEditor.SyncWithHost to indicate
@@ -99,4 +99,46 @@ func (c ContractTransaction) IsValid() bool {
 	return len(c.Transaction.FileContractRevisions) > 0 &&
 		len(c.Transaction.FileContractRevisions[0].NewValidProofOutputs) > 0 &&
 		len(c.Transaction.FileContractRevisions[0].UnlockConditions.PublicKeys) == 2
+}
+
+// SubmitContractTransaction submits the latest revision of a contract to the
+// blockchain, finalizing the renter and host payouts as they stand in the
+// revision. Submitting a revision with a higher revision number will replace
+// the previously-submitted revision.
+//
+// Submitting revision transactions is a way for the renter to punish the
+// host. If the host is well-behaved, there is no incentive for the renter to
+// submit revision transactions. But if the host misbehaves, submitting the
+// revision ensures that the host will lose the collateral it committed.
+func SubmitContractTransaction(c ContractTransaction, w Wallet, tpool TransactionPool) error {
+	// make a copy of the transaction. In practice it's probably fine to
+	// modify the transaction directly (since we'd be appending to the slices,
+	// leaving the original unchanged) but we might as well be cautious.
+	var txn types.Transaction
+	encoding.Unmarshal(encoding.Marshal(c.Transaction), &txn)
+
+	// add the transaction fee
+	_, maxFee := tpool.FeeEstimate()
+	fee := maxFee.Mul64(estTxnSize)
+	txn.MinerFees = append(txn.MinerFees, fee)
+
+	// pay for the fee by adding outputs and signing them
+	outputs := w.SpendableOutputs()
+	changeAddr, err := w.NewWalletAddress()
+	if err != nil {
+		return errors.Wrap(err, "could not get a change address to use")
+	}
+	toSign, ok := fundSiacoins(&txn, outputs, fee, changeAddr)
+	if !ok {
+		return errors.New("not enough coins to fund transaction fee")
+	}
+	if err := w.SignTransaction(&txn, toSign); err != nil {
+		return errors.Wrap(err, "failed to sign transaction")
+	}
+
+	// submit the funded and signed transaction
+	if err := tpool.AcceptTransactionSet([]types.Transaction{txn}); err != nil {
+		return err
+	}
+	return nil
 }
