@@ -148,6 +148,32 @@ func checkCreate(filename string) error {
 	return nil
 }
 
+func tattle(contractPath string) error {
+	contract, err := renter.LoadContract(contractPath)
+	if err != nil {
+		return errors.Wrap(err, "could not load contract")
+	}
+	defer contract.Close()
+
+	c := makeClient()
+	err = proto.SubmitContractTransaction(contract.Transaction(), c, c)
+	if err != nil {
+		return err
+	}
+	validOutputs := contract.CurrentRevision().NewValidProofOutputs
+	missedOutputs := contract.CurrentRevision().NewMissedProofOutputs
+	fmt.Printf(`Tattled on %v.
+
+If no more revisions are submitted and the host submits a valid storage
+proof, the host will receive %v and %v will be returned to the renter.
+
+If the host does not submit a valid storage proof, the host will receive %v,
+%v will be returned to the renter, and %v will be destroyed.
+`, contract.HostKey().ShortKey(), currencyUnits(validOutputs[1].Value), currencyUnits(validOutputs[0].Value),
+		currencyUnits(missedOutputs[1].Value), currencyUnits(missedOutputs[0].Value), currencyUnits(missedOutputs[2].Value))
+	return nil
+}
+
 func loadContracts(dir string) (renter.ContractSet, error) {
 	contracts, err := renter.LoadContracts(dir)
 	if err != nil {

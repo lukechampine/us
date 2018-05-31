@@ -33,6 +33,7 @@ Actions:
     download        download a file
     checkup         check the health of a file
     migrate         migrate a file to different hosts
+    tattle          submit a contract revision to the blockchain
     info            display info about a contract or file
     recover         try to repair a corrupted metafile
 `
@@ -143,6 +144,38 @@ There are three migration strategies, specified by mutually-exclusive flags.
 	copy of the file, and it can be performed even if the "old" hosts are
 	offline.`
 
+	tattleUsage = `Usage:
+	user tattle contract
+
+Broadcasts the contract transaction in the specified file, recording the
+latest revision of the contract in the blockchain. Unless a revision is
+broadcast before the contract period ends, it's like the contract never
+happened; the renter and host both get their money back. As a result, the
+renter has little incentive to broadcast a revision (because revisions always
+transfer money from the renter to the host), whereas the host has an
+overwhelming incentive to broadcast a revision immediately prior to the end of
+the contract (in order to maximize the amount of renter funds they receive).
+
+However, if the host is acting maliciously or provide poor service, the renter
+can punish them by submitting a revision. This causes the renter to forfeit
+whatever money they've already sent to the host, but it also ensures that the
+host will lose whatever collateral they've committed. Since the host spends
+more on collateral than the renter does on storage, this is an example of
+"cutting off your nose to spite your face." It hurts the renter, but it hurts
+the host more.
+
+This is rarely the right thing to do, so think carefully before running this
+command. In most cases, it's preferable to not submit anything and hope that
+the host doesn't either, so you get your money back. It's also important to
+know that the host will only lose their collateral if they don't submit a
+valid storage proof. So if you think the host is just refusing to talk to you,
+bear in mind that they will likely still be able to submit a storage proof and
+thus reclaim their collateral. On the other hand, if you think the host has
+gone offline or has lost your data, submitting a revision makes more sense.
+
+Lastly, please be aware that broadcasting a revision will incur a standard
+transaction fee.
+`
 	infoUsage = `Usage:
     user info contract
     user info metafile
@@ -202,6 +235,7 @@ func main() {
 	mFile := migrateCmd.String("file", "", mFileUsage)
 	mDirect := migrateCmd.Bool("direct", false, mDirectUsage)
 	mRemote := migrateCmd.Bool("remote", false, mRemoteUsage)
+	tattleCmd := flagg.New("tattle", tattleUsage)
 	infoCmd := flagg.New("info", infoUsage)
 	recoverCmd := flagg.New("recover", recoverUsage)
 	serveCmd := flagg.New("serve", serveUsage)
@@ -219,6 +253,7 @@ func main() {
 			{Cmd: downloadCmd},
 			{Cmd: checkupCmd},
 			{Cmd: migrateCmd},
+			{Cmd: tattleCmd},
 			{Cmd: infoCmd},
 			{Cmd: recoverCmd},
 			{Cmd: serveCmd},
@@ -339,6 +374,14 @@ Define min_shards in your config file or supply the -m flag.`)
 			log.Fatalln("Multiple migration strategies specified (see user migrate --help).")
 		}
 		check("Migration failed:", err)
+
+	case tattleCmd:
+		if len(args) != 1 {
+			tattleCmd.Usage()
+			return
+		}
+		err := tattle(args[0])
+		check("Tattling failed:", err)
 
 	case infoCmd:
 		if len(args) != 1 {
