@@ -74,8 +74,6 @@ func (d *Downloader) Close() error {
 // integrity of the retrieved data by comparing its computed Merkle root to
 // root. The returned sector is only valid until the next call to Sector or
 // PartialSector.
-//
-// Calls to Sector must be serialized.
 func (d *Downloader) Sector(root crypto.Hash) (*[SectorSize]byte, error) {
 	sectorSlice, err := d.PartialSector(root, 0, SectorSize)
 	if err != nil {
@@ -96,8 +94,6 @@ func (d *Downloader) Sector(root crypto.Hash) (*[SectorSize]byte, error) {
 // Unlike Sector, the integrity of the data cannot be verified by computing
 // its Merkle root. Callers must implement a different means of integrity-
 // checking, such as comparing against a known checksum.
-//
-// Calls to PartialSector must be serialized.
 func (d *Downloader) PartialSector(root crypto.Hash, offset, length uint32) ([]byte, error) {
 	data, err := d.partialSector(root, offset, length)
 	if isHostDisconnect(err) {

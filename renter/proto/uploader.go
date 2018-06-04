@@ -34,8 +34,7 @@ func (u *Uploader) Close() error {
 }
 
 // Upload negotiates a revision that adds a sector to a file contract, and
-// revises the underlying contract to pay the host appropriately. Calls to
-// Upload must be serialized.
+// revises the underlying contract to pay the host appropriately.
 func (u *Uploader) Upload(data *[SectorSize]byte) (crypto.Hash, error) {
 	root, err := u.upload(data)
 	if isHostDisconnect(err) {
