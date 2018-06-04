@@ -57,4 +57,4 @@ code and faster development. Its formats differ from the `siad` formats, so
 you should **not** assume that contracts formed and files uploaded using `us`
 are transferable to `siad`, nor vice versa. No part of `us` is currently
 marked as stable; until that changes, **don't spend any siacoins on `us` that
-you aren't comfortable losing.**
+you can't afford to lose.**
