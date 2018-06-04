@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"time"
+	"unsafe"
 
 	"github.com/NebulousLabs/Sia/crypto"
 	"github.com/NebulousLabs/Sia/encoding"
@@ -71,7 +72,8 @@ func (d *Downloader) Close() error {
 // Sector retrieves the sector with the specified Merkle root, and revises the
 // underlying contract to pay the host appropriately. Sector verifies the
 // integrity of the retrieved data by comparing its computed Merkle root to
-// root. The returned slice is only valid until the next call to Sector.
+// root. The returned sector is only valid until the next call to Sector or
+// PartialSector.
 //
 // Calls to Sector must be serialized.
 func (d *Downloader) Sector(root crypto.Hash) (*[SectorSize]byte, error) {
@@ -79,12 +81,11 @@ func (d *Downloader) Sector(root crypto.Hash) (*[SectorSize]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var sector [SectorSize]byte
-	copy(sector[:], sectorSlice)
-	if SectorMerkleRoot(&sector) != root {
+	sector := (*[SectorSize]byte)(unsafe.Pointer(&sectorSlice[0]))
+	if SectorMerkleRoot(sector) != root {
 		return nil, errors.New("host sent invalid sector data")
 	}
-	return &sector, nil
+	return sector, nil
 }
 
 // PartialSector retrieves the slice of sector data uniquely identified by
