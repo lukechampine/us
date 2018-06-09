@@ -7,8 +7,8 @@ import (
 	"math"
 	"os"
 
-	"github.com/lukechampine/us/renter"
-	"github.com/lukechampine/us/renter/renterutil"
+	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/renterutil"
 
 	"github.com/pkg/errors"
 )

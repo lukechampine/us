@@ -1,5 +1,5 @@
 // Package hostdb defines types and functions relevant to scanning hosts.
-package hostdb
+package hostdb // import "lukechampine.com/us/hostdb"
 
 import (
 	"context"

@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lukechampine/us/hostdb"
-	"github.com/lukechampine/us/renter"
-	"github.com/lukechampine/us/renter/proto"
+	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/proto"
 
 	"github.com/NebulousLabs/Sia/types"
 	"github.com/pkg/errors"

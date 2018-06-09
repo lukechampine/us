@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/NebulousLabs/Sia/types"
-	"github.com/lukechampine/us/hostdb"
-	"github.com/lukechampine/us/renter/proto"
-	"github.com/lukechampine/us/renter/renterutil"
 	"github.com/pkg/errors"
+	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/renter/renterutil"
 )
 
 func currencyUnits(c types.Currency) string {

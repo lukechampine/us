@@ -7,8 +7,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lukechampine/us/renter/renterutil"
 	"golang.org/x/crypto/ssh/terminal"
+	"lukechampine.com/us/renter/renterutil"
 )
 
 func trackUpload(filename string, op *renterutil.Operation) error {

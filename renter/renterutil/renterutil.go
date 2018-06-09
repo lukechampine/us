@@ -1,6 +1,6 @@
 // Package renterutil provides convenience functions for common renter
 // actions.
-package renterutil
+package renterutil // import "lukechampine.com/us/renter/renterutil"
 
 import (
 	"errors"

@@ -9,9 +9,9 @@ import (
 	"github.com/NebulousLabs/Sia/types"
 	"github.com/pkg/errors"
 
-	"github.com/lukechampine/us/renter"
-	"github.com/lukechampine/us/renter/proto"
-	"github.com/lukechampine/us/renter/renterutil"
+	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/renter/renterutil"
 )
 
 func contractinfo(contract proto.ContractTransaction) {

@@ -1,5 +1,5 @@
 // Package renter provides formats for contracts and files.
-package renter
+package renter // import "lukechampine.com/us/renter"
 
 import (
 	"archive/tar"
@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/lukechampine/us/hostdb"
-	"github.com/lukechampine/us/renter/proto"
+	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/renter/proto"
 
 	"github.com/NebulousLabs/fastrand"
 	"github.com/pkg/errors"

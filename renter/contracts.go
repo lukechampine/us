@@ -13,8 +13,8 @@ import (
 	"github.com/NebulousLabs/Sia/types"
 	"github.com/pkg/errors"
 
-	"github.com/lukechampine/us/hostdb"
-	"github.com/lukechampine/us/renter/proto"
+	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/renter/proto"
 )
 
 const (

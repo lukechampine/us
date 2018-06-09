@@ -1,8 +1,8 @@
 us
 ==
 
-[![GoDoc](https://godoc.org/github.com/lukechampine/us?status.svg)](https://godoc.org/github.com/lukechampine/us)
-[![Go Report Card](https://goreportcard.com/badge/github.com/lukechampine/us)](https://goreportcard.com/report/github.com/lukechampine/us)
+[![GoDoc](https://godoc.org/lukechampine.com/us?status.svg)](https://godoc.org/lukechampine.com/us)
+[![Go Report Card](https://goreportcard.com/badge/lukechampine.com/us)](https://goreportcard.com/report/lukechampine.com/us)
 
 `us` is an alternative interface to the [Sia](http://github.com/NebulousLabs/Sia)
 network. It provides low-level, developer-oriented APIs and formats that

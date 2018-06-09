@@ -7,10 +7,10 @@ import (
 	"syscall"
 
 	"github.com/NebulousLabs/Sia/build"
-	"github.com/lukechampine/us/renter"
+	"lukechampine.com/us/renter"
 
-	"github.com/lukechampine/flagg"
 	"github.com/pkg/errors"
+	"lukechampine.com/flagg"
 )
 
 var (

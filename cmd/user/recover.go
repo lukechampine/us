@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lukechampine/us/renter"
 	"github.com/pkg/errors"
+	"lukechampine.com/us/renter"
 )
 
 func exists(path string) bool {

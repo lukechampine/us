@@ -5,8 +5,8 @@ import (
 	"github.com/NebulousLabs/Sia/encoding"
 	"github.com/NebulousLabs/Sia/modules"
 	"github.com/NebulousLabs/Sia/types"
-	"github.com/lukechampine/us/hostdb"
 	"github.com/pkg/errors"
+	"lukechampine.com/us/hostdb"
 )
 
 // RenewContract negotiates a new file contract and initial revision for data

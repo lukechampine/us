@@ -9,8 +9,8 @@ import (
 	"github.com/NebulousLabs/Sia/crypto"
 	"github.com/NebulousLabs/Sia/encoding"
 	"github.com/NebulousLabs/Sia/modules"
-	"github.com/lukechampine/us/hostdb"
 	"github.com/pkg/errors"
+	"lukechampine.com/us/hostdb"
 )
 
 // sectorBuffer is used to efficiently read sector data from the host.

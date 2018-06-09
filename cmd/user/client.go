@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/lukechampine/us/hostdb"
+	"lukechampine.com/us/hostdb"
 
 	"github.com/NebulousLabs/Sia/modules"
 	"github.com/NebulousLabs/Sia/node/api/client"

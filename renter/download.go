@@ -2,8 +2,8 @@ package renter
 
 import (
 	"github.com/NebulousLabs/Sia/crypto"
-	"github.com/lukechampine/us/hostdb"
-	"github.com/lukechampine/us/renter/proto"
+	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/renter/proto"
 
 	"github.com/pkg/errors"
 )

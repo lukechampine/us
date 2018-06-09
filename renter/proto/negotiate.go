@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lukechampine/us/hostdb"
+	"lukechampine.com/us/hostdb"
 
 	"github.com/NebulousLabs/Sia/crypto"
 	"github.com/NebulousLabs/Sia/encoding"

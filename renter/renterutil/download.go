@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lukechampine/us/renter"
-	"github.com/lukechampine/us/renter/proto"
+	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/proto"
 
 	"github.com/NebulousLabs/Sia/crypto"
 	"github.com/pkg/errors"

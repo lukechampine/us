@@ -8,8 +8,8 @@ import (
 	"github.com/NebulousLabs/Sia/encoding"
 	"github.com/NebulousLabs/Sia/modules"
 	"github.com/NebulousLabs/Sia/types"
-	"github.com/lukechampine/us/hostdb"
 	"github.com/pkg/errors"
+	"lukechampine.com/us/hostdb"
 )
 
 // An Uploader uploads sectors by calling the revise RPC on a host. It updates

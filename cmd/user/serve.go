@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lukechampine/us/hostdb"
-	"github.com/lukechampine/us/renter"
-	"github.com/lukechampine/us/renter/proto"
-	"github.com/lukechampine/us/renter/renterutil"
 	"github.com/pkg/errors"
+	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/renter/renterutil"
 )
 
 func serve(contractDir, metaDir, addr string) error {
