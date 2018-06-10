@@ -54,10 +54,6 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 	extendDeadline(u.conn, modules.NegotiateFileContractRevisionTime)
 	defer extendDeadline(u.conn, time.Hour) // reset deadline
 
-	if len(data) != SectorSize {
-		return crypto.Hash{}, errors.New("must upload exactly one sector")
-	}
-
 	// initiate revision, updating host settings
 	if err := startRevision(u.conn, &u.host); err != nil {
 		return crypto.Hash{}, err
