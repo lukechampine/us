@@ -148,57 +148,50 @@ func verifyRecentRevision(conn net.Conn, contract ContractTransaction) (types.Fi
 
 // negotiateRevision sends a revision and actions to the host for approval,
 // completing one iteration of the revision loop.
-func negotiateRevision(conn net.Conn, rev types.FileContractRevision, secretKey crypto.SecretKey) (types.Transaction, error) {
-	// create transaction containing the revision
-	signedTxn := types.Transaction{
-		FileContractRevisions: []types.FileContractRevision{rev},
-		TransactionSignatures: []types.TransactionSignature{{
-			ParentID:       crypto.Hash(rev.ParentID),
-			CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
-			PublicKeyIndex: 0, // renter key is always first -- see formContract
-		}},
-	}
-	// sign the transaction
-	encodedSig := crypto.SignHash(signedTxn.SigHash(0), secretKey)
-	signedTxn.TransactionSignatures[0].Signature = encodedSig[:]
-
+func negotiateRevision(conn net.Conn, rev types.FileContractRevision, secretKey crypto.SecretKey) ([]types.TransactionSignature, error) {
 	// send the revision
 	if err := encoding.WriteObject(conn, rev); err != nil {
-		return types.Transaction{}, errors.Wrap(err, "could not send revision")
+		return nil, errors.Wrap(err, "could not send revision")
 	}
 	// read acceptance
 	if err := modules.ReadNegotiationAcceptance(conn); err != nil {
-		return types.Transaction{}, errors.Wrap(err, "host did not accept revision")
+		return nil, errors.Wrap(err, "host did not accept revision")
 	}
 
 	// send the new transaction signature
-	if err := encoding.WriteObject(conn, signedTxn.TransactionSignatures[0]); err != nil {
-		return types.Transaction{}, errors.Wrap(err, "could not send transaction signature")
+	renterSig := revisionSignature(rev, secretKey)
+	if err := encoding.WriteObject(conn, renterSig); err != nil {
+		return nil, errors.Wrap(err, "could not send transaction signature")
 	}
 	// read the host's acceptance and transaction signature
 	// NOTE: if the host sends ErrStopResponse, we should continue processing
 	// the revision, but return the error anyway.
 	responseErr := modules.ReadNegotiationAcceptance(conn)
 	if responseErr != nil && responseErr != modules.ErrStopResponse {
-		return types.Transaction{}, errors.Wrap(responseErr, "host did not accept transaction signature")
+		return nil, errors.Wrap(responseErr, "host did not accept transaction signature")
 	}
 	var hostSig types.TransactionSignature
 	if err := encoding.ReadObject(conn, &hostSig, 16e3); err != nil {
-		return types.Transaction{}, errors.Wrap(err, "could not read host's signature")
+		return nil, errors.Wrap(err, "could not read host's signature")
 	}
 
-	// add the signature to the transaction and verify it
+	// verify that we can construct a valid transaction from the revision and
+	// two signatures,
+	//
 	// NOTE: we can fake the blockheight here because it doesn't affect
 	// verification; it just needs to be above the fork height and below the
 	// contract expiration (which was checked earlier).
+	signedTxn := types.Transaction{
+		FileContractRevisions: []types.FileContractRevision{rev},
+		TransactionSignatures: []types.TransactionSignature{renterSig, hostSig},
+	}
 	verificationHeight := rev.NewWindowStart - 1
-	signedTxn.TransactionSignatures = append(signedTxn.TransactionSignatures, hostSig)
 	if err := signedTxn.StandaloneValid(verificationHeight); err != nil {
-		return types.Transaction{}, errors.Wrap(err, "negotiated transaction is invalid")
+		return nil, errors.Wrap(err, "negotiated transaction is invalid")
 	}
 
 	// if the host sent ErrStopResponse, return it
-	return signedTxn, responseErr
+	return signedTxn.TransactionSignatures, responseErr
 }
 
 // newRevision creates a copy of current with its revision number incremented,
@@ -245,6 +238,19 @@ func newUploadRevision(current types.FileContractRevision, merkleRoot crypto.Has
 	rev.NewFileSize += SectorSize
 	rev.NewFileMerkleRoot = merkleRoot
 	return rev
+}
+
+// revisionSignature returns a transaction signature that covers rev. Since
+// the signature is restricted to just the revision, the revision and
+// signature can be included as part of any other transaction.
+func revisionSignature(rev types.FileContractRevision, renterKey crypto.SecretKey) types.TransactionSignature {
+	sig := crypto.SignHash(crypto.HashObject(rev), renterKey)
+	return types.TransactionSignature{
+		ParentID:       crypto.Hash(rev.ParentID),
+		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
+		PublicKeyIndex: 0, // renter key is always first -- see FormContract
+		Signature:      sig[:],
+	}
 }
 
 type actionSet []modules.RevisionAction

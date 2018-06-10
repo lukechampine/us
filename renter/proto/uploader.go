@@ -99,7 +99,7 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 	rev := newUploadRevision(txn.CurrentRevision(), merkleRoot, sectorPrice, sectorCollateral)
 
 	// send revision to host and exchange signatures
-	signedTxn, err := negotiateRevision(u.conn, rev, txn.RenterKey)
+	txnSignatures, err := negotiateRevision(u.conn, rev, txn.RenterKey)
 	if err == modules.ErrStopResponse {
 		// if host gracefully closed, close our side too and suppress the
 		// error. The next call to Upload will return an error that
@@ -116,7 +116,7 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 	}
 
 	// update contract revision
-	err = u.contract.SyncWithHost(signedTxn.FileContractRevisions[0], signedTxn.TransactionSignatures)
+	err = u.contract.SyncWithHost(rev, txnSignatures)
 	if err != nil {
 		return crypto.Hash{}, errors.Wrap(err, "could not update contract transaction")
 	}

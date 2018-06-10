@@ -143,7 +143,7 @@ func (d *Downloader) partialSector(root crypto.Hash, offset, length uint32) ([]b
 	rev := newDownloadRevision(txn.CurrentRevision(), sectorPrice)
 
 	// send the revision to the host for approval
-	signedTxn, err := negotiateRevision(d.conn, rev, txn.RenterKey)
+	txnSignatures, err := negotiateRevision(d.conn, rev, txn.RenterKey)
 	if err == modules.ErrStopResponse {
 		// if host gracefully closed, ignore the error. The next download
 		// attempt will return an error that satisfies IsHostDisconnect.
@@ -153,7 +153,7 @@ func (d *Downloader) partialSector(root crypto.Hash, offset, length uint32) ([]b
 	}
 
 	// update contract revision
-	err = d.contract.SyncWithHost(signedTxn.FileContractRevisions[0], signedTxn.TransactionSignatures)
+	err = d.contract.SyncWithHost(rev, txnSignatures)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not update contract transaction")
 	}
