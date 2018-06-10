@@ -3,7 +3,6 @@ package proto // import "lukechampine.com/us/renter/proto"
 
 import (
 	"github.com/NebulousLabs/Sia/crypto"
-	"github.com/NebulousLabs/Sia/encoding"
 	"github.com/NebulousLabs/Sia/modules"
 	"github.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
@@ -34,9 +33,8 @@ type (
 // contract transaction and the Merkle roots of each sector covered by the
 // contract.
 type ContractEditor interface {
-	// Transaction returns the transaction containing the latest revision of
-	// the file contract.
-	Transaction() ContractTransaction
+	// Revision returns the latest revision of the file contract.
+	Revision() ContractRevision
 
 	// AppendRoot appends a sector root to the contract, returning the new
 	// top-level Merkle root. The root should be written to durable storage.
@@ -53,52 +51,45 @@ type ContractEditor interface {
 	SyncWithHost(rev types.FileContractRevision, hostSignatures []types.TransactionSignature) error
 }
 
-// A ContractTransaction contains a file contract transaction and the secret
+// A ContractRevision contains a file contract transaction and the secret
 // key used to sign it.
-type ContractTransaction struct {
-	Transaction types.Transaction
-	RenterKey   crypto.SecretKey
-}
-
-// CurrentRevision returns the most recently negotiated revision of the
-// original FileContract.
-func (c ContractTransaction) CurrentRevision() types.FileContractRevision {
-	return c.Transaction.FileContractRevisions[0]
+type ContractRevision struct {
+	Revision   types.FileContractRevision
+	Signatures []types.TransactionSignature
+	RenterKey  crypto.SecretKey
 }
 
 // EndHeight returns the height at which the host is no longer obligated to
 // store contract data.
-func (c ContractTransaction) EndHeight() types.BlockHeight {
-	return c.CurrentRevision().NewWindowStart
+func (c ContractRevision) EndHeight() types.BlockHeight {
+	return c.Revision.NewWindowStart
 }
 
 // ID returns the ID of the original FileContract.
-func (c ContractTransaction) ID() types.FileContractID {
-	return c.CurrentRevision().ParentID
+func (c ContractRevision) ID() types.FileContractID {
+	return c.Revision.ParentID
 }
 
 // HostKey returns the public key of the host.
-func (c ContractTransaction) HostKey() hostdb.HostPublicKey {
-	key := c.CurrentRevision().UnlockConditions.PublicKeys[1]
+func (c ContractRevision) HostKey() hostdb.HostPublicKey {
+	key := c.Revision.UnlockConditions.PublicKeys[1]
 	return hostdb.HostPublicKey(key.String())
 }
 
 // RenterFunds returns the funds remaining in the contract's Renter payout as
 // of the most recent revision.
-func (c ContractTransaction) RenterFunds() types.Currency {
-	return c.CurrentRevision().NewValidProofOutputs[0].Value
+func (c ContractRevision) RenterFunds() types.Currency {
+	return c.Revision.NewValidProofOutputs[0].Value
 }
 
-// IsValid returns false if the Contract does not contain a
-// FileContractRevision, or contains a FileContractRevision without the proper
-// number of outputs.
-func (c ContractTransaction) IsValid() bool {
-	return len(c.Transaction.FileContractRevisions) > 0 &&
-		len(c.Transaction.FileContractRevisions[0].NewValidProofOutputs) > 0 &&
-		len(c.Transaction.FileContractRevisions[0].UnlockConditions.PublicKeys) == 2
+// IsValid returns false if the ContractRevision has the wrong number of
+// public keys or outputs.
+func (c ContractRevision) IsValid() bool {
+	return len(c.Revision.NewValidProofOutputs) > 0 &&
+		len(c.Revision.UnlockConditions.PublicKeys) == 2
 }
 
-// SubmitContractTransaction submits the latest revision of a contract to the
+// SubmitContractRevision submits the latest revision of a contract to the
 // blockchain, finalizing the renter and host payouts as they stand in the
 // revision. Submitting a revision with a higher revision number will replace
 // the previously-submitted revision.
@@ -107,12 +98,12 @@ func (c ContractTransaction) IsValid() bool {
 // host. If the host is well-behaved, there is no incentive for the renter to
 // submit revision transactions. But if the host misbehaves, submitting the
 // revision ensures that the host will lose the collateral it committed.
-func SubmitContractTransaction(c ContractTransaction, w Wallet, tpool TransactionPool) error {
-	// make a copy of the transaction. In practice it's probably fine to
-	// modify the transaction directly (since we'd be appending to the slices,
-	// leaving the original unchanged) but we might as well be cautious.
-	var txn types.Transaction
-	encoding.Unmarshal(encoding.Marshal(c.Transaction), &txn)
+func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool) error {
+	// construct a transaction containing the signed revision
+	txn := types.Transaction{
+		FileContractRevisions: []types.FileContractRevision{c.Revision},
+		TransactionSignatures: c.Signatures,
+	}
 
 	// add the transaction fee
 	_, maxFee := tpool.FeeEstimate()

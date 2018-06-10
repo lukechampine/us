@@ -336,7 +336,7 @@ Define min_shards in your config file or supply the -m flag.`)
 		var err error
 		if _, readErr := renter.ReadMetaIndex(path); readErr == nil {
 			err = checkupMeta(config.Contracts, path)
-		} else if _, readErr := renter.ReadContractTransaction(path); readErr == nil {
+		} else if _, readErr := renter.ReadContractRevision(path); readErr == nil {
 			err = checkupContract(path)
 		} else {
 			log.Fatalln("Not a valid contract or meta file")
@@ -391,7 +391,7 @@ Define min_shards in your config file or supply the -m flag.`)
 
 		if index, shards, err := renter.ReadMetaFileContents(args[0]); err == nil {
 			metainfo(index, shards)
-		} else if h, err := renter.ReadContractTransaction(args[0]); err == nil {
+		} else if h, err := renter.ReadContractRevision(args[0]); err == nil {
 			contractinfo(h)
 		} else {
 			log.Fatalln("Not a contract or meta file")

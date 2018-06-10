@@ -123,9 +123,9 @@ func (d *Downloader) partialSector(root crypto.Hash, offset, length uint32) ([]b
 	}
 
 	// calculate price
-	txn := d.contract.Transaction()
 	sectorPrice := d.host.DownloadBandwidthPrice.Mul64(uint64(length))
-	if txn.RenterFunds().Cmp(sectorPrice) < 0 {
+	contract := d.contract.Revision()
+	if contract.RenterFunds().Cmp(sectorPrice) < 0 {
 		return nil, errors.New("contract has insufficient funds to support download")
 	}
 
@@ -140,10 +140,10 @@ func (d *Downloader) partialSector(root crypto.Hash, offset, length uint32) ([]b
 	}
 
 	// create the download revision
-	rev := newDownloadRevision(txn.CurrentRevision(), sectorPrice)
+	rev := newDownloadRevision(contract.Revision, sectorPrice)
 
 	// send the revision to the host for approval
-	txnSignatures, err := negotiateRevision(d.conn, rev, txn.RenterKey)
+	txnSignatures, err := negotiateRevision(d.conn, rev, contract.RenterKey)
 	if err == modules.ErrStopResponse {
 		// if host gracefully closed, ignore the error. The next download
 		// attempt will return an error that satisfies IsHostDisconnect.

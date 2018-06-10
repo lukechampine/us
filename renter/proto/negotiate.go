@@ -39,7 +39,7 @@ func initiateRPC(addr modules.NetAddress, rpc types.Specifier, contract Contract
 		conn.Close()
 		return nil, errors.Wrap(err, "could not initiate RPC")
 	}
-	hostRev, hostSigs, err := verifyRecentRevision(conn, contract.Transaction())
+	hostRev, hostSigs, err := verifyRecentRevision(conn, contract.Revision())
 	if err != nil {
 		conn.Close()
 		return nil, errors.Wrap(err, "could not verify most recent contract revision")
@@ -100,7 +100,7 @@ func verifySettings(conn net.Conn, host hostdb.ScannedHost) (hostdb.ScannedHost,
 
 // verifyRecentRevision confirms that the host and contractor agree upon the current
 // state of the contract being revised.
-func verifyRecentRevision(conn net.Conn, contract ContractTransaction) (types.FileContractRevision, []types.TransactionSignature, error) {
+func verifyRecentRevision(conn net.Conn, contract ContractRevision) (types.FileContractRevision, []types.TransactionSignature, error) {
 	// send contract ID
 	if err := encoding.WriteObject(conn, contract.ID()); err != nil {
 		return types.FileContractRevision{}, nil, errors.Wrap(err, "could not send contract ID")
@@ -140,7 +140,7 @@ func verifyRecentRevision(conn net.Conn, contract ContractTransaction) (types.Fi
 	}
 	// Check that the unlock hashes match; if they do not, something is
 	// seriously wrong.
-	if hostRevision.UnlockConditions.UnlockHash() != contract.CurrentRevision().UnlockConditions.UnlockHash() {
+	if hostRevision.UnlockConditions.UnlockHash() != contract.Revision.UnlockConditions.UnlockHash() {
 		return types.FileContractRevision{}, nil, errors.New("unlock conditions do not match")
 	}
 	return hostRevision, hostSignatures, nil
@@ -244,6 +244,9 @@ func newUploadRevision(current types.FileContractRevision, merkleRoot crypto.Has
 // the signature is restricted to just the revision, the revision and
 // signature can be included as part of any other transaction.
 func revisionSignature(rev types.FileContractRevision, renterKey crypto.SecretKey) types.TransactionSignature {
+	// NOTE: equivalent to calling SigHash(0) on a transaction containing rev
+	// and the signature below. If a later version of the renter-host protocol
+	// changes this transaction, we may need to update this.
 	sig := crypto.SignHash(crypto.HashObject(rev), renterKey)
 	return types.TransactionSignature{
 		ParentID:       crypto.Hash(rev.ParentID),

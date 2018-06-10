@@ -61,20 +61,20 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 
 	// calculate price
 	// TODO: height is never updated, so we'll wind up overpaying on long-running uploads
-	txn := u.contract.Transaction()
-	storageDuration := txn.CurrentRevision().NewWindowEnd - u.height
+	contract := u.contract.Revision()
+	storageDuration := contract.Revision.NewWindowEnd - u.height
 	storageDuration += 12 // hosts may not be fully synced; allow 2 hours of leeway
 	blockBytes := types.NewCurrency64(SectorSize * uint64(storageDuration))
 	sectorStoragePrice := u.host.StoragePrice.Mul(blockBytes)
 	sectorBandwidthPrice := u.host.UploadBandwidthPrice.Mul64(SectorSize)
 	sectorPrice := sectorStoragePrice.Add(sectorBandwidthPrice)
-	if txn.RenterFunds().Cmp(sectorPrice) < 0 {
-		return crypto.Hash{}, errors.Errorf("contract has insufficient funds to support upload: needed %v, have %v", sectorPrice, txn.RenterFunds())
+	if contract.RenterFunds().Cmp(sectorPrice) < 0 {
+		return crypto.Hash{}, errors.Errorf("contract has insufficient funds to support upload: needed %v, have %v", sectorPrice, contract.RenterFunds())
 	}
 	sectorCollateral := u.host.Collateral.Mul(blockBytes)
 	// hosts tend to be picky about collateral, so shave off 15%
 	sectorCollateral = sectorCollateral.MulFloat(0.85)
-	if txn.CurrentRevision().NewMissedProofOutputs[1].Value.Cmp(sectorCollateral) < 0 {
+	if contract.Revision.NewMissedProofOutputs[1].Value.Cmp(sectorCollateral) < 0 {
 		return crypto.Hash{}, errors.New("contract has insufficient collateral to support upload")
 	}
 
@@ -96,10 +96,10 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 	if err != nil {
 		return crypto.Hash{}, errors.Wrap(err, "could not calculate new Merkle root")
 	}
-	rev := newUploadRevision(txn.CurrentRevision(), merkleRoot, sectorPrice, sectorCollateral)
+	rev := newUploadRevision(contract.Revision, merkleRoot, sectorPrice, sectorCollateral)
 
 	// send revision to host and exchange signatures
-	txnSignatures, err := negotiateRevision(u.conn, rev, txn.RenterKey)
+	txnSignatures, err := negotiateRevision(u.conn, rev, contract.RenterKey)
 	if err == modules.ErrStopResponse {
 		// if host gracefully closed, close our side too and suppress the
 		// error. The next call to Upload will return an error that
@@ -129,7 +129,7 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 func NewUploader(host hostdb.ScannedHost, contract ContractEditor, currentHeight types.BlockHeight) (*Uploader, error) {
 	// check that contract has enough value to support an upload
 	sectorPrice := host.UploadBandwidthPrice.Mul64(SectorSize)
-	if contract.Transaction().RenterFunds().Cmp(sectorPrice) < 0 {
+	if contract.Revision().RenterFunds().Cmp(sectorPrice) < 0 {
 		return nil, errors.New("contract has insufficient funds to support upload")
 	}
 	conn, err := initiateRPC(host.NetAddress, modules.RPCReviseContract, contract)

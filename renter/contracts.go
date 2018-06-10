@@ -63,11 +63,11 @@ func (h *ContractHeader) Validate() error {
 // A Contract represents an open contract file. Contract files contain all the
 // data necessary to revise a file contract.
 type Contract struct {
-	proto.ContractTransaction // for convenience
-	header                    ContractHeader
-	sectorRoots               []crypto.Hash
-	diskRoot                  crypto.Hash
-	f                         *os.File
+	proto.ContractRevision // for convenience
+	header                 ContractHeader
+	sectorRoots            []crypto.Hash
+	diskRoot               crypto.Hash
+	f                      *os.File
 }
 
 // Close closes the contract file.
@@ -78,10 +78,9 @@ func (c *Contract) Close() error {
 	return c.f.Close()
 }
 
-// Transaction returns the transaction containing the latest revision of
-// the file contract.
-func (c *Contract) Transaction() proto.ContractTransaction {
-	return c.ContractTransaction
+// Revision returns the latest revision of the file contract.
+func (c *Contract) Revision() proto.ContractRevision {
+	return c.ContractRevision
 }
 
 // AppendRoot appends a sector root to the contract, returning the new
@@ -118,7 +117,7 @@ func (c *Contract) SectorRoot(i int) (crypto.Hash, error) {
 // revision. SyncWithHost returns an error iff the contract has permanently
 // desynchronized with the host and recovery is impossible.
 func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSignatures []types.TransactionSignature) error {
-	renterRevision := c.Transaction().CurrentRevision()
+	renterRevision := c.Revision().Revision
 	if hostRevision.NewRevisionNumber == renterRevision.NewRevisionNumber &&
 		hostRevision.NewFileMerkleRoot == renterRevision.NewFileMerkleRoot &&
 		c.diskRoot == renterRevision.NewFileMerkleRoot {
@@ -154,11 +153,11 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 	// The Merkle roots should match now, so overwrite our revision with the
 	// host's version. Since we signed the revision, this can't conceivably
 	// hurt us.
-	c.ContractTransaction.Transaction.FileContractRevisions[0] = hostRevision
-	c.ContractTransaction.Transaction.TransactionSignatures = hostSignatures
+	c.ContractRevision.Revision = hostRevision
+	c.ContractRevision.Signatures = hostSignatures
 	if _, err := c.f.Seek(ContractHeaderSize, io.SeekStart); err != nil {
-		return errors.Wrap(err, "could not seek to transaction")
-	} else if err := writeContractTransaction(c.f, c.ContractTransaction.Transaction); err != nil {
+		return errors.Wrap(err, "could not seek to revision")
+	} else if err := writeContractRevision(c.f, c.ContractRevision); err != nil {
 		return err
 	} else if err := c.f.Sync(); err != nil {
 		return errors.Wrap(err, "could not sync contract file")
@@ -166,7 +165,7 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 	return nil
 }
 
-func writeContractHeader(w io.Writer, contract proto.ContractTransaction) error {
+func writeContractHeader(w io.Writer, contract proto.ContractRevision) error {
 	header := make([]byte, ContractHeaderSize)
 	n := copy(header, ContractMagic)
 	header[n] = ContractVersion
@@ -193,32 +192,32 @@ func readContractHeader(r io.Reader) (ContractHeader, error) {
 	return header, nil
 }
 
-func writeContractTransaction(w io.Writer, txn types.Transaction) error {
+func writeContractRevision(w io.Writer, rev proto.ContractRevision) error {
 	arena := make([]byte, ContractArenaSize)
-	err := json.NewEncoder(bytes.NewBuffer(arena[:0])).Encode(txn)
+	err := json.NewEncoder(bytes.NewBuffer(arena[:0])).Encode(rev)
 	if err != nil {
-		return errors.Wrap(err, "could not encode contract transaction")
+		return errors.Wrap(err, "could not encode contract revision")
 	}
 	_, err = w.Write(arena)
 	return err
 }
 
-func readContractTransaction(r io.Reader) (types.Transaction, error) {
+func readContractRevision(r io.Reader) (proto.ContractRevision, error) {
 	arena := make([]byte, ContractArenaSize)
 	if _, err := io.ReadFull(r, arena); err != nil {
-		return types.Transaction{}, errors.Wrap(err, "could not read contract transaction")
+		return proto.ContractRevision{}, errors.Wrap(err, "could not read contract revision")
 	}
-	var txn types.Transaction
-	err := json.NewDecoder(bytes.NewReader(arena)).Decode(&txn)
+	var rev proto.ContractRevision
+	err := json.NewDecoder(bytes.NewReader(arena)).Decode(&rev)
 	if err != nil {
-		return types.Transaction{}, errors.Wrap(err, "could not decode contract transaction")
+		return proto.ContractRevision{}, errors.Wrap(err, "could not decode contract revision")
 	}
-	return txn, nil
+	return rev, nil
 }
 
 // SaveContract creates a new contract file using the provided contract. The
 // contract file will not contain any sector Merkle roots.
-func SaveContract(contract proto.ContractTransaction, filename string) error {
+func SaveContract(contract proto.ContractRevision, filename string) error {
 	f, err := os.Create(filename)
 	if err != nil {
 		return errors.Wrap(err, "could not create contract file")
@@ -226,8 +225,8 @@ func SaveContract(contract proto.ContractTransaction, filename string) error {
 	defer f.Close()
 	if err := writeContractHeader(f, contract); err != nil {
 		return errors.Wrap(err, "could not write contract header")
-	} else if err := writeContractTransaction(f, contract.Transaction); err != nil {
-		return errors.Wrap(err, "could not write contract transaction")
+	} else if err := writeContractRevision(f, contract); err != nil {
+		return errors.Wrap(err, "could not write contract revision")
 	} else if err := f.Sync(); err != nil {
 		return errors.Wrap(err, "could not sync contract file")
 	}
@@ -236,7 +235,7 @@ func SaveContract(contract proto.ContractTransaction, filename string) error {
 
 // SaveRenewedContract creates a new contract file using the provided contract
 // and the sector Merkle roots of the old contract.
-func SaveRenewedContract(oldContract *Contract, newContract proto.ContractTransaction, filename string) error {
+func SaveRenewedContract(oldContract *Contract, newContract proto.ContractRevision, filename string) error {
 	f, err := os.Create(filename)
 	if err != nil {
 		return errors.Wrap(err, "could not create contract file")
@@ -246,7 +245,7 @@ func SaveRenewedContract(oldContract *Contract, newContract proto.ContractTransa
 	// write header+transaction
 	if err := writeContractHeader(f, newContract); err != nil {
 		return errors.Wrap(err, "could not write contract header")
-	} else if err := writeContractTransaction(f, newContract.Transaction); err != nil {
+	} else if err := writeContractRevision(f, newContract); err != nil {
 		return errors.Wrap(err, "could not write contract transaction")
 	}
 
@@ -297,13 +296,15 @@ func LoadContract(filename string) (*Contract, error) {
 	}
 	// read transaction
 	// TODO: try to recover if txn is invalid?
-	txn, err := readContractTransaction(f)
+	rev, err := readContractRevision(f)
 	if err != nil {
 		return nil, err
-	} else if ct := (proto.ContractTransaction{Transaction: txn}); !ct.IsValid() {
-		return nil, errors.Wrap(err, "contract transaction is invalid")
-	} else if ct.ID() != header.id {
-		return nil, errors.New("contract transaction has wrong ID")
+	} else if !rev.IsValid() {
+		return nil, errors.New("contract revision is invalid")
+	} else if rev.ID() != header.id {
+		return nil, errors.New("contract revision has wrong ID")
+	} else if rev.RenterKey != header.key {
+		return nil, errors.New("contract revision has wrong secret key")
 	}
 
 	// read sector roots
@@ -321,37 +322,31 @@ func LoadContract(filename string) (*Contract, error) {
 	}))
 
 	return &Contract{
-		ContractTransaction: proto.ContractTransaction{
-			Transaction: txn,
-			RenterKey:   header.key,
-		},
-		header:      header,
-		sectorRoots: roots,
-		diskRoot:    proto.CachedMerkleRoot(roots),
-		f:           f,
+		ContractRevision: rev,
+		header:           header,
+		sectorRoots:      roots,
+		diskRoot:         proto.CachedMerkleRoot(roots),
+		f:                f,
 	}, nil
 }
 
-// ReadContractTransaction reads, decodes, and returns the ContractTransaction
-// of a contract file. The ContractTransaction is not validated.
-func ReadContractTransaction(filename string) (proto.ContractTransaction, error) {
+// ReadContractRevision reads, decodes, and returns the ContractRevision
+// of a contract file. The ContractRevision is not validated.
+func ReadContractRevision(filename string) (proto.ContractRevision, error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		return proto.ContractTransaction{}, errors.Wrap(err, "could not open contract file")
+		return proto.ContractRevision{}, errors.Wrap(err, "could not open contract file")
 	}
 	defer f.Close()
-	header, err := readContractHeader(f)
+	_, err = readContractHeader(f)
 	if err != nil {
-		return proto.ContractTransaction{}, errors.Wrap(err, "could not read header")
+		return proto.ContractRevision{}, errors.Wrap(err, "could not read header")
 	}
-	txn, err := readContractTransaction(f)
+	rev, err := readContractRevision(f)
 	if err != nil {
-		return proto.ContractTransaction{}, errors.Wrap(err, "could not read transaction")
+		return proto.ContractRevision{}, errors.Wrap(err, "could not read transaction")
 	}
-	return proto.ContractTransaction{
-		Transaction: txn,
-		RenterKey:   header.key,
-	}, nil
+	return rev, nil
 }
 
 // A ContractSet is a map of Contracts keyed by their host public key.

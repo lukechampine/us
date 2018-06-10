@@ -14,7 +14,7 @@ import (
 	"lukechampine.com/us/renter/renterutil"
 )
 
-func contractinfo(contract proto.ContractTransaction) {
+func contractinfo(contract proto.ContractRevision) {
 	c := makeClient()
 	height := c.ChainHeight()
 	var remaining string
@@ -33,7 +33,7 @@ Renter Funds: %v remaining
 		remaining, currencyUnits(contract.RenterFunds()))
 }
 
-func contractName(contract proto.ContractTransaction) string {
+func contractName(contract proto.ContractRevision) string {
 	id := contract.ID().String()
 	return fmt.Sprintf("%s-%s.contract", contract.HostKey().ShortKey(), id[:8])
 }
@@ -156,12 +156,12 @@ func tattle(contractPath string) error {
 	defer contract.Close()
 
 	c := makeClient()
-	err = proto.SubmitContractTransaction(contract.Transaction(), c, c)
+	err = proto.SubmitContractRevision(contract.Revision(), c, c)
 	if err != nil {
 		return err
 	}
-	validOutputs := contract.CurrentRevision().NewValidProofOutputs
-	missedOutputs := contract.CurrentRevision().NewMissedProofOutputs
+	validOutputs := contract.Revision().Revision.NewValidProofOutputs
+	missedOutputs := contract.Revision().Revision.NewMissedProofOutputs
 	fmt.Printf(`Tattled on %v.
 
 If no more revisions are submitted and the host submits a valid storage
