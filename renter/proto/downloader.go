@@ -124,7 +124,7 @@ func (d *Downloader) partialSector(root crypto.Hash, offset, length uint32) ([]b
 
 	// calculate price
 	txn := d.contract.Transaction()
-	sectorPrice := d.host.DownloadBandwidthPrice.Mul64(SectorSize)
+	sectorPrice := d.host.DownloadBandwidthPrice.Mul64(uint64(length))
 	if txn.RenterFunds().Cmp(sectorPrice) < 0 {
 		return nil, errors.New("contract has insufficient funds to support download")
 	}
