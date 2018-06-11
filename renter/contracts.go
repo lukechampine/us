@@ -1,13 +1,12 @@
 package renter
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
-	"unsafe"
 
 	"github.com/NebulousLabs/Sia/crypto"
 	"github.com/NebulousLabs/Sia/types"
@@ -65,7 +64,7 @@ func (h *ContractHeader) Validate() error {
 type Contract struct {
 	proto.ContractRevision // for convenience
 	header                 ContractHeader
-	sectorRoots            []crypto.Hash
+	sectorRoots            proto.MerkleStack
 	diskRoot               crypto.Hash
 	f                      *os.File
 }
@@ -96,20 +95,27 @@ func (c *Contract) AppendRoot(root crypto.Hash) (crypto.Hash, error) {
 	if err := c.f.Sync(); err != nil {
 		return crypto.Hash{}, errors.Wrap(err, "could not sync contract file")
 	}
-	c.sectorRoots = append(c.sectorRoots, root)
-	c.diskRoot = proto.CachedMerkleRoot(c.sectorRoots)
+	c.sectorRoots.AppendNode(root)
+	c.diskRoot = c.sectorRoots.Root()
 	return c.diskRoot, nil
 }
 
 // NumSectors returns the number of sector roots in the contract. It does not
 // reflect any pending changes to the roots.
 func (c *Contract) NumSectors() int {
-	return len(c.sectorRoots)
+	return c.sectorRoots.NumNodes()
 }
 
 // SectorRoot returns the sector root at index i.
 func (c *Contract) SectorRoot(i int) (crypto.Hash, error) {
-	return c.sectorRoots[i], nil
+	if _, err := c.f.Seek(ContractRootOffset+int64(i*crypto.HashSize), io.SeekStart); err != nil {
+		return crypto.Hash{}, errors.Wrap(err, "could not seek to sector root")
+	}
+	var root crypto.Hash
+	if _, err := io.ReadFull(c.f, root[:]); err != nil {
+		return crypto.Hash{}, errors.Wrap(err, "could not read sector root")
+	}
+	return root, nil
 }
 
 // SyncWithHost synchronizes the local version of the contract with the host's
@@ -125,29 +131,46 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 		return nil
 	}
 
+	// if the Merkle root is wrong, try to fix it.
 	if hostRevision.NewFileMerkleRoot != renterRevision.NewFileMerkleRoot || hostRevision.NewFileMerkleRoot != c.diskRoot {
-		// try removing sector roots until top-level root matches the host
-		var fixed bool
-		for i := 0; i <= len(c.sectorRoots) && i < 5; i++ {
+		// revert up to five roots
+		orig := c.sectorRoots.NumNodes()
+		c.sectorRoots.Reset()
+		if _, err := c.f.Seek(ContractRootOffset, io.SeekStart); err != nil {
+			return errors.Wrap(err, "could not seek to contract sector roots")
+		}
+		if orig > 5 {
+			r := io.LimitReader(bufio.NewReader(c.f), int64(orig-5)*crypto.HashSize)
+			if _, err := c.sectorRoots.ReadFrom(r); err != nil {
+				return errors.Wrap(err, "could not read sector roots")
+			}
+		}
+
+		// re-apply each root, checking to see if the top-level root matches
+		for c.sectorRoots.NumNodes() != orig {
 			// NOTE: the first iteration of the loop simply recalculates the
 			// root without truncating. This accounts for the case where only
 			// diskRoot is out of sync.
-			truncatedRoots := c.sectorRoots[:len(c.sectorRoots)-i]
-			if proto.CachedMerkleRoot(truncatedRoots) == hostRevision.NewFileMerkleRoot {
-				// truncate disk roots
-				err := c.f.Truncate(ContractRootOffset + int64(len(truncatedRoots)*crypto.HashSize))
-				if err != nil {
-					return errors.Wrap(err, "could not repair sector roots")
-				}
-				c.sectorRoots = truncatedRoots
-				c.diskRoot = hostRevision.NewFileMerkleRoot
-				fixed = true
+			if c.sectorRoots.Root() == hostRevision.NewFileMerkleRoot {
+				// success!
 				break
 			}
+			// append the next root
+			if _, err := c.sectorRoots.ReadFrom(io.LimitReader(c.f, crypto.HashSize)); err != nil {
+				return errors.Wrap(err, "could not read sector roots")
+			}
 		}
-		if !fixed {
+		if c.sectorRoots.Root() != hostRevision.NewFileMerkleRoot {
+			// give up
 			return proto.ErrDesynchronized
 		}
+
+		// truncate disk roots
+		err := c.f.Truncate(ContractRootOffset + int64(c.sectorRoots.NumNodes()*crypto.HashSize))
+		if err != nil {
+			return errors.Wrap(err, "could not repair sector roots")
+		}
+		c.diskRoot = hostRevision.NewFileMerkleRoot
 	}
 
 	// The Merkle roots should match now, so overwrite our revision with the
@@ -249,15 +272,10 @@ func SaveRenewedContract(oldContract *Contract, newContract proto.ContractRevisi
 		return errors.Wrap(err, "could not write contract transaction")
 	}
 
-	// write sector roots
-	roots := oldContract.sectorRoots
-	rootsBytes := *(*[]byte)(unsafe.Pointer(&reflect.SliceHeader{
-		Len:  len(roots) * crypto.HashSize,
-		Cap:  len(roots) * crypto.HashSize,
-		Data: (*reflect.SliceHeader)(unsafe.Pointer(&roots)).Data,
-	}))
-	if _, err := f.Write(rootsBytes); err != nil {
-		return errors.Wrap(err, "could not write sector roots")
+	// copy sector roots
+	oldContract.f.Seek(ContractRootOffset, io.SeekStart)
+	if _, err := io.Copy(f, oldContract.f); err != nil {
+		return errors.Wrap(err, "could not copy sector roots")
 	} else if err := f.Sync(); err != nil {
 		return errors.Wrap(err, "could not sync contract file")
 	}
@@ -308,24 +326,19 @@ func LoadContract(filename string) (*Contract, error) {
 	}
 
 	// read sector roots
+	var stack proto.MerkleStack
 	if _, err := f.Seek(ContractRootOffset, io.SeekStart); err != nil {
 		return nil, errors.Wrap(err, "could not seek to contract sector roots")
 	}
-	rootsBytes := make([]byte, numSectors*crypto.HashSize)
-	if _, err := io.ReadFull(f, rootsBytes); err != nil {
+	if _, err := stack.ReadFrom(f); err != nil {
 		return nil, errors.Wrap(err, "could not read sector roots")
 	}
-	roots := *(*[]crypto.Hash)(unsafe.Pointer(&reflect.SliceHeader{
-		Len:  int(numSectors),
-		Cap:  int(numSectors),
-		Data: (*reflect.SliceHeader)(unsafe.Pointer(&rootsBytes)).Data,
-	}))
 
 	return &Contract{
 		ContractRevision: rev,
 		header:           header,
-		sectorRoots:      roots,
-		diskRoot:         proto.CachedMerkleRoot(roots),
+		sectorRoots:      stack,
+		diskRoot:         stack.Root(),
 		f:                f,
 	}, nil
 }

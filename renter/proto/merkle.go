@@ -113,7 +113,7 @@ type MerkleStack struct {
 	// NOTE: 64 hashes is enough to cover 2^64 * SegmentSize bytes (1 ZiB), so
 	// we don't need to worry about running out.
 	stack [64]crypto.Hash
-	used  uint64                      // one bit per stack elem; also number of node
+	used  uint64                      // one bit per stack elem; also number of nodes
 	buf   [1 + crypto.HashSize*2]byte // for merging nodes
 }
 
