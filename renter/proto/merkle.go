@@ -2,6 +2,8 @@ package proto
 
 import (
 	"bytes"
+	"io"
+	"math/bits"
 	"sync"
 
 	"github.com/NebulousLabs/Sia/crypto"
@@ -88,4 +90,97 @@ func cachedMerkleRootAlias(roots []crypto.Hash) crypto.Hash {
 		roots = newRoots
 	}
 	return roots[0]
+}
+
+// A MerkleStack is a Merkle tree that stores only one (or zero) nodes per
+// level. If a node is inserted at a level already containing a node, the
+// nodes are merged into the next level. This process repeats until it reaches
+// an open level.
+//
+// For example, after five nodes have been inserted, the stack only retains
+// two nodes: one node created from the first four, and one node containing
+// the last. After seven nodes have been inserted, the stack retains three
+// nodes: one for the first four, one for the next two, and the last one.
+//
+// MerkleStacks are an alternative to storing the full Merkle tree; they
+// compress the tree to O(log2(n)) space at the cost of reduced functionality
+// (nodes can only be appended to the "end" of the stack; arbitrary insertion
+// is not possible). MerkleStacks also distribute the number of hashing
+// operations more evenly: instead of hashing the full tree all at once, the
+// hashes are computed as needed at insertion time. (The total number of
+// hashes performed is the same.)
+type MerkleStack struct {
+	// NOTE: 64 hashes is enough to cover 2^64 * SegmentSize bytes (1 ZiB), so
+	// we don't need to worry about running out.
+	stack [64]crypto.Hash
+	used  uint64                      // one bit per stack elem; also number of node
+	buf   [1 + crypto.HashSize*2]byte // for merging nodes
+}
+
+func (s *MerkleStack) merge(left, right crypto.Hash) crypto.Hash {
+	// NOTE: even though in theory we only need to set s.buf[0] once, doing it
+	// here means a zero-valued MerkleStack is useful.
+	s.buf[0] = nodeHashPrefix
+	copy(s.buf[1:], left[:])
+	copy(s.buf[1+crypto.HashSize:], right[:])
+	return crypto.Hash(blake2b.Sum256(s.buf[:]))
+}
+
+// AppendNode appends node to the right side of the Merkle tree.
+func (s *MerkleStack) AppendNode(node crypto.Hash) {
+	for i := uint64(0); i < 64; i++ {
+		if s.used&(1<<i) == 0 {
+			// slot is open
+			s.stack[i] = node
+			s.used++ // nice
+			return
+		}
+		// merge upwards to make room
+		node = s.merge(s.stack[i], node)
+	}
+	panic("MerkleStack exceeded 64 full slots")
+}
+
+// NumNodes returns the number of nodes appended to the stack since the last
+// call to Reset.
+func (s *MerkleStack) NumNodes() int {
+	return int(s.used)
+}
+
+// ReadFrom reads successive nodes from r, appending them to the stack.
+func (s *MerkleStack) ReadFrom(r io.Reader) (int64, error) {
+	var total int64
+	for {
+		var node crypto.Hash
+		n, err := io.ReadFull(r, node[:])
+		total += int64(n)
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+			return total, err
+		}
+		s.AppendNode(node)
+	}
+}
+
+// Reset clears the stack.
+func (s *MerkleStack) Reset() {
+	s.used = 0 // nice
+}
+
+// Root returns the root of the Merkle tree. It does not modify the stack. If
+// the stack is empty, Root returns a zero-valued hash.
+func (s *MerkleStack) Root() crypto.Hash {
+	i := uint64(bits.TrailingZeros64(s.used))
+	if i == 64 {
+		return crypto.Hash{}
+	}
+	root := s.stack[i]
+	for i++; i < 64; i++ {
+		if s.used&(1<<i) != 0 {
+			root = s.merge(s.stack[i], root)
+		}
+	}
+	return root
 }
