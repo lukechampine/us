@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 	"net"
@@ -175,23 +176,26 @@ func negotiateRevision(conn net.Conn, rev types.FileContractRevision, secretKey 
 		return nil, errors.Wrap(err, "could not read host's signature")
 	}
 
-	// verify that we can construct a valid transaction from the revision and
-	// two signatures,
-	//
-	// NOTE: we can fake the blockheight here because it doesn't affect
-	// verification; it just needs to be above the fork height and below the
-	// contract expiration (which was checked earlier).
-	signedTxn := types.Transaction{
-		FileContractRevisions: []types.FileContractRevision{rev},
-		TransactionSignatures: []types.TransactionSignature{renterSig, hostSig},
+	// verify the host's signature
+	expSig := types.TransactionSignature{
+		ParentID:       crypto.Hash(rev.ParentID),
+		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
+		PublicKeyIndex: 1, // host key is always second -- see FormContract
+		Signature:      hostSig.Signature,
 	}
-	verificationHeight := rev.NewWindowStart - 1
-	if err := signedTxn.StandaloneValid(verificationHeight); err != nil {
-		return nil, errors.Wrap(err, "negotiated transaction is invalid")
+	if !bytes.Equal(encoding.Marshal(hostSig), encoding.Marshal(expSig)) {
+		return nil, errors.New("host sent a signature with unexpected metadata")
+	}
+	var hostKey crypto.PublicKey
+	var cryptoSig crypto.Signature
+	copy(hostKey[:], rev.UnlockConditions.PublicKeys[1].Key)
+	copy(cryptoSig[:], hostSig.Signature)
+	if crypto.VerifyHash(crypto.HashObject(rev), hostKey, cryptoSig) != nil {
+		return nil, errors.New("host sent an invalid signature")
 	}
 
 	// if the host sent ErrStopResponse, return it
-	return signedTxn.TransactionSignatures, responseErr
+	return []types.TransactionSignature{renterSig, hostSig}, responseErr
 }
 
 // newRevision creates a copy of current with its revision number incremented,
