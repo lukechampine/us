@@ -140,7 +140,7 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 			return errors.Wrap(err, "could not seek to contract sector roots")
 		}
 		if orig > 5 {
-			r := io.LimitReader(bufio.NewReader(c.f), int64(orig-5)*crypto.HashSize)
+			r := bufio.NewReader(io.LimitReader(c.f, int64(orig-5)*crypto.HashSize))
 			if _, err := c.sectorRoots.ReadFrom(r); err != nil {
 				return errors.Wrap(err, "could not read sector roots")
 			}
