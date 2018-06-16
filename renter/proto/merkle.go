@@ -184,3 +184,123 @@ func (s *MerkleStack) Root() crypto.Hash {
 	}
 	return root
 }
+
+// BuildMerkleProof constructs a proof for the segment range [start, end).
+func BuildMerkleProof(sector *[SectorSize]byte, start, end int) []crypto.Hash {
+	if start < 0 || end > SegmentsPerSector || start > end || start == end {
+		panic("BuildMerkleProof: illegal proof range")
+	}
+	// calculate the leaf roots of the tree
+	roots := make([]crypto.Hash, SegmentsPerSector)
+	buf := make([]byte, 1+SegmentSize)
+	buf[0] = leafHashPrefix
+	for i := range roots {
+		if start <= i && i < end {
+			continue // don't need to calculate roots inside proof range
+		}
+		copy(buf[1:], sector[i*SegmentSize:][:SegmentSize])
+		roots[i] = crypto.Hash(blake2b.Sum256(buf))
+	}
+
+	// the largest possible proof is 2*(log2(SegmentsPerSector) - 1), for the
+	// range [32767, 32769), which splits the tree down the middle.
+	proof := make([]crypto.Hash, 0, 30)
+
+	// we build the proof by recursively enumerating subtrees, left to right.
+	// If the subtree is inside the segment range, we don't add anything to
+	// the proof (because the verifier has the segments); if the subtree is
+	// outside the segment range, we add its Merkle root to the proof.
+	//
+	// NOTE: this operation might be a little tricky to understand because
+	// it's a recursive function with side effects (appending to proof), but
+	// this is the simplest way I was able to implement it. Namely, it has the
+	// important advantage of being symmetrical to the Verify operation.
+	var rec func(int, int)
+	rec = func(i, j int) {
+		if i >= start && j <= end {
+			// this subtree contains only data segments; skip it
+		} else if j <= start || i >= end {
+			// this subtree does not contain any data segments; add its Merkle
+			// root to the proof
+			proof = append(proof, cachedMerkleRootAlias(roots[i:j]))
+		} else {
+			// this subtree partially overlaps the data segments; split it
+			// into two subtrees and recurse on each
+			mid := (i + j) / 2
+			rec(i, mid)
+			rec(mid, j)
+		}
+	}
+	rec(0, SegmentsPerSector)
+	return proof
+}
+
+// VerifyMerkleProof verifies a proof produced by BuildMerkleProof. Only
+// sector-sized proofs can be verified.
+func VerifyMerkleProof(proof []crypto.Hash, segments []byte, start, end int, root crypto.Hash) bool {
+	if len(segments)%SegmentSize != 0 {
+		panic("VerifyMerkleProof: segments must be a multiple of SegmentSize")
+	} else if len(segments) != (end-start)*SegmentSize {
+		panic("VerifyMerkleProof: segments length does not match range")
+	} else if start < 0 || end > SegmentsPerSector || start > end || start == end {
+		panic("VerifyMerkleProof: illegal proof range")
+	}
+
+	// check that the proof is the correct size
+	//
+	// NOTE: I realize this is a bit magical (in a bad way), but it's too
+	// pretty for me not to use it. If you have some spare time, try to figure
+	// out why it works!
+	proofSize := bits.OnesCount(uint(start)) + bits.OnesCount(uint(SegmentsPerSector-end))
+	if len(proof) != proofSize {
+		return false
+	}
+
+	// calculate roots of each segment
+	segRoots := make([]crypto.Hash, end-start)
+	buf := make([]byte, 1+SegmentSize)
+	buf[0] = leafHashPrefix
+	for i := range segRoots {
+		copy(buf[1:], segments[i*SegmentSize:][:SegmentSize])
+		segRoots[i] = crypto.Hash(blake2b.Sum256(buf))
+	}
+
+	// define a helper function for later
+	buf[0] = nodeHashPrefix
+	nodeHash := func(left, right crypto.Hash) crypto.Hash {
+		copy(buf[1:], left[:])
+		copy(buf[1+crypto.HashSize:], right[:])
+		return crypto.Hash(blake2b.Sum256(buf))
+	}
+
+	// we verify the proof by recursively enumerating subtrees, left to right,
+	// and calculating their Merkle root. If the subtree is inside the segment
+	// range, then we calculate its root by combining segRoots; if the subtree
+	// is outside the segment range, its Merkle root should be the "next"
+	// hash supplied in the proof set.
+	//
+	// NOTE: this operation might be a little tricky to understand because
+	// it's a recursive function with side effects (popping hashes off the
+	// proof set), but this is the simplest way I was able to implement it.
+	// Namely, it has the important advantage of being symmetrical to the
+	// Build operation.
+	var rec func(int, int) crypto.Hash
+	rec = func(i, j int) crypto.Hash {
+		if i >= start && j <= end {
+			// this subtree contains only data segments; return their root
+			return cachedMerkleRootAlias(segRoots[i-start : j-start])
+		} else if j <= start || i >= end {
+			// this subtree does not overlap with the data segments at all;
+			// the root of this tree should be the next hash in the proof set.
+			h := proof[0]
+			proof = proof[1:]
+			return h
+		} else {
+			// this subtree partially overlaps the data segments; split it
+			// into two subtrees and recurse on each, joining their roots.
+			mid := (i + j) / 2
+			return nodeHash(rec(i, mid), rec(mid, j))
+		}
+	}
+	return rec(0, SegmentsPerSector) == root
+}
