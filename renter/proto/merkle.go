@@ -118,12 +118,20 @@ type MerkleStack struct {
 }
 
 func (s *MerkleStack) merge(left, right crypto.Hash) crypto.Hash {
-	// NOTE: even though in theory we only need to set s.buf[0] once, doing it
-	// here means a zero-valued MerkleStack is useful.
 	s.buf[0] = nodeHashPrefix
 	copy(s.buf[1:], left[:])
 	copy(s.buf[1+crypto.HashSize:], right[:])
 	return crypto.Hash(blake2b.Sum256(s.buf[:]))
+}
+
+// AppendLeaf appends the leaf hash of data to the right side of the Merkle
+// tree. Note that, if used in conjunction with AppendNode, the hashes passed
+// to AppendNode must also be leaf hashes.
+func (s *MerkleStack) AppendLeaf(data []byte) {
+	buf := s.buf[:0]
+	buf = append(buf, leafHashPrefix)
+	buf = append(buf, data...) // will allocate if len(data) > len(s.buf)-1
+	s.AppendNode(crypto.Hash(blake2b.Sum256(buf)))
 }
 
 // AppendNode appends node to the right side of the Merkle tree.
@@ -190,16 +198,15 @@ func BuildMerkleProof(sector *[SectorSize]byte, start, end int) []crypto.Hash {
 	if start < 0 || end > SegmentsPerSector || start > end || start == end {
 		panic("BuildMerkleProof: illegal proof range")
 	}
-	// calculate the leaf roots of the tree
-	roots := make([]crypto.Hash, SegmentsPerSector)
-	buf := make([]byte, 1+SegmentSize)
-	buf[0] = leafHashPrefix
-	for i := range roots {
-		if start <= i && i < end {
-			continue // don't need to calculate roots inside proof range
+
+	// define a helper function for later
+	var s MerkleStack
+	subtreeRoot := func(i, j int) crypto.Hash {
+		s.Reset()
+		for ; i < j; i++ {
+			s.AppendLeaf(sector[i*SegmentSize:][:SegmentSize])
 		}
-		copy(buf[1:], sector[i*SegmentSize:][:SegmentSize])
-		roots[i] = crypto.Hash(blake2b.Sum256(buf))
+		return s.Root()
 	}
 
 	// the largest possible proof is 2*(log2(SegmentsPerSector) - 1), for the
@@ -221,8 +228,8 @@ func BuildMerkleProof(sector *[SectorSize]byte, start, end int) []crypto.Hash {
 			// this subtree contains only data segments; skip it
 		} else if j <= start || i >= end {
 			// this subtree does not contain any data segments; add its Merkle
-			// root to the proof
-			proof = append(proof, cachedMerkleRootAlias(roots[i:j]))
+			// root to the proof.
+			proof = append(proof, subtreeRoot(i, j))
 		} else {
 			// this subtree partially overlaps the data segments; split it
 			// into two subtrees and recurse on each
