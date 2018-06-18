@@ -193,10 +193,18 @@ func (s *MerkleStack) Root() crypto.Hash {
 	return root
 }
 
-// BuildMerkleProof constructs a proof for the segment range [start, end).
-func BuildMerkleProof(sector *[SectorSize]byte, start, end int) []crypto.Hash {
+// BuildMerkleProof constructs a proof for the segment range [start, end). If
+// a non-nil precalc function is provided, it will be used to supply
+// precalculated subtree Merkle roots. For example, if the root of the left
+// half of the Merkle tree is precomputed, precalc should return it for i == 0
+// and j == SegmentsPerSector/2. If a precalculated root is not available,
+// precalc should return the zero hash.
+func BuildMerkleProof(sector *[SectorSize]byte, start, end int, precalc func(i, j int) crypto.Hash) []crypto.Hash {
 	if start < 0 || end > SegmentsPerSector || start > end || start == end {
 		panic("BuildMerkleProof: illegal proof range")
+	}
+	if precalc == nil {
+		precalc = func(i, j int) (h crypto.Hash) { return }
 	}
 
 	// define a helper function for later
@@ -228,8 +236,13 @@ func BuildMerkleProof(sector *[SectorSize]byte, start, end int) []crypto.Hash {
 			// this subtree contains only data segments; skip it
 		} else if j <= start || i >= end {
 			// this subtree does not contain any data segments; add its Merkle
-			// root to the proof.
-			proof = append(proof, subtreeRoot(i, j))
+			// root to the proof. If we have a precalculated root, use that;
+			// otherwise, calculate it from scratch.
+			if h := precalc(i, j); h != (crypto.Hash{}) {
+				proof = append(proof, h)
+			} else {
+				proof = append(proof, subtreeRoot(i, j))
+			}
 		} else {
 			// this subtree partially overlaps the data segments; split it
 			// into two subtrees and recurse on each

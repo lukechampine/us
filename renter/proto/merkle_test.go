@@ -2,6 +2,7 @@ package proto
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 	"unsafe"
 
@@ -199,12 +200,12 @@ func TestBuildVerifyMerkleProof(t *testing.T) {
 	var sector [SectorSize]byte
 	fastrand.Read(sector[:])
 
-	proof := BuildMerkleProof(&sector, 0, SegmentsPerSector)
+	proof := BuildMerkleProof(&sector, 0, SegmentsPerSector, nil)
 	if len(proof) != 0 {
 		t.Error("BuildMerkleProof constructed an incorrect proof for the entire sector")
 	}
 
-	proof = BuildMerkleProof(&sector, 0, 1)
+	proof = BuildMerkleProof(&sector, 0, 1, nil)
 	hash := leafHash(sector[:64])
 	for i := range proof {
 		hash = nodeHash(hash, proof[i])
@@ -215,7 +216,7 @@ func TestBuildVerifyMerkleProof(t *testing.T) {
 		t.Error("VerifyMerkleProof failed to verify a known correct proof")
 	}
 
-	proof = BuildMerkleProof(&sector, SegmentsPerSector-1, SegmentsPerSector)
+	proof = BuildMerkleProof(&sector, SegmentsPerSector-1, SegmentsPerSector, nil)
 	hash = leafHash(sector[len(sector)-64:])
 	for i := range proof {
 		hash = nodeHash(proof[len(proof)-i-1], hash)
@@ -226,7 +227,7 @@ func TestBuildVerifyMerkleProof(t *testing.T) {
 		t.Error("VerifyMerkleProof failed to verify a known correct proof")
 	}
 
-	proof = BuildMerkleProof(&sector, 10, 11)
+	proof = BuildMerkleProof(&sector, 10, 11, nil)
 	hash = leafHash(sector[10*64:][:64])
 	hash = nodeHash(hash, proof[2])
 	hash = nodeHash(proof[1], hash)
@@ -242,7 +243,7 @@ func TestBuildVerifyMerkleProof(t *testing.T) {
 	}
 
 	// this is the largest possible proof
-	proof = BuildMerkleProof(&sector, 32767, 32769)
+	proof = BuildMerkleProof(&sector, 32767, 32769, nil)
 	left := leafHash(sector[32767*64:][:64])
 	for i := 0; i < 15; i++ {
 		left = nodeHash(proof[15-i-1], left)
@@ -261,10 +262,28 @@ func TestBuildVerifyMerkleProof(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		start := fastrand.Intn(SegmentsPerSector - 1)
 		end := start + fastrand.Intn(SegmentsPerSector-start)
-		proof := BuildMerkleProof(&sector, start, end)
+		proof := BuildMerkleProof(&sector, start, end, nil)
 		if !VerifyMerkleProof(proof, sector[start*SegmentSize:end*SegmentSize], start, end, SectorMerkleRoot(&sector)) {
 			t.Errorf("BuildMerkleProof constructed an incorrect proof for range %v-%v", start, end)
 		}
+	}
+
+	// test a proof with precomputed inputs
+	leftRoots := make([]crypto.Hash, SegmentsPerSector/2)
+	for i := range leftRoots {
+		leftRoots[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
+	}
+	left = CachedMerkleRoot(leftRoots)
+	precalc := func(i, j int) (h crypto.Hash) {
+		if i == 0 && j == SegmentsPerSector/2 {
+			h = left
+		}
+		return
+	}
+	proof = BuildMerkleProof(&sector, SegmentsPerSector-1, SegmentsPerSector, precalc)
+	recalcProof := BuildMerkleProof(&sector, SegmentsPerSector-1, SegmentsPerSector, nil)
+	if !reflect.DeepEqual(proof, recalcProof) {
+		t.Fatal("precalc failed")
 	}
 
 	// test malformed inputs
@@ -284,7 +303,7 @@ func BenchmarkBuildMerkleProof(b *testing.B) {
 		return func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				_ = BuildMerkleProof(&sector, start, end)
+				_ = BuildMerkleProof(&sector, start, end, nil)
 			}
 		}
 	}
@@ -294,13 +313,60 @@ func BenchmarkBuildMerkleProof(b *testing.B) {
 	b.Run("mid", benchRange(SegmentsPerSector/2, 1+SegmentsPerSector/2))
 }
 
+func BenchmarkBuildMerkleProofPrecalc(b *testing.B) {
+	var sector [SectorSize]byte
+	fastrand.Read(sector[:])
+	root := SectorMerkleRoot(&sector)
+
+	roots := make([]crypto.Hash, SegmentsPerSector)
+	for i := range roots {
+		roots[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
+	}
+	left := make([]crypto.Hash, 4)
+	left[0], roots = CachedMerkleRoot(roots[:SegmentsPerSector/2]), roots[SegmentsPerSector/2:]
+	left[1], roots = CachedMerkleRoot(roots[:SegmentsPerSector/4]), roots[SegmentsPerSector/4:]
+	left[2], roots = CachedMerkleRoot(roots[:SegmentsPerSector/8]), roots[SegmentsPerSector/8:]
+	left[3], roots = CachedMerkleRoot(roots[:SegmentsPerSector/16]), roots[SegmentsPerSector/16:]
+	precalc := func(i, j int) crypto.Hash {
+		if (j - i) == SegmentsPerSector/2 {
+			return left[0]
+		}
+		if (j - i) == SegmentsPerSector/4 {
+			return left[1]
+		}
+		if (j - i) == SegmentsPerSector/8 {
+			return left[2]
+		}
+		if (j - i) == SegmentsPerSector/16 {
+			return left[3]
+		}
+		return crypto.Hash{}
+	}
+
+	benchRange := func(start, end int) func(*testing.B) {
+		return func(b *testing.B) {
+			b.ReportAllocs()
+			proof := BuildMerkleProof(&sector, start, end, precalc)
+			if !VerifyMerkleProof(proof, sector[start*SegmentSize:end*SegmentSize], start, end, root) {
+				b.Fatal("precalculated roots are incorrect")
+			}
+			for i := 0; i < b.N; i++ {
+				_ = BuildMerkleProof(&sector, start, end, precalc)
+			}
+		}
+	}
+
+	b.Run("single", benchRange(SegmentsPerSector-1, SegmentsPerSector))
+	b.Run("sixteenth", benchRange(SegmentsPerSector-SegmentsPerSector/16, SegmentsPerSector))
+}
+
 func BenchmarkVerifyMerkleProof(b *testing.B) {
 	var sector [SectorSize]byte
 	fastrand.Read(sector[:])
 	root := SectorMerkleRoot(&sector)
 
 	benchRange := func(start, end int) func(*testing.B) {
-		proof := BuildMerkleProof(&sector, start, end)
+		proof := BuildMerkleProof(&sector, start, end, nil)
 		proofSegs := sector[start*SegmentSize : end*SegmentSize]
 		return func(b *testing.B) {
 			b.ReportAllocs()
