@@ -113,40 +113,35 @@ type MerkleStack struct {
 	// NOTE: 64 hashes is enough to cover 2^64 * SegmentSize bytes (1 ZiB), so
 	// we don't need to worry about running out.
 	stack [64]crypto.Hash
-	used  uint64                      // one bit per stack elem; also number of nodes
-	buf   [1 + crypto.HashSize*2]byte // for merging nodes
+	used  uint64   // one bit per stack elem; also number of nodes
+	buf   [65]byte // for hashing leaves and nodes
 }
 
-func (s *MerkleStack) merge(left, right crypto.Hash) crypto.Hash {
-	s.buf[0] = nodeHashPrefix
-	copy(s.buf[1:], left[:])
-	copy(s.buf[1+crypto.HashSize:], right[:])
+func (s *MerkleStack) leafHash(segment []byte) crypto.Hash {
+	if len(segment) != SegmentSize {
+		panic("leafHash: illegal input size")
+	}
+	s.buf[0] = leafHashPrefix
+	copy(s.buf[1:], segment)
 	return crypto.Hash(blake2b.Sum256(s.buf[:]))
 }
 
-// AppendLeaf appends the leaf hash of data to the right side of the Merkle
-// tree. Note that, if used in conjunction with AppendNode, the hashes passed
-// to AppendNode must also be leaf hashes.
-func (s *MerkleStack) AppendLeaf(data []byte) {
-	buf := s.buf[:0]
-	buf = append(buf, leafHashPrefix)
-	buf = append(buf, data...) // will allocate if len(data) > len(s.buf)-1
-	s.AppendNode(crypto.Hash(blake2b.Sum256(buf)))
+func (s *MerkleStack) nodeHash(left, right crypto.Hash) crypto.Hash {
+	s.buf[0] = nodeHashPrefix
+	copy(s.buf[1:], left[:])
+	copy(s.buf[1+len(left):], right[:])
+	return crypto.Hash(blake2b.Sum256(s.buf[:]))
 }
 
 // AppendNode appends node to the right side of the Merkle tree.
 func (s *MerkleStack) AppendNode(node crypto.Hash) {
-	for i := uint64(0); i < 64; i++ {
-		if s.used&(1<<i) == 0 {
-			// slot is open
-			s.stack[i] = node
-			s.used++ // nice
-			return
-		}
-		// merge upwards to make room
-		node = s.merge(s.stack[i], node)
+	// seek to first open slot, merging nodes as we go
+	var i uint64
+	for ; s.used&(1<<i) != 0; i++ {
+		node = s.nodeHash(s.stack[i], node)
 	}
-	panic("MerkleStack exceeded 64 full slots")
+	s.stack[i] = node
+	s.used++ // nice
 }
 
 // NumNodes returns the number of nodes appended to the stack since the last
@@ -187,7 +182,7 @@ func (s *MerkleStack) Root() crypto.Hash {
 	root := s.stack[i]
 	for i++; i < 64; i++ {
 		if s.used&(1<<i) != 0 {
-			root = s.merge(s.stack[i], root)
+			root = s.nodeHash(s.stack[i], root)
 		}
 	}
 	return root
@@ -212,7 +207,7 @@ func BuildMerkleProof(sector *[SectorSize]byte, start, end int, precalc func(i, 
 	subtreeRoot := func(i, j int) crypto.Hash {
 		s.Reset()
 		for ; i < j; i++ {
-			s.AppendLeaf(sector[i*SegmentSize:][:SegmentSize])
+			s.AppendNode(s.leafHash(sector[i*SegmentSize:][:SegmentSize]))
 		}
 		return s.Root()
 	}
@@ -281,7 +276,7 @@ func VerifyMerkleProof(proof []crypto.Hash, segments []byte, start, end int, roo
 	subtreeRoot := func(i, j int) crypto.Hash {
 		s.Reset()
 		for ; i < j; i++ {
-			s.AppendLeaf(segments[(i-start)*SegmentSize:][:SegmentSize])
+			s.AppendNode(s.leafHash(segments[(i-start)*SegmentSize:][:SegmentSize]))
 		}
 		return s.Root()
 	}
@@ -312,7 +307,7 @@ func VerifyMerkleProof(proof []crypto.Hash, segments []byte, start, end int, roo
 			// this subtree partially overlaps the data segments; split it
 			// into two subtrees and recurse on each, joining their roots.
 			mid := (i + j) / 2
-			return s.merge(rec(i, mid), rec(mid, j))
+			return s.nodeHash(rec(i, mid), rec(mid, j))
 		}
 	}
 	return rec(0, SegmentsPerSector) == root
