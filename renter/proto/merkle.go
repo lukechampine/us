@@ -222,9 +222,9 @@ func BuildMerkleProof(sector *[SectorSize]byte, start, end int, precalc func(i, 
 	proof := make([]crypto.Hash, 0, 30)
 
 	// we build the proof by recursively enumerating subtrees, left to right.
-	// If the subtree is inside the segment range, we don't add anything to
-	// the proof (because the verifier has the segments); if the subtree is
-	// outside the segment range, we add its Merkle root to the proof.
+	// If a subtree is inside the segment range, we can skip it (because the
+	// verifier has the segments); otherwise, we add its Merkle root to the
+	// proof.
 	//
 	// NOTE: this operation might be a little tricky to understand because
 	// it's a recursive function with side effects (appending to proof), but
@@ -276,21 +276,14 @@ func VerifyMerkleProof(proof []crypto.Hash, segments []byte, start, end int, roo
 		return false
 	}
 
-	// calculate roots of each segment
-	segRoots := make([]crypto.Hash, end-start)
-	buf := make([]byte, 1+SegmentSize)
-	buf[0] = leafHashPrefix
-	for i := range segRoots {
-		copy(buf[1:], segments[i*SegmentSize:][:SegmentSize])
-		segRoots[i] = crypto.Hash(blake2b.Sum256(buf))
-	}
-
 	// define a helper function for later
-	buf[0] = nodeHashPrefix
-	nodeHash := func(left, right crypto.Hash) crypto.Hash {
-		copy(buf[1:], left[:])
-		copy(buf[1+crypto.HashSize:], right[:])
-		return crypto.Hash(blake2b.Sum256(buf))
+	var s MerkleStack
+	subtreeRoot := func(i, j int) crypto.Hash {
+		s.Reset()
+		for ; i < j; i++ {
+			s.AppendLeaf(segments[(i-start)*SegmentSize:][:SegmentSize])
+		}
+		return s.Root()
 	}
 
 	// we verify the proof by recursively enumerating subtrees, left to right,
@@ -308,7 +301,7 @@ func VerifyMerkleProof(proof []crypto.Hash, segments []byte, start, end int, roo
 	rec = func(i, j int) crypto.Hash {
 		if i >= start && j <= end {
 			// this subtree contains only data segments; return their root
-			return cachedMerkleRootAlias(segRoots[i-start : j-start])
+			return subtreeRoot(i, j)
 		} else if j <= start || i >= end {
 			// this subtree does not overlap with the data segments at all;
 			// the root of this tree should be the next hash in the proof set.
@@ -319,7 +312,7 @@ func VerifyMerkleProof(proof []crypto.Hash, segments []byte, start, end int, roo
 			// this subtree partially overlaps the data segments; split it
 			// into two subtrees and recurse on each, joining their roots.
 			mid := (i + j) / 2
-			return nodeHash(rec(i, mid), rec(mid, j))
+			return s.merge(rec(i, mid), rec(mid, j))
 		}
 	}
 	return rec(0, SegmentsPerSector) == root
