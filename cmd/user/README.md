@@ -70,34 +70,28 @@ hosts = [
 ## Scanning for hosts
 
 The first step of forming a contract is choosing a host to form the contract
-with. You can get a ranked list of hosts by running `siac hosts --verbose`.
+with. You can get a ranked list of hosts by running `siac hostdb -v`.
 The longer `siad` has been running, the more accurate these rankings will be.
 
-You can also scan hosts manually with `user`. The `user scan` command will fetch
-the list of all hosts from `siad` and scan them in parallel. Scan results are
-printed in real time. Once all the hosts have been scanned, a summary will be
-printed that lists the best hosts, as ranked by various metrics.
+The command will output a ranked list of hosts, with the best-scoring hosts at
+the bottom. The format of each line is:
 
-```bash
-$ user scan
-Scanning 3 hosts:
-Host         Latency     Storage Price    Upload Price    Download Price
-a1b2c3        100 ms      360 SC/TB/mo        10 SC/GB          30 SC/GB
-d4e5f6        200 ms      120 SC/TB/mo        15 SC/GB          20 SC/GB
-
-Successfully scanned 2 hosts (66% online)
-
-Lowest Latency: (median: 100 ms)
-a1b2c3        100 ms      360 SC/TB/mo        10 SC/GB          30 SC/GB
-d4e5f6        200 ms      120 SC/TB/mo        15 SC/GB          20 SC/GB
-
-Lowest Storage Price: (median: 120 SC/TB/mo)
-d4e5f6        200 ms      120 SC/TB/mo        15 SC/GB          20 SC/GB
-a1b2c3        100 ms      360 SC/TB/mo        10 SC/GB          30 SC/GB
-
-# ...
-# truncated
 ```
+[rank]: [host public key] [IP address] [score] [storage price] [download price] [uptime]
+```
+
+The format of host public keys is:
+
+```
+ed25519:706715a4f37fda29f8e06b867c5df3f139f6ed93c18d99a5665eb66a5fab6009
+```
+
+You can pass this full string to the `user` commands below, but it is
+generally more convenient to use the abbreviated form. In the abbreviated
+form, the `ed25519:` prefix is dropped, and only the first few characters of
+the key are retained. The key above, for example, could be shortened to
+`706715a4`. Like git hashes, you only need enough characters to ensure that
+the key is unambiguous; eight is a safe choice.
 
 
 ## Forming contracts

@@ -39,7 +39,6 @@ Actions:
 `
 	versionUsage = rootUsage
 	scanUsage    = `Usage:
-    user scan
     user scan hostkey bytes duration downloads
 
 Scans the specified host and reports various metrics.
@@ -48,9 +47,6 @@ bytes is the number of bytes intended to be stored on the host; duration is
 the number of blocks that the contract will be active; downloads is the
 expected ratio of downloads to uploads, i.e. downloads = 0.5 means the user
 expects to download half of the uploaded data.
-
-A bare 'user scan' will scan and rank all known hosts according to their
-latency and prices.
 `
 	formUsage = `Usage:
     user form hostkey funds endheight [filename]
@@ -224,7 +220,6 @@ func main() {
 
 	versionCmd := flagg.New("version", versionUsage)
 	scanCmd := flagg.New("scan", scanUsage)
-	scanN := scanCmd.Int("n", 5, "number of scan results to display")
 	formCmd := flagg.New("form", formUsage)
 	renewCmd := flagg.New("renew", renewUsage)
 	uploadCmd := flagg.New("upload", uploadUsage)
@@ -275,10 +270,6 @@ func main() {
 			version, githash, build.Release, goversion, builddate)
 
 	case scanCmd:
-		if len(args) == 0 {
-			scanAll(*scanN)
-			return
-		}
 		hostkey, bytes, duration, downloads := parseScan(args, scanCmd)
 		err := scan(hostkey, bytes, duration, downloads)
 		check("Scan failed:", err)
