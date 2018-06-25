@@ -4,7 +4,6 @@ package renter // import "lukechampine.com/us/renter"
 import (
 	"archive/tar"
 	"compress/gzip"
-	"crypto/aes"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -17,9 +16,9 @@ import (
 	"lukechampine.com/us/renter/proto"
 
 	"github.com/NebulousLabs/fastrand"
+	"github.com/aead/chacha20/chacha"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/blake2b"
-	"golang.org/x/crypto/xts"
 )
 
 const (
@@ -76,51 +75,46 @@ type EncryptionKey interface {
 	DecryptSegments(plaintext, ciphertext []byte, startIndex uint64)
 }
 
-// xtsAES implements EncryptionKey using XTS-AES.
-type xtsAES struct {
-	*xts.Cipher
+// chachaKey implements EncryptionKey using ChaCha20.
+type chachaKey struct {
+	*chacha.Cipher
 }
 
-func (c xtsAES) EncryptSegments(ciphertext, plaintext []byte, startIndex uint64) {
+func (c chachaKey) EncryptSegments(ciphertext, plaintext []byte, startIndex uint64) {
 	if len(plaintext)%proto.SegmentSize != 0 {
 		panic("plaintext must be a multiple of segment size")
 	} else if len(plaintext) != len(ciphertext) {
 		panic("plaintext and ciphertext must have same length")
 	}
-	const n = proto.SegmentSize
-	numSegments := len(plaintext) / n
-	for i := 0; i < numSegments; i++ {
-		c.Encrypt(ciphertext[i*n:][:n], plaintext[i*n:][:n], startIndex+uint64(i))
-	}
+	c.SetCounter(startIndex)
+	c.XORKeyStream(ciphertext, plaintext)
 }
-func (c xtsAES) DecryptSegments(plaintext, ciphertext []byte, startIndex uint64) {
-	if len(ciphertext)%proto.SegmentSize != 0 {
-		panic("ciphertext must be a multiple of segment size")
-	} else if len(plaintext) != len(ciphertext) {
-		panic("plaintext and ciphertext must have same length")
-	}
-	const n = proto.SegmentSize
-	numSegments := len(ciphertext) / n
-	for i := 0; i < numSegments; i++ {
-		c.Decrypt(plaintext[i*n:][:n], ciphertext[i*n:][:n], startIndex+uint64(i))
-	}
+func (c chachaKey) DecryptSegments(plaintext, ciphertext []byte, startIndex uint64) {
+	c.EncryptSegments(plaintext, ciphertext, startIndex)
 }
 
 // EncryptionKey returns the encryption key used to encrypt sectors in a given
 // shard.
 func (m *MetaIndex) EncryptionKey(shardIndex int) EncryptionKey {
+	// We derive the per-shard encryption key as H(masterKey|shardIndex).
+	// Since there's no danger of reuse, we can use an arbitrary nonce.
+	//
+	// NOTE: as far as I can tell, this isn't any more secure than using
+	// m.MasterKey directly with shardIndex as the nonce. Deriving an entirely
+	// separate key only prevents an attacker who knows one key from deriving
+	// the others. But as long as ChaCha20 remains secure, this scenario is
+	// highly unlikely; protecting the master key is all that really matters.
+	// Still, I don't see any harm in deriving a separate key, and it's what
+	// Sia has always done, so we'll follow suit.
 	b := make([]byte, len(m.MasterKey)+8)
 	copy(b, m.MasterKey[:])
 	binary.LittleEndian.PutUint64(b[len(m.MasterKey):], uint64(shardIndex))
 	key := blake2b.Sum256(b)
-	// XTS requires two keys, but its security is unchanged if we simply use
-	// the same key twice.
-	doubleKey := append(key[:], key[:]...)
-	c, err := xts.NewCipher(aes.NewCipher, doubleKey)
+	c, err := chacha.NewCipher(make([]byte, chacha.NonceSize), key[:], 20)
 	if err != nil {
 		panic(err)
 	}
-	return xtsAES{c}
+	return chachaKey{c}
 }
 
 // MaxChunkSize returns the maximum amount of file data that can fit into a
