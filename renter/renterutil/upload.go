@@ -365,7 +365,9 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 				}
 				f.Close = func() error { return nil }
 			}
-			curEntry.Close()
+			if curEntry.Close != nil {
+				curEntry.Close()
+			}
 			op.die(ErrCanceled)
 			return
 		}
