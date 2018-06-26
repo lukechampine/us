@@ -188,6 +188,14 @@ func (s *MerkleStack) Root() crypto.Hash {
 	return root
 }
 
+func proofSize(start, end int) int {
+	// NOTE: I realize this is a bit magical (in a bad way), but it's too
+	// pretty for me not to use it. If you have some spare time, try to figure
+	// out why it works!
+	zerosCount := func(x uint16) int { return bits.OnesCount16(^x) }
+	return bits.OnesCount16(uint16(start)) + zerosCount(uint16(end-1))
+}
+
 // BuildMerkleProof constructs a proof for the segment range [start, end). If
 // a non-nil precalc function is provided, it will be used to supply
 // precalculated subtree Merkle roots. For example, if the root of the left
@@ -212,10 +220,6 @@ func BuildMerkleProof(sector *[SectorSize]byte, start, end int, precalc func(i, 
 		return s.Root()
 	}
 
-	// the largest possible proof is 2*(log2(SegmentsPerSector) - 1), for the
-	// range [32767, 32769), which splits the tree down the middle.
-	proof := make([]crypto.Hash, 0, 30)
-
 	// we build the proof by recursively enumerating subtrees, left to right.
 	// If a subtree is inside the segment range, we can skip it (because the
 	// verifier has the segments); otherwise, we add its Merkle root to the
@@ -225,6 +229,7 @@ func BuildMerkleProof(sector *[SectorSize]byte, start, end int, precalc func(i, 
 	// it's a recursive function with side effects (appending to proof), but
 	// this is the simplest way I was able to implement it. Namely, it has the
 	// important advantage of being symmetrical to the Verify operation.
+	proof := make([]crypto.Hash, 0, proofSize(start, end))
 	var rec func(int, int)
 	rec = func(i, j int) {
 		if i >= start && j <= end {
@@ -261,13 +266,7 @@ func VerifyMerkleProof(proof []crypto.Hash, segments []byte, start, end int, roo
 		panic("VerifyMerkleProof: illegal proof range")
 	}
 
-	// check that the proof is the correct size
-	//
-	// NOTE: I realize this is a bit magical (in a bad way), but it's too
-	// pretty for me not to use it. If you have some spare time, try to figure
-	// out why it works!
-	proofSize := bits.OnesCount(uint(start)) + bits.OnesCount(uint(SegmentsPerSector-end))
-	if len(proof) != proofSize {
+	if len(proof) != proofSize(start, end) {
 		return false
 	}
 

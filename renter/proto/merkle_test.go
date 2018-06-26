@@ -327,6 +327,7 @@ func BenchmarkBuildMerkleProofPrecalc(b *testing.B) {
 	left[1], roots = CachedMerkleRoot(roots[:SegmentsPerSector/4]), roots[SegmentsPerSector/4:]
 	left[2], roots = CachedMerkleRoot(roots[:SegmentsPerSector/8]), roots[SegmentsPerSector/8:]
 	left[3], roots = CachedMerkleRoot(roots[:SegmentsPerSector/16]), roots[SegmentsPerSector/16:]
+	_ = roots
 	precalc := func(i, j int) crypto.Hash {
 		if (j - i) == SegmentsPerSector/2 {
 			return left[0]
