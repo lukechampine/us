@@ -4,9 +4,9 @@ import (
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter/proto"
 
-	"github.com/NebulousLabs/Sia/crypto"
 	"github.com/NebulousLabs/Sia/types"
 	"github.com/NebulousLabs/fastrand"
+	"github.com/dchest/blake2b"
 	"github.com/pkg/errors"
 )
 
@@ -71,7 +71,7 @@ func (sb *SectorBuilder) Append(data []byte, key EncryptionKey, chunkIndex int64
 	sb.slices = append(sb.slices, SectorSlice{
 		Offset:   uint32(sb.sectorLen),
 		Length:   uint32(len(data)),
-		Checksum: crypto.HashBytes(data),
+		Checksum: blake2b.Sum256(data),
 	})
 	sb.sectorLen += len(sectorSlice)
 }

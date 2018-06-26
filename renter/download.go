@@ -1,11 +1,11 @@
 package renter
 
 import (
-	"github.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter/proto"
 
 	"github.com/pkg/errors"
+	"golang.org/x/crypto/blake2b"
 )
 
 // ErrBadChecksum indicates that a piece of sector data failed checksum
@@ -52,7 +52,7 @@ func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 	// trim according to s
 	data = data[s.Offset%proto.SegmentSize:][:s.Length]
 	// validate checksum
-	if crypto.HashBytes(data) != s.Checksum {
+	if blake2b.Sum256(data) != s.Checksum {
 		return nil, ErrBadChecksum
 	}
 	return data, nil
