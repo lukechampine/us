@@ -13,49 +13,14 @@ import (
 	"lukechampine.com/us/hostdb"
 )
 
-// sectorBuffer is used to efficiently read sector data from the host.
-// Normally we would decode into a [][]byte, but this would cause the encoding
-// package to allocate a new slice each time. Furthermore, we only ever
-// request one sector, so a [][]byte is unnecessary. Implementing a custom
-// SiaUnmarshaler addresses both of these problems.
-type sectorBuffer []byte
-
-func (sb *sectorBuffer) UnmarshalSia(r io.Reader) error {
-	if cap(*sb) != SectorSize {
-		*sb = make([]byte, SectorSize)
-	}
-	buf := *sb // for convenience
-
-	// first 24 bytes are length prefixes
-	_, err := io.ReadFull(r, buf[:24])
-	if err != nil {
-		return err
-	}
-	totalSize := encoding.DecUint64(buf[0:8])
-	numSectors := encoding.DecUint64(buf[8:16])
-	payloadSize := encoding.DecUint64(buf[16:24])
-	if totalSize > SectorSize+16 {
-		return errors.New("reported payload size is larger than SectorSize")
-	} else if numSectors != 1 {
-		return errors.New("wrong number of sectors")
-	} else if payloadSize > SectorSize {
-		return errors.New("reported sector data is larger than SectorSize")
-	}
-
-	// read sector data
-	*sb = buf[:payloadSize]
-	_, err = io.ReadFull(r, *sb)
-	return err
-}
-
 // A Downloader retrieves sectors by calling the download RPC on a host. It
 // updates the corresponding contract after each iteration of the download
 // protocol.
 type Downloader struct {
 	host     hostdb.ScannedHost
 	contract ContractEditor
-	sector   sectorBuffer // reuse buffer for each download
 	conn     net.Conn
+	buf      []byte
 }
 
 // HostKey returns the public key of the host being downloaded from.
@@ -159,15 +124,39 @@ func (d *Downloader) partialSector(root crypto.Hash, offset, length uint32) ([]b
 	}
 
 	// read sector data, completing one iteration of the download loop
-	if err := d.sector.UnmarshalSia(d.conn); err != nil {
+	data, err := d.readPayload(length)
+	if err != nil {
 		d.conn.Close()
 		return nil, err
-	} else if uint32(len(d.sector)) != length {
-		d.conn.Close()
-		return nil, errors.New("host sent incomplete sector data")
+	}
+	return data, nil
+}
+
+func (d *Downloader) readPayload(length uint32) ([]byte, error) {
+	// ensure buffer has sufficient capacity
+	if cap(d.buf) < int(length) {
+		d.buf = make([]byte, length)
 	}
 
-	return d.sector, nil
+	// first 24 bytes are length prefixes
+	_, err := io.ReadFull(d.conn, d.buf[:24])
+	if err != nil {
+		return nil, err
+	}
+	totalSize := encoding.DecUint64(d.buf[0:8])
+	numSectors := encoding.DecUint64(d.buf[8:16])
+	payloadSize := encoding.DecUint64(d.buf[16:24])
+	if totalSize > SectorSize+16 {
+		return nil, errors.New("reported payload size is larger than SectorSize")
+	} else if numSectors != 1 {
+		return nil, errors.New("wrong number of sectors")
+	} else if payloadSize > SectorSize {
+		return nil, errors.New("reported sector data is larger than SectorSize")
+	}
+
+	// read sector data
+	_, err = io.ReadFull(d.conn, d.buf[:length])
+	return d.buf[:length], err
 }
 
 // NewDownloader initiates the download request loop with a host, and returns a
@@ -181,5 +170,6 @@ func NewDownloader(host hostdb.ScannedHost, contract ContractEditor) (*Downloade
 		contract: contract,
 		host:     host,
 		conn:     conn,
+		buf:      make([]byte, 24), // enough capacity to read length prefixes
 	}, nil
 }
