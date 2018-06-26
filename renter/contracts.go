@@ -182,8 +182,6 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 		return errors.Wrap(err, "could not seek to revision")
 	} else if err := writeContractRevision(c.f, c.ContractRevision); err != nil {
 		return err
-	} else if err := c.f.Sync(); err != nil {
-		return errors.Wrap(err, "could not sync contract file")
 	}
 	return nil
 }
