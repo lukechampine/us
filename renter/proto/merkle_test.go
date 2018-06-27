@@ -243,18 +243,19 @@ func TestBuildVerifyMerkleProof(t *testing.T) {
 	}
 
 	// this is the largest possible proof
-	proof = BuildMerkleProof(&sector, 32767, 32769, nil)
-	left := leafHash(sector[32767*64:][:64])
-	for i := 0; i < 15; i++ {
-		left = nodeHash(proof[15-i-1], left)
+	midl, midr := SegmentsPerSector/2-1, SegmentsPerSector/2+1
+	proof = BuildMerkleProof(&sector, midl, midr, nil)
+	left := leafHash(sector[midl*64:][:64])
+	for i := 0; i < len(proof)/2; i++ {
+		left = nodeHash(proof[len(proof)/2-i-1], left)
 	}
-	right := leafHash(sector[32768*64:][:64])
-	for i := 15; i < len(proof); i++ {
+	right := leafHash(sector[(midr-1)*64:][:64])
+	for i := len(proof) / 2; i < len(proof); i++ {
 		right = nodeHash(right, proof[i])
 	}
 	if nodeHash(left, right) != SectorMerkleRoot(&sector) {
 		t.Error("BuildMerkleProof constructed an incorrect proof for worst-case inputs")
-	} else if !VerifyMerkleProof(proof, sector[32767*64:32769*64], 32767, 32769, hash) {
+	} else if !VerifyMerkleProof(proof, sector[midl*64:midr*64], midl, midr, hash) {
 		t.Error("VerifyMerkleProof failed to verify a known correct proof")
 	}
 
