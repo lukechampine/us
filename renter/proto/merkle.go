@@ -2,6 +2,7 @@ package proto
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"math/bits"
 	"sync"
@@ -115,6 +116,38 @@ type MerkleStack struct {
 	stack [64]crypto.Hash
 	used  uint64   // one bit per stack elem; also number of nodes
 	buf   [65]byte // for hashing leaves and nodes
+}
+
+// MarshalSia implements the encoding.SiaMarshaler interface.
+func (s *MerkleStack) MarshalSia(w io.Writer) error {
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, s.used)
+	_, err := w.Write(buf)
+	if err != nil {
+		return err
+	}
+	for _, h := range s.stack[:bits.Len64(s.used)] {
+		if _, err := w.Write(h[:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UnmarshalSia implements the encoding.SiaUnmarshaler interface.
+func (s *MerkleStack) UnmarshalSia(r io.Reader) error {
+	buf := make([]byte, 8)
+	_, err := io.ReadFull(r, buf)
+	if err != nil {
+		return err
+	}
+	s.used = binary.LittleEndian.Uint64(buf)
+	for i := range s.stack[:bits.Len64(s.used)] {
+		if _, err := io.ReadFull(r, s.stack[i][:]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *MerkleStack) leafHash(segment []byte) crypto.Hash {
