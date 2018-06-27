@@ -3,12 +3,13 @@ package renter
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
+	"encoding/binary"
 	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/NebulousLabs/Sia/crypto"
+	"github.com/NebulousLabs/Sia/encoding"
 	"github.com/NebulousLabs/Sia/types"
 	"github.com/pkg/errors"
 
@@ -21,18 +22,16 @@ const (
 	ContractMagic = "us-contract"
 
 	// ContractHeaderSize is the size in bytes of the contract file header.
+	// It is also the offset at which the contract revision data begins.
 	ContractHeaderSize = 11 + 1 + 32 + 64
 
-	// ContractRootOffset is the offset at which the binary-encoded sector Merkle
-	// roots of the contract are stored. An offset of 4096 bytes was chosen
-	// because it should hold any reasonably-sized transaction and is also the
-	// size of a block on most filesystems (and, increasingly, on the underlying
-	// hardware).
+	// ContractRootOffset is the offset at which the sector Merkle
+	// roots of the contract are stored.
 	ContractRootOffset = 4096
 
-	// ContractArenaSize is the size in bytes of the contract file "arena," which
-	// contains the JSON-encoded contract transaction.
-	ContractArenaSize = ContractRootOffset - ContractHeaderSize
+	// ContractStackOffset is the offset at which the Merkle "stack" of the
+	// sector Merkle roots is stored.
+	ContractStackOffset = ContractRootOffset - (2048 + 8)
 
 	// ContractVersion is the current version of the contract file format. It is
 	// incremented after each change to the format.
@@ -71,9 +70,8 @@ type Contract struct {
 
 // Close closes the contract file.
 func (c *Contract) Close() error {
-	if err := c.f.Sync(); err != nil {
-		return err
-	}
+	// can ignore error here; nothing we can do about it, and it's not fatal
+	_, _ = c.f.WriteAt(marshalStack(&c.sectorRoots), ContractStackOffset)
 	return c.f.Close()
 }
 
@@ -178,62 +176,64 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 	// hurt us.
 	c.ContractRevision.Revision = hostRevision
 	c.ContractRevision.Signatures = hostSignatures
-	if _, err := c.f.Seek(ContractHeaderSize, io.SeekStart); err != nil {
-		return errors.Wrap(err, "could not seek to revision")
-	} else if err := writeContractRevision(c.f, c.ContractRevision); err != nil {
-		return err
+	if _, err := c.f.WriteAt(marshalRevision(c.ContractRevision), ContractHeaderSize); err != nil {
+		return errors.Wrap(err, "could not write contract revision")
 	}
 	return nil
 }
 
-func writeContractHeader(w io.Writer, contract proto.ContractRevision) error {
-	header := make([]byte, ContractHeaderSize)
-	n := copy(header, ContractMagic)
-	header[n] = ContractVersion
-	n++
-	id := contract.ID()
-	n += copy(header[n:], id[:])
-	copy(header[n:], contract.RenterKey[:])
-	_, err := w.Write(header)
-	return err
+func marshalHeader(contract proto.ContractRevision) []byte {
+	buf := bytes.NewBuffer(make([]byte, 0, ContractHeaderSize))
+	buf.WriteString(ContractMagic)
+	buf.WriteByte(ContractVersion)
+	buf.Write(contract.Revision.ParentID[:])
+	buf.Write(contract.RenterKey[:])
+	return buf.Bytes()
 }
 
-func readContractHeader(r io.Reader) (ContractHeader, error) {
-	b := make([]byte, ContractHeaderSize)
-	if _, err := io.ReadFull(r, b); err != nil {
-		return ContractHeader{}, errors.Wrap(err, "could not read contract header")
-	}
+func unmarshalHeader(b []byte) (h ContractHeader) {
 	buf := bytes.NewBuffer(b)
-
-	var header ContractHeader
-	header.magic = string(buf.Next(len(ContractMagic)))
-	header.version, _ = buf.ReadByte()
-	copy(header.id[:], buf.Next(32))
-	copy(header.key[:], buf.Next(64))
-	return header, nil
+	h.magic = string(buf.Next(len(ContractMagic)))
+	h.version, _ = buf.ReadByte()
+	copy(h.id[:], buf.Next(32))
+	copy(h.key[:], buf.Next(64))
+	return h
 }
 
-func writeContractRevision(w io.Writer, rev proto.ContractRevision) error {
-	arena := make([]byte, ContractArenaSize)
-	err := json.NewEncoder(bytes.NewBuffer(arena[:0])).Encode(rev)
-	if err != nil {
-		return errors.Wrap(err, "could not encode contract revision")
+func marshalRevision(rev proto.ContractRevision) []byte {
+	var buf bytes.Buffer
+	buf.Grow(2048)
+	rev.Revision.MarshalSia(&buf)
+	encoding.WriteUint64(&buf, uint64(len(rev.Signatures)))
+	for _, sig := range rev.Signatures {
+		sig.MarshalSia(&buf)
 	}
-	_, err = w.Write(arena)
-	return err
+	return buf.Bytes()
 }
 
-func readContractRevision(r io.Reader) (proto.ContractRevision, error) {
-	arena := make([]byte, ContractArenaSize)
-	if _, err := io.ReadFull(r, arena); err != nil {
-		return proto.ContractRevision{}, errors.Wrap(err, "could not read contract revision")
+func unmarshalRevision(b []byte, rev *proto.ContractRevision) error {
+	buf := bytes.NewBuffer(b)
+	if err := rev.Revision.UnmarshalSia(buf); err != nil {
+		return err
 	}
-	var rev proto.ContractRevision
-	err := json.NewDecoder(bytes.NewReader(arena)).Decode(&rev)
-	if err != nil {
-		return proto.ContractRevision{}, errors.Wrap(err, "could not decode contract revision")
+	n := binary.LittleEndian.Uint64(buf.Next(8))
+	rev.Signatures = make([]types.TransactionSignature, n)
+	for i := range rev.Signatures {
+		if err := rev.Signatures[i].UnmarshalSia(buf); err != nil {
+			return err
+		}
 	}
-	return rev, nil
+	return nil
+}
+
+func marshalStack(stack *proto.MerkleStack) []byte {
+	var buf bytes.Buffer
+	stack.MarshalSia(&buf)
+	return buf.Bytes()
+}
+
+func unmarshalStack(b []byte, stack *proto.MerkleStack) error {
+	return stack.UnmarshalSia(bytes.NewReader(b))
 }
 
 // SaveContract creates a new contract file using the provided contract. The
@@ -244,10 +244,11 @@ func SaveContract(contract proto.ContractRevision, filename string) error {
 		return errors.Wrap(err, "could not create contract file")
 	}
 	defer f.Close()
-	if err := writeContractHeader(f, contract); err != nil {
-		return errors.Wrap(err, "could not write contract header")
-	} else if err := writeContractRevision(f, contract); err != nil {
-		return errors.Wrap(err, "could not write contract revision")
+	buf := make([]byte, ContractRootOffset)
+	copy(buf, marshalHeader(contract))
+	copy(buf[ContractHeaderSize:], marshalRevision(contract))
+	if _, err := f.Write(buf); err != nil {
+		return errors.Wrap(err, "could not write contract header and revision")
 	} else if err := f.Sync(); err != nil {
 		return errors.Wrap(err, "could not sync contract file")
 	}
@@ -263,14 +264,17 @@ func SaveRenewedContract(oldContract *Contract, newContract proto.ContractRevisi
 	}
 	defer f.Close()
 
-	// write header+transaction
-	if err := writeContractHeader(f, newContract); err != nil {
+	// write header+revision+stack
+	if _, err := f.Write(marshalHeader(newContract)); err != nil {
 		return errors.Wrap(err, "could not write contract header")
-	} else if err := writeContractRevision(f, newContract); err != nil {
-		return errors.Wrap(err, "could not write contract transaction")
+	} else if _, err := f.WriteAt(marshalRevision(newContract), ContractHeaderSize); err != nil {
+		return errors.Wrap(err, "could not write contract revision")
+	} else if _, err := f.WriteAt(marshalStack(&oldContract.sectorRoots), ContractStackOffset); err != nil {
+		return errors.Wrap(err, "could not write contract Merkle root stack")
 	}
 
 	// copy sector roots
+	f.Seek(ContractRootOffset, io.SeekStart)
 	oldContract.f.Seek(ContractRootOffset, io.SeekStart)
 	if _, err := io.Copy(f, oldContract.f); err != nil {
 		return errors.Wrap(err, "could not copy sector roots")
@@ -303,33 +307,41 @@ func LoadContract(filename string) (*Contract, error) {
 		}
 	}
 
-	// read header
-	header, err := readContractHeader(f)
-	if err != nil {
-		return nil, err
-	} else if err := header.Validate(); err != nil {
+	// read header+revision+stack
+	b := make([]byte, ContractRootOffset)
+	if _, err := io.ReadFull(f, b); err != nil {
+		return nil, errors.Wrap(err, "could not read contract metadata")
+	}
+	// decode header
+	header := unmarshalHeader(b[:ContractHeaderSize])
+	if err := header.Validate(); err != nil {
 		return nil, errors.Wrap(err, "contract is invalid")
 	}
-	// read transaction
-	// TODO: try to recover if txn is invalid?
-	rev, err := readContractRevision(f)
+
+	// decode revision
+	// TODO: try to recover if revision is invalid?
+	var rev proto.ContractRevision
+	err = unmarshalRevision(b[ContractHeaderSize:], &rev)
 	if err != nil {
 		return nil, err
 	} else if !rev.IsValid() {
 		return nil, errors.New("contract revision is invalid")
 	} else if rev.ID() != header.id {
 		return nil, errors.New("contract revision has wrong ID")
-	} else if rev.RenterKey != header.key {
-		return nil, errors.New("contract revision has wrong secret key")
 	}
-
-	// read sector roots
+	rev.RenterKey = header.key
+	// decode stack
 	var stack proto.MerkleStack
-	if _, err := f.Seek(ContractRootOffset, io.SeekStart); err != nil {
-		return nil, errors.Wrap(err, "could not seek to contract sector roots")
-	}
-	if _, err := stack.ReadFrom(f); err != nil {
-		return nil, errors.Wrap(err, "could not read sector roots")
+	err = unmarshalStack(b[ContractStackOffset:], &stack)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not read Merkle stack")
+	} else if stack.Root() != rev.Revision.NewFileMerkleRoot {
+		// the stack is corrupted or outdated. Rebuild it from scratch using
+		// the full set of roots.
+		stack.Reset()
+		if _, err := stack.ReadFrom(bufio.NewReader(f)); err != nil {
+			return nil, errors.Wrap(err, "could not read sector roots")
+		}
 	}
 
 	return &Contract{
@@ -349,15 +361,13 @@ func ReadContractRevision(filename string) (proto.ContractRevision, error) {
 		return proto.ContractRevision{}, errors.Wrap(err, "could not open contract file")
 	}
 	defer f.Close()
-	_, err = readContractHeader(f)
-	if err != nil {
-		return proto.ContractRevision{}, errors.Wrap(err, "could not read header")
+	b := make([]byte, ContractStackOffset)
+	if _, err := f.ReadAt(b, ContractHeaderSize); err != nil {
+		return proto.ContractRevision{}, errors.Wrap(err, "could not read revision")
 	}
-	rev, err := readContractRevision(f)
-	if err != nil {
-		return proto.ContractRevision{}, errors.Wrap(err, "could not read transaction")
-	}
-	return rev, nil
+	var rev proto.ContractRevision
+	err = unmarshalRevision(b, &rev)
+	return rev, err
 }
 
 // A ContractSet is a map of Contracts keyed by their host public key.

@@ -6,34 +6,47 @@ metadata, and one for storing file metadata.
 ### contract
 
 A contract defines a file contract formed with a host. It contains the
-contract's ID, the contract transaction, the secret key used to revise the
-transaction, and the Merkle roots of each 4MB sector stored under the
-contract, i.e. the set of hashes whose Merkle hash is the contract's
-`FileMerkleRoot`.
+contract's ID, the secret key used to revise the contract, the latest revision
+(along with signatures), and the Merkle roots of each 4MB sector stored under
+the contract, i.e. the set of hashes whose Merkle hash is the contract's
+`FileMerkleRoot`. All of the fields are encoded in binary.
 
 To ensure high throughput, the format enables efficient updates to both the
-contract transaction and the sector Merkle roots. Since the size of the
-transaction may change (e.g. when the `NewFileSize` field increases), the
-format stores the transaction in a fixed-size "arena", padded with zeros. Thus
-the sector Merkle roots always begin at a fixed offset, making it trivial to
-retrieve or modify a given root. (Note that the sector Merkle roots will be
-constitute the bulk of the file; a 1 TB contract requires 8 MB of Merkle
-roots.)
+contract revision and the sector Merkle roots. Since the size of the revision
+may change (e.g. when the `NewFileSize` field increases), the format stores the
+revision in a fixed-size buffer, padded with zeros. Thus the sector Merkle
+roots always begin at a fixed offset, making it trivial to retrieve or modify a
+given root. (Note that the sector Merkle roots will be constitute the bulk of
+the file; a 1 TB contract requires 8 MB of Merkle roots.)
+
+The format also contains a "compressed" set of the sector Merkle roots, known
+as the Merkle *stack*. This size of this set is logarathmic with respect to the
+full set, yet it can still recalculate the contract Merkle root when a new
+sector is uploaded. Thus, the stack serves to greatly reduce the I/O required
+when loading a contract file: only a single 4 KiB read is necessary, regardless
+of how much data the contract is storing. The full set of roots is retained for
+two reasons: it serves as a backup in case the stack is somehow corrupted, and
+it may prove useful for future Merkle tree operations for which the stack alone
+is insufficient.
 
 ```go
 type Contract struct {
-	// binary
 	Magic   [11]byte // the string 'us-contract'
 	Version byte     // version of the contract format, currently 1
 	ID      [32]byte // the ID of the contract
 	Key     [64]byte // the secret ed25519 key used to sign revisions
 
-	// JSON
-	Transaction types.Transaction // contract transaction (see Sia/types)
+	// latest contract revision, with signatures (see Sia/types)
+	Revision   types.FileContractRevision
+	Signatures []types.TransactionSignature
 
-	// padding until byte 4096...
+	// padding until byte 2040...
 
-	// binary
+	// the "compressed" set of sector Merkle roots
+	NumRoots    uint64
+	MerkleStack [64][32]byte
+
+	// the full set of sector Merkle roots
 	SectorRoots [][32]byte
 }
 ```
