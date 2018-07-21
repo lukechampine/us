@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/NebulousLabs/Sia/types"
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/types"
 
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
@@ -57,7 +57,7 @@ func form(hostKeyPrefix string, funds types.Currency, endHeight types.BlockHeigh
 
 	contract, err := proto.FormContract(c, c, host, funds, c.ChainHeight(), endHeight)
 	if err != nil {
-		return errors.Wrap(err, "could not form contract")
+		return err
 	}
 
 	if filename == "" {

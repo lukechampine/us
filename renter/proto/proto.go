@@ -2,9 +2,9 @@
 package proto // import "lukechampine.com/us/renter/proto"
 
 import (
-	"github.com/NebulousLabs/Sia/crypto"
-	"github.com/NebulousLabs/Sia/modules"
-	"github.com/NebulousLabs/Sia/types"
+	"gitlab.com/NebulousLabs/Sia/crypto"
+	"gitlab.com/NebulousLabs/Sia/modules"
+	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 
 	"github.com/pkg/errors"
@@ -18,8 +18,9 @@ type (
 	// A Wallet provides addresses and outputs, and can sign transactions.
 	Wallet interface {
 		NewWalletAddress() (types.UnlockHash, error)
-		SignTransaction(txn *types.Transaction, toSign map[types.OutputID]types.UnlockHash) error
-		SpendableOutputs() []modules.SpendableOutput
+		SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error
+		UnspentOutputs() []modules.UnspentOutput
+		UnlockConditions(addr types.UnlockHash) (types.UnlockConditions, error)
 	}
 	// A TransactionPool can broadcast transactions and estimate transaction
 	// fees.
@@ -111,12 +112,11 @@ func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool)
 	txn.MinerFees = append(txn.MinerFees, fee)
 
 	// pay for the fee by adding outputs and signing them
-	outputs := w.SpendableOutputs()
 	changeAddr, err := w.NewWalletAddress()
 	if err != nil {
 		return errors.Wrap(err, "could not get a change address to use")
 	}
-	toSign, ok := fundSiacoins(&txn, outputs, fee, changeAddr)
+	toSign, ok := fundSiacoins(&txn, fee, changeAddr, w)
 	if !ok {
 		return errors.New("not enough coins to fund transaction fee")
 	}

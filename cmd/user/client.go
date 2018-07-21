@@ -6,9 +6,10 @@ import (
 
 	"lukechampine.com/us/hostdb"
 
-	"github.com/NebulousLabs/Sia/modules"
-	"github.com/NebulousLabs/Sia/node/api/client"
-	"github.com/NebulousLabs/Sia/types"
+	"gitlab.com/NebulousLabs/Sia/crypto"
+	"gitlab.com/NebulousLabs/Sia/modules"
+	"gitlab.com/NebulousLabs/Sia/node/api/client"
+	"gitlab.com/NebulousLabs/Sia/types"
 )
 
 type siadClient struct {
@@ -32,8 +33,8 @@ func (c *siadClient) Synced() bool {
 // Transaction Pool
 
 func (c *siadClient) AcceptTransactionSet(txnSet []types.Transaction) error {
-	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
-	return c.siad.TransactionpoolRawPost(parents, txn)
+	txn, parents := txnSet[len(txnSet)-1], txnSet[:len(txnSet)-1]
+	return c.siad.TransactionPoolRawPost(txn, parents)
 }
 
 func (c *siadClient) FeeEstimate() (minFee, maxFee types.Currency) {
@@ -49,7 +50,7 @@ func (c *siadClient) NewWalletAddress() (types.UnlockHash, error) {
 	return wag.Address, err
 }
 
-func (c *siadClient) SignTransaction(txn *types.Transaction, toSign map[types.OutputID]types.UnlockHash) error {
+func (c *siadClient) SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error {
 	wspr, err := c.siad.WalletSignPost(*txn, toSign)
 	if err == nil {
 		*txn = wspr.Transaction
@@ -57,10 +58,15 @@ func (c *siadClient) SignTransaction(txn *types.Transaction, toSign map[types.Ou
 	return err
 }
 
-func (c *siadClient) SpendableOutputs() []modules.SpendableOutput {
+func (c *siadClient) UnspentOutputs() []modules.UnspentOutput {
 	wug, err := c.siad.WalletUnspentGet()
 	check("Could not get spendable outputs:", err)
 	return wug.Outputs
+}
+
+func (c *siadClient) UnlockConditions(addr types.UnlockHash) (types.UnlockConditions, error) {
+	wucg, err := c.siad.WalletUnlockConditionsGet(addr)
+	return wucg.UnlockConditions, err
 }
 
 // HostDB

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NebulousLabs/fastrand"
 	"github.com/aead/chacha20"
 	"github.com/aead/chacha20/chacha"
+	"gitlab.com/NebulousLabs/fastrand"
 	"golang.org/x/crypto/xts"
 
 	"lukechampine.com/us/renter/proto"

@@ -1,10 +1,10 @@
 package proto
 
 import (
-	"github.com/NebulousLabs/Sia/encoding"
-	"github.com/NebulousLabs/Sia/modules"
-	"github.com/NebulousLabs/Sia/types"
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/encoding"
+	"gitlab.com/NebulousLabs/Sia/modules"
+	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 )
 
@@ -90,7 +90,7 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 		FileContracts: []types.FileContract{fc},
 		MinerFees:     []types.Currency{fee},
 	}
-	toSign, ok := fundSiacoins(&txn, w.SpendableOutputs(), totalCost, changeAddr)
+	toSign, ok := fundSiacoins(&txn, totalCost, changeAddr, w)
 	if !ok {
 		return ContractRevision{}, errors.New("not enough coins to fund contract transaction")
 	}
@@ -159,8 +159,11 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 	// calculate signatures added
 	var addedSignatures []types.TransactionSignature
 	for _, sig := range txn.TransactionSignatures {
-		if _, ok := toSign[types.OutputID(sig.ParentID)]; ok {
-			addedSignatures = append(addedSignatures, sig)
+		for _, id := range toSign {
+			if id == sig.ParentID {
+				addedSignatures = append(addedSignatures, sig)
+				break
+			}
 		}
 	}
 

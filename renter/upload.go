@@ -4,10 +4,10 @@ import (
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter/proto"
 
-	"github.com/NebulousLabs/Sia/types"
-	"github.com/NebulousLabs/fastrand"
 	"github.com/dchest/blake2b"
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/types"
+	"gitlab.com/NebulousLabs/fastrand"
 )
 
 // A SectorBuilder facilitates the construction of sectors for later upload.

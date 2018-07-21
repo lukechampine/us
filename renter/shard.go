@@ -5,8 +5,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/NebulousLabs/Sia/crypto"
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/crypto"
 )
 
 // A SectorSlice is the unit element of a shard file. Each SectorSlice uniquely

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/NebulousLabs/fastrand"
+	"gitlab.com/NebulousLabs/fastrand"
 
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"

@@ -9,8 +9,8 @@ import (
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 
-	"github.com/NebulousLabs/Sia/crypto"
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/crypto"
 )
 
 // Download downloads m to f, updating the specified contracts. Download may

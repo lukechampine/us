@@ -6,7 +6,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/NebulousLabs/Sia/build"
+	"gitlab.com/NebulousLabs/Sia/build"
 	"lukechampine.com/us/renter"
 
 	"github.com/pkg/errors"

@@ -10,8 +10,8 @@ import (
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 
-	"github.com/NebulousLabs/Sia/types"
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/types"
 )
 
 // Upload uploads the contents of f, updating the specified contracts and

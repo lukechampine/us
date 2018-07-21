@@ -11,8 +11,8 @@ import (
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 
-	"github.com/NebulousLabs/Sia/types"
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/types"
 )
 
 // A MigrateSkipUpdate indicates that a host will not be migrated to.

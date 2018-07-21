@@ -7,7 +7,7 @@ import (
 	"math/bits"
 	"sync"
 
-	"github.com/NebulousLabs/Sia/crypto"
+	"gitlab.com/NebulousLabs/Sia/crypto"
 	"golang.org/x/crypto/blake2b"
 )
 

@@ -5,11 +5,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/NebulousLabs/Sia/crypto"
-	"github.com/NebulousLabs/Sia/encoding"
-	"github.com/NebulousLabs/Sia/modules"
-	"github.com/NebulousLabs/Sia/types"
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/crypto"
+	"gitlab.com/NebulousLabs/Sia/encoding"
+	"gitlab.com/NebulousLabs/Sia/modules"
+	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 )
 
@@ -121,7 +121,7 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 		FileContracts: []types.FileContract{fc},
 		MinerFees:     []types.Currency{fee},
 	}
-	toSign, ok := fundSiacoins(&txn, w.SpendableOutputs(), totalCost, changeAddr)
+	toSign, ok := fundSiacoins(&txn, totalCost, changeAddr, w)
 	if !ok {
 		return ContractRevision{}, errors.New("not enough coins to fund contract transaction")
 	}
@@ -158,7 +158,7 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 	if err = encoding.WriteObject(conn, []types.Transaction{txn}); err != nil {
 		return ContractRevision{}, errors.Wrap(err, "could not send the contract signed by us")
 	}
-	if err = encoding.WriteObject(conn, ourSK.PublicKey()); err != nil {
+	if err = encoding.WriteObject(conn, ourPK); err != nil {
 		return ContractRevision{}, errors.Wrap(err, "could not send our public key")
 	}
 
@@ -186,18 +186,24 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 	txn.SiacoinOutputs = append(txn.SiacoinOutputs, hostOutputs...)
 
 	// sign the txn
+	// NOTE: it is not necessary to explicitly check that the host supplied
+	// collateral before signing; underpayment will result in an invalid
+	// transaction.
 	err = w.SignTransaction(&txn, toSign)
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
-		modules.WriteNegotiationRejection(conn, err)
+		modules.WriteNegotiationRejection(conn, errors.New("internal error")) // don't want to reveal too much
 		return ContractRevision{}, err
 	}
 
 	// calculate signatures added
 	var addedSignatures []types.TransactionSignature
 	for _, sig := range txn.TransactionSignatures {
-		if _, ok := toSign[types.OutputID(sig.ParentID)]; ok {
-			addedSignatures = append(addedSignatures, sig)
+		for _, id := range toSign {
+			if id == sig.ParentID {
+				addedSignatures = append(addedSignatures, sig)
+				break
+			}
 		}
 	}
 
@@ -257,14 +263,15 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 	}, nil
 }
 
-func fundSiacoins(txn *types.Transaction, outputs []modules.SpendableOutput, amount types.Currency, changeAddr types.UnlockHash) (map[types.OutputID]types.UnlockHash, bool) {
+func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr types.UnlockHash, w Wallet) ([]crypto.Hash, bool) {
+	outputs := w.UnspentOutputs()
 	// sort outputs by value, high to low
 	sort.Slice(outputs, func(i, j int) bool {
 		return outputs[i].Value.Cmp(outputs[j].Value) > 0
 	})
 
 	// keep adding outputs until we have enough
-	var fundingOutputs []modules.SpendableOutput
+	var fundingOutputs []modules.UnspentOutput
 	var outputSum types.Currency
 	for i, o := range outputs {
 		if o.FundType != types.SpecifierSiacoinOutput {
@@ -279,13 +286,21 @@ func fundSiacoins(txn *types.Transaction, outputs []modules.SpendableOutput, amo
 		return nil, false
 	}
 
-	toSign := make(map[types.OutputID]types.UnlockHash)
+	var toSign []crypto.Hash
 	for _, o := range fundingOutputs {
+		uc, err := w.UnlockConditions(o.UnlockHash)
+		if err != nil {
+			return nil, false
+		}
 		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
 			ParentID:         types.SiacoinOutputID(o.ID),
-			UnlockConditions: o.UnlockConditions,
+			UnlockConditions: uc,
 		})
-		toSign[o.ID] = o.UnlockHash
+		txn.TransactionSignatures = append(txn.TransactionSignatures, types.TransactionSignature{
+			ParentID:       crypto.Hash(o.ID),
+			PublicKeyIndex: 0,
+		})
+		toSign = append(toSign, crypto.Hash(o.ID))
 	}
 	// add change output if needed
 	if change := outputSum.Sub(amount); !change.IsZero() {

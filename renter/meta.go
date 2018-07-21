@@ -15,9 +15,9 @@ import (
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter/proto"
 
-	"github.com/NebulousLabs/fastrand"
 	"github.com/aead/chacha20/chacha"
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/fastrand"
 	"golang.org/x/crypto/blake2b"
 )
 

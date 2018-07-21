@@ -6,9 +6,9 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/NebulousLabs/Sia/crypto"
-	"github.com/NebulousLabs/fastrand"
 	"github.com/dchest/blake2b"
+	"gitlab.com/NebulousLabs/Sia/crypto"
+	"gitlab.com/NebulousLabs/fastrand"
 )
 
 func leafHash(seg []byte) crypto.Hash {

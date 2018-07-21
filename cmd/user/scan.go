@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NebulousLabs/Sia/types"
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 )
 
