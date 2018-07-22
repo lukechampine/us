@@ -6,9 +6,9 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/dchest/blake2b"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/fastrand"
+	"golang.org/x/crypto/blake2b"
 )
 
 func leafHash(seg []byte) crypto.Hash {

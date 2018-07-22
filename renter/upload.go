@@ -1,10 +1,10 @@
 package renter
 
 import (
+	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter/proto"
 
-	"github.com/dchest/blake2b"
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"

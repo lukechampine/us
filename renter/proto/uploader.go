@@ -78,6 +78,17 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 		return crypto.Hash{}, errors.New("contract has insufficient collateral to support upload")
 	}
 
+	// send sector data to host while concurrently calculating its Merkle root
+	// and writing it to disk
+	errChan := make(chan error)
+	var sectorRoot, merkleRoot crypto.Hash
+	go func() {
+		sectorRoot = SectorMerkleRoot(data)
+		var err error
+		merkleRoot, err = u.contract.AppendRoot(sectorRoot)
+		errChan <- err
+	}()
+
 	// send actions
 	actions := actionSet{{
 		Type:        modules.ActionInsert,
@@ -89,11 +100,7 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 	} else if err := actions.MarshalSia(u.conn); err != nil {
 		return crypto.Hash{}, errors.Wrap(err, "could not send revision action")
 	}
-
-	// calculate the new Merkle root and revision
-	sectorRoot := SectorMerkleRoot(data)
-	merkleRoot, err := u.contract.AppendRoot(sectorRoot)
-	if err != nil {
+	if err := <-errChan; err != nil {
 		return crypto.Hash{}, errors.Wrap(err, "could not calculate new Merkle root")
 	}
 	rev := newUploadRevision(contract.Revision, merkleRoot, sectorPrice, sectorCollateral)
