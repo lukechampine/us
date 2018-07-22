@@ -47,11 +47,9 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 		baseCollateral = host.Collateral.Mul64(currentRevision.NewFileSize).Mul64(timeExtension) // same but collateral
 	}
 
-	// calculate payouts (see formContract)
+	// calculate payouts
 	hostPayout := host.ContractPrice.Add(hostCollateral).Add(basePrice)
-	outputSum := hostPayout.Add(renterPayout)
-	payout := outputSum.Mul64(1000).Div64(960)
-	hostPayout = types.PostTax(startHeight, payout).Sub(renterPayout)
+	payout := calculatePayout(renterPayout, hostPayout, startHeight)
 
 	// create file contract
 	fc := types.FileContract{

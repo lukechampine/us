@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"math/big"
 	"net"
 	"sort"
 	"time"
@@ -60,29 +61,8 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 	}
 
 	// calculate payouts
-	//
-	// NOTE: due to a bug in the transaction validation code, tax is
-	// calculated on the post-tax contract payout (instead of the sum of the
-	// renter and host payouts). So the equation for the payout is:
-	//
-	//   payout - tax*payout = hostPayout + renterPayout
-	//             ∴  payout = (hostPayout + renterPayout) / 1-tax
-	//
-	// However, even this is not sufficient, because 'tax' is not a simple
-	// fraction, but a function that rounds down to the nearest multiple of
-	// the siafund count. Therefore, we are forced to first estimate the
-	// payout, then subtract the tax from it, and finally adjust the host and
-	// renter payouts to sum to that number. Fortunately, we have some room to
-	// tweak the host payout because collateral values are not expected to be
-	// exact. But because we may already be using the maximum accepted
-	// collateral, we cannot add to the hostPayout. Instead, we intentionally
-	// underestimate the total payout.
 	hostPayout := host.ContractPrice.Add(hostCollateral)
-	outputSum := hostPayout.Add(renterPayout)
-	payout := outputSum.Mul64(1000).Div64(960) // should be 961
-
-	// adjust the hostPayout
-	hostPayout = types.PostTax(startHeight, payout).Sub(renterPayout)
+	payout := calculatePayout(renterPayout, hostPayout, startHeight)
 
 	// create file contract
 	fc := types.FileContract{
@@ -310,4 +290,37 @@ func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr type
 		})
 	}
 	return toSign, true
+}
+
+// NOTE: due to a bug in the transaction validation code, calculating payouts
+// is way harder than it needs to be. Tax is calculated on the post-tax
+// contract payout (instead of the sum of the renter and host payouts). So the
+// equation for the payout is:
+//
+//      payout = renterPayout + hostPayout + payout*tax
+//   ∴  payout = (renterPayout + hostPayout) / (1 - tax)
+//
+// This would work if 'tax' were a simple fraction, but because the tax must
+// be evenly distributed among siafund holders, 'tax' is actually a function
+// that multiplies by a fraction and then rounds down to the nearest multiple
+// of the siafund count. Thus, the only way to derive payout is an iterated
+// guess-and-check approach.
+//
+// TODO: I'm fairly sure that it is always possible to calculate a "perfect"
+// payout (one where PostTax(payout) == renterPayout + hostPayout), but it
+// would be nice to prove it rigorously.
+func calculatePayout(renterPayout, hostPayout types.Currency, startHeight types.BlockHeight) types.Currency {
+	target := renterPayout.Add(hostPayout)
+	guess := target.MulRat(new(big.Rat).Inv(new(big.Rat).Sub(big.NewRat(1, 1), types.SiafundPortion)))
+	// NOTE: initial guess always overshoots, and the overshoot is capped to
+	// types.SiafundPortion. Since this function isn't on a hot path, we can
+	// get away with just decrementing the guess by 1 in a loop.
+	one := types.NewCurrency64(1)
+	for types.PostTax(startHeight, guess).Cmp(target) > 0 {
+		guess = guess.Sub(one)
+	}
+	if !types.PostTax(startHeight, guess).Equals(target) {
+		panic("calculatePayout: failed to find perfect payout!")
+	}
+	return guess
 }
