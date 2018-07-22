@@ -130,7 +130,7 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 	}
 
 	// if the Merkle root is wrong, try to fix it.
-	if hostRevision.NewFileMerkleRoot != renterRevision.NewFileMerkleRoot || hostRevision.NewFileMerkleRoot != c.diskRoot {
+	if hostRevision.NewFileMerkleRoot != c.diskRoot {
 		// revert up to five roots
 		orig := c.sectorRoots.NumNodes()
 		c.sectorRoots.Reset()
