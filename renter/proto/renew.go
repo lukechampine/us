@@ -49,7 +49,7 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 
 	// calculate payouts
 	hostPayout := host.ContractPrice.Add(hostCollateral).Add(basePrice)
-	payout := calculatePayout(renterPayout, hostPayout, startHeight)
+	payout := taxAdjustedPayout(renterPayout.Add(hostPayout), startHeight)
 
 	// create file contract
 	fc := types.FileContract{
@@ -81,7 +81,7 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 	// tax, and a transaction fee.
 	_, maxFee := tpool.FeeEstimate()
 	fee := maxFee.Mul64(estTxnSize)
-	totalCost := payout.Sub(hostPayout.Sub(host.ContractPrice).Sub(basePrice)).Add(fee)
+	totalCost := renterPayout.Add(host.ContractPrice).Add(types.Tax(startHeight, fc.Payout)).Add(fee)
 
 	// create and fund a transaction containing fc
 	txn := types.Transaction{

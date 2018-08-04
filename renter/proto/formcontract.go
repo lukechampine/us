@@ -62,7 +62,7 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 
 	// calculate payouts
 	hostPayout := host.ContractPrice.Add(hostCollateral)
-	payout := calculatePayout(renterPayout, hostPayout, startHeight)
+	payout := taxAdjustedPayout(renterPayout.Add(hostPayout), startHeight)
 
 	// create file contract
 	fc := types.FileContract{
@@ -94,7 +94,7 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 	// tax, and a transaction fee.
 	_, maxFee := tpool.FeeEstimate()
 	fee := maxFee.Mul64(estTxnSize)
-	totalCost := renterPayout.Add(host.ContractPrice).Add(types.Tax(startHeight, payout)).Add(fee)
+	totalCost := renterPayout.Add(host.ContractPrice).Add(types.Tax(startHeight, fc.Payout)).Add(fee)
 
 	// create and fund a transaction containing fc
 	txn := types.Transaction{
@@ -303,24 +303,39 @@ func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr type
 // This would work if 'tax' were a simple fraction, but because the tax must
 // be evenly distributed among siafund holders, 'tax' is actually a function
 // that multiplies by a fraction and then rounds down to the nearest multiple
-// of the siafund count. Thus, the only way to derive payout is an iterated
-// guess-and-check approach.
-//
-// TODO: I'm fairly sure that it is always possible to calculate a "perfect"
-// payout (one where PostTax(payout) == renterPayout + hostPayout), but it
-// would be nice to prove it rigorously.
-func calculatePayout(renterPayout, hostPayout types.Currency, startHeight types.BlockHeight) types.Currency {
-	target := renterPayout.Add(hostPayout)
-	guess := target.MulRat(new(big.Rat).Inv(new(big.Rat).Sub(big.NewRat(1, 1), types.SiafundPortion)))
-	// NOTE: initial guess always overshoots, and the overshoot is capped to
-	// types.SiafundPortion. Since this function isn't on a hot path, we can
-	// get away with just decrementing the guess by 1 in a loop.
-	one := types.NewCurrency64(1)
-	for types.PostTax(startHeight, guess).Cmp(target) > 0 {
-		guess = guess.Sub(one)
+// of the siafund count. Thus, when inverting the function, we have to make an
+// initial guess and then fix the rounding error.
+func taxAdjustedPayout(target types.Currency, startHeight types.BlockHeight) types.Currency {
+	// compute initial guess as target * (1 / 1-tax); since this does not take
+	// the siafund rounding into account, the guess will be up to
+	// types.SiafundCount greater than the actual payout value.
+	guess := target.Big()
+	guess.Mul(guess, big.NewInt(1000))
+	guess.Div(guess, big.NewInt(961))
+
+	// now, adjust the guess to remove the rounding error. We know that:
+	//
+	//   (target % types.SiafundCount) == (payout % types.SiafundCount)
+	//
+	// therefore, we can simply adjust the guess to have this remainder as
+	// well. The only wrinkle is that, since we know guess >= payout, if the
+	// guess remainder is smaller than the target remainder, we must subtract
+	// an extra types.SiafundCount.
+	//
+	// for example, if target = 87654321 and types.SiafundCount = 10000, then:
+	//
+	//   initial_guess  = 87654321 * (1 / (1 - tax))
+	//                  = 91211572
+	//   target % 10000 =     4321
+	//   adjusted_guess = 91204321
+	sfc := types.SiafundCount.Big()
+	tm := new(big.Int).Mod(target.Big(), sfc)
+	gm := new(big.Int).Mod(guess, sfc)
+	if gm.Cmp(tm) < 0 {
+		guess.Sub(guess, sfc)
 	}
-	if !types.PostTax(startHeight, guess).Equals(target) {
-		panic("calculatePayout: failed to find perfect payout!")
-	}
-	return guess
+	guess.Sub(guess, gm)
+	guess.Add(guess, tm)
+
+	return types.NewCurrency(guess)
 }
