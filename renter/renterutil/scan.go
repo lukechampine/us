@@ -136,8 +136,9 @@ func CheckupContract(contract *renter.Contract, scan renter.ScanFn) CheckupResul
 		res.Error = errors.Wrap(err, "could not get a sector to test")
 		return res
 	}
+	var sector [proto.SectorSize]byte
 	start = time.Now()
-	_, err = d.Sector(root)
+	err = d.Sector(&sector, root)
 	bandTime := time.Since(start)
 	d.Close()
 	if err != nil {
@@ -145,7 +146,7 @@ func CheckupContract(contract *renter.Contract, scan renter.ScanFn) CheckupResul
 		return res
 	}
 
-	res.Bandwidth = (float64(proto.SectorSize) * 8 / 1e6) / bandTime.Seconds()
+	res.Bandwidth = (proto.SectorSize * 8 / 1e6) / bandTime.Seconds()
 	return res
 }
 

@@ -280,6 +280,7 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 	})
 
 	// migrate each old-new pair
+	var sector [proto.SectorSize]byte
 	for i := range oldhosts {
 		oldHost := oldhosts[i]
 		newHost := newhosts[i]
@@ -289,7 +290,7 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 				return
 			}
 			// download a sector
-			sector, err := oldHost.Downloader.Sector(s.MerkleRoot)
+			err := oldHost.Downloader.Sector(&sector, s.MerkleRoot)
 			if err != nil {
 				op.sendUpdate(MigrateSkipUpdate{Host: oldHost.HostKey(), Err: err})
 				total -= int64(len(oldHost.Slices[chunkIndex:])) * proto.SectorSize
@@ -297,7 +298,7 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 			}
 
 			// upload the sector to the new host
-			if _, err := newHost.Uploader.Upload(sector); err != nil {
+			if _, err := newHost.Uploader.Upload(&sector); err != nil {
 				op.sendUpdate(MigrateSkipUpdate{Host: oldHost.HostKey(), Err: err})
 				total -= int64(len(oldHost.Slices[chunkIndex:])) * proto.SectorSize
 				break

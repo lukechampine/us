@@ -1,6 +1,8 @@
 package renter
 
 import (
+	"bytes"
+
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter/proto"
 
@@ -15,16 +17,18 @@ var ErrBadChecksum = errors.New("sector data failed checksum validation")
 // A ScanFn can scan hosts.
 type ScanFn func(hostdb.HostPublicKey) (hostdb.ScannedHost, error)
 
-// A ShardDownloader wraps a proto.Downloader to provide SectorSlice-based data
-// retrieval, transparently decrypting and validating the received data.
+// A ShardDownloader wraps a proto.Downloader to provide SectorSlice-based
+// data retrieval, transparently decrypting and validating the received data.
 type ShardDownloader struct {
 	Downloader *proto.Downloader
 	Slices     []SectorSlice
 	Key        EncryptionKey
+	buf        bytes.Buffer
 }
 
-// DownloadAndDecrypt downloads the SectorSlice associated with chunkIndex. The
-// data is decrypted and validated before it is returned.
+// DownloadAndDecrypt downloads the SectorSlice associated with chunkIndex.
+// The data is decrypted and validated before it is returned. The returned
+// slice is only valid until the next call to DownloadAndDecrypt.
 func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 	if chunkIndex >= int64(len(d.Slices)) {
 		return nil, errors.Errorf("unknown chunk index %v", chunkIndex)
@@ -38,7 +42,11 @@ func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 	}
 	offset := startSegment * proto.SegmentSize
 	length := (endSegment - startSegment) * proto.SegmentSize
-	data, err := d.Downloader.PartialSector(s.MerkleRoot, offset, length)
+	// resize buffer and download
+	d.buf.Reset()
+	d.buf.Grow(int(length))
+	data := d.buf.Bytes()[:length]
+	err := d.Downloader.PartialSector(data, s.MerkleRoot, offset)
 	if err != nil {
 		return nil, err
 	}
