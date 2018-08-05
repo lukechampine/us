@@ -3,14 +3,12 @@ package renter
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/types"
 
 	"lukechampine.com/us/hostdb"
@@ -128,6 +126,9 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 		// everything is synchronized
 		return nil
 	}
+	if len(hostSignatures) != 2 {
+		return errors.New("wrong number of host signatures")
+	}
 
 	// if the Merkle root is wrong, try to fix it.
 	if hostRevision.NewFileMerkleRoot != c.diskRoot {
@@ -175,7 +176,7 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 	// host's version. Since we signed the revision, this can't conceivably
 	// hurt us.
 	c.ContractRevision.Revision = hostRevision
-	c.ContractRevision.Signatures = hostSignatures
+	copy(c.ContractRevision.Signatures[:], hostSignatures)
 	if _, err := c.f.WriteAt(marshalRevision(c.ContractRevision), ContractHeaderSize); err != nil {
 		return errors.Wrap(err, "could not write contract revision")
 	}
@@ -204,10 +205,8 @@ func marshalRevision(rev proto.ContractRevision) []byte {
 	var buf bytes.Buffer
 	buf.Grow(2048)
 	rev.Revision.MarshalSia(&buf)
-	encoding.WriteUint64(&buf, uint64(len(rev.Signatures)))
-	for _, sig := range rev.Signatures {
-		sig.MarshalSia(&buf)
-	}
+	rev.Signatures[0].MarshalSia(&buf)
+	rev.Signatures[1].MarshalSia(&buf)
 	return buf.Bytes()
 }
 
@@ -215,13 +214,10 @@ func unmarshalRevision(b []byte, rev *proto.ContractRevision) error {
 	buf := bytes.NewBuffer(b)
 	if err := rev.Revision.UnmarshalSia(buf); err != nil {
 		return err
-	}
-	n := binary.LittleEndian.Uint64(buf.Next(8))
-	rev.Signatures = make([]types.TransactionSignature, n)
-	for i := range rev.Signatures {
-		if err := rev.Signatures[i].UnmarshalSia(buf); err != nil {
-			return err
-		}
+	} else if err := rev.Signatures[0].UnmarshalSia(buf); err != nil {
+		return err
+	} else if err := rev.Signatures[1].UnmarshalSia(buf); err != nil {
+		return err
 	}
 	return nil
 }

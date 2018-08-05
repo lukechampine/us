@@ -238,7 +238,7 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 
 	return ContractRevision{
 		Revision:   initRevision,
-		Signatures: []types.TransactionSignature{renterRevisionSig, hostRevisionSig},
+		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostRevisionSig},
 		RenterKey:  ourSK,
 	}, nil
 }

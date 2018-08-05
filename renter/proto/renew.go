@@ -216,7 +216,7 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 
 	return ContractRevision{
 		Revision:   initRevision,
-		Signatures: []types.TransactionSignature{renterRevisionSig, hostRevisionSig},
+		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostRevisionSig},
 		RenterKey:  renterKey,
 	}, nil
 }

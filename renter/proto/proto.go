@@ -56,7 +56,7 @@ type ContractEditor interface {
 // key used to sign it.
 type ContractRevision struct {
 	Revision   types.FileContractRevision
-	Signatures []types.TransactionSignature
+	Signatures [2]types.TransactionSignature
 	RenterKey  crypto.SecretKey
 }
 
@@ -103,7 +103,7 @@ func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool)
 	// construct a transaction containing the signed revision
 	txn := types.Transaction{
 		FileContractRevisions: []types.FileContractRevision{c.Revision},
-		TransactionSignatures: c.Signatures,
+		TransactionSignatures: c.Signatures[:],
 	}
 
 	// add the transaction fee
