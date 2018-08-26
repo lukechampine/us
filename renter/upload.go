@@ -123,7 +123,22 @@ type ShardUploader struct {
 	Uploader *proto.Uploader
 	Shard    *Shard
 	Key      EncryptionKey
-	sb       SectorBuilder
+	Sector   SectorBuilder
+}
+
+// Upload uploads u.Sector, writing the resulting SectorSlice(s) to u.Shard,
+// starting at offset chunkIndex. Upload does not call Reset on u.Sector.
+func (u *ShardUploader) Upload(chunkIndex int64) error {
+	_, err := u.Uploader.Upload(u.Sector.Finish())
+	if err != nil {
+		return err
+	}
+	for i, ss := range u.Sector.Slices() {
+		if err := u.Shard.WriteSlice(ss, chunkIndex+int64(i)); err != nil {
+			return errors.Wrap(err, "could not write to shard file")
+		}
+	}
+	return nil
 }
 
 // EncryptAndUpload uploads the data associated with chunkIndex, creating a
@@ -133,22 +148,17 @@ func (u *ShardUploader) EncryptAndUpload(data []byte, chunkIndex int64) (SectorS
 	if len(data) > proto.SectorSize {
 		return SectorSlice{}, errors.New("data exceeds sector size")
 	}
-
-	u.sb.Reset()
-	u.sb.Append(data, u.Key, chunkIndex)
-	_, err := u.Uploader.Upload(u.sb.Finish())
+	u.Sector.Reset()
+	u.Sector.Append(data, u.Key, chunkIndex)
+	err := u.Upload(chunkIndex)
 	if err != nil {
 		return SectorSlice{}, err
 	}
-	ss := u.sb.Slices()[0]
-
-	// add slice to shard
-	err = u.Shard.WriteSlice(ss, chunkIndex)
-	if err != nil {
-		return SectorSlice{}, errors.Wrap(err, "could not write to shard file")
+	slices := u.Sector.Slices()
+	if len(slices) != 1 {
+		panic("expected exactly 1 SectorSlice")
 	}
-
-	return ss, nil
+	return slices[0], nil
 }
 
 // HostKey returns the public key of the host.
