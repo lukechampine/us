@@ -24,6 +24,9 @@ const (
 	nodeHashPrefix = 1
 )
 
+// Much of this code assumes that SectorSize is a power of 2; verify this assumption at compile time
+var _ [0]struct{} = [SectorSize & (SectorSize - 1)]struct{}{}
+
 // SectorMerkleRoot computes the Merkle root of a sector, using the standard
 // Sia leaf size.
 func SectorMerkleRoot(sector *[SectorSize]byte) crypto.Hash {
