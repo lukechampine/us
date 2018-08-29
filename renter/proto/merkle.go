@@ -342,7 +342,9 @@ func VerifyMerkleProof(proof []crypto.Hash, segments []byte, start, end int, roo
 			// this subtree partially overlaps the data segments; split it
 			// into two subtrees and recurse on each, joining their roots.
 			mid := (i + j) / 2
-			return s.nodeHash(rec(i, mid), rec(mid, j))
+			left := rec(i, mid)
+			right := rec(mid, j)
+			return s.nodeHash(left, right)
 		}
 	}
 	return rec(0, SegmentsPerSector) == root

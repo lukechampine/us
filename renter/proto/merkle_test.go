@@ -313,6 +313,7 @@ func BenchmarkBuildMerkleProof(b *testing.B) {
 	b.Run("single", benchRange(0, 1))
 	b.Run("half", benchRange(0, SegmentsPerSector/2))
 	b.Run("mid", benchRange(SegmentsPerSector/2, 1+SegmentsPerSector/2))
+	b.Run("full", benchRange(0, SegmentsPerSector-1))
 }
 
 func BenchmarkBuildMerkleProofPrecalc(b *testing.B) {
@@ -320,6 +321,7 @@ func BenchmarkBuildMerkleProofPrecalc(b *testing.B) {
 	fastrand.Read(sector[:])
 	root := SectorMerkleRoot(&sector)
 
+	// precalculate left-hand nodes to depth 4
 	roots := make([]crypto.Hash, SegmentsPerSector)
 	for i := range roots {
 		roots[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
@@ -331,16 +333,15 @@ func BenchmarkBuildMerkleProofPrecalc(b *testing.B) {
 	left[3], roots = CachedMerkleRoot(roots[:SegmentsPerSector/16]), roots[SegmentsPerSector/16:]
 	_ = roots
 	precalc := func(i, j int) crypto.Hash {
-		if (j - i) == SegmentsPerSector/2 {
+		// pattern matching would be nice here
+		switch {
+		case i == 0 && (j-i) == SegmentsPerSector/2:
 			return left[0]
-		}
-		if (j - i) == SegmentsPerSector/4 {
+		case i == SegmentsPerSector/2 && (j-i) == SegmentsPerSector/4:
 			return left[1]
-		}
-		if (j - i) == SegmentsPerSector/8 {
+		case i == SegmentsPerSector/2+SegmentsPerSector/4 && (j-i) == SegmentsPerSector/8:
 			return left[2]
-		}
-		if (j - i) == SegmentsPerSector/16 {
+		case i == SegmentsPerSector/2+SegmentsPerSector/4+SegmentsPerSector/8 && (j-i) == SegmentsPerSector/16:
 			return left[3]
 		}
 		return crypto.Hash{}
@@ -382,6 +383,7 @@ func BenchmarkVerifyMerkleProof(b *testing.B) {
 	b.Run("single", benchRange(0, 1))
 	b.Run("half", benchRange(0, SegmentsPerSector/2))
 	b.Run("mid", benchRange(SegmentsPerSector/2, 1+SegmentsPerSector/2))
+	b.Run("full", benchRange(0, SegmentsPerSector-1))
 }
 
 func TestTaxAdjustedPayout(t *testing.T) {
