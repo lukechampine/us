@@ -6,11 +6,11 @@ The golden rule of contributing is: **Propose what you plan to do before you
 do it.** Submitting a big PR with no warning is bad manners. It imposes social
 pressure on the maintainer to accept the PR, regardless of its quality,
 because to reject the PR means discarding the hard work of the contributor. Of
-course, if a bad PR is accepted, the quality of the project suffers.
-Discussing potential changes in advance can prevent these lose-lose
-situations. If the contributor and maintainer disagree on something, they can
-arrive at a decision before any code is written, saving everyone time and
-frustration.
+course, if a bad PR is accepted, the quality of the project suffers. It's a
+lose-lose situation that is best avoided by discussing potential changes in
+advance. That way, if the contributor and maintainer disagree on something,
+they can arrive at a decision before any code is written, saving everyone time
+and frustration.
 
 This rule does not apply to small PRs. Small PRs are more likely to be
 accepted, and if they are rejected, the amount of wasted effort isn't terribly
@@ -24,12 +24,12 @@ slated to be removed entirely as part of a larger refactor. Use your best
 judgment when deciding what counts as "small," but when in doubt, err on the
 side of caution and propose your change first.
 
-The preferred method of proposing a change is to open a GitHub issue with the
+The preferred method of proposing a change is to open an issue with the
 `Proposal` prefix, e.g. `Proposal: new chunk caching algorithm`. The issue
 should contain a description of the problem being addressed and a basic
 outline of how you intend to fix it. You can propose changes via other
-channels, like Discord, but GitHub is preferred because it leaves a permanent
-record of the discussion that can be referenced later.
+channels, like Discord, but issues are preferred because they leave a
+permanent record of the discussion that can be referenced later.
 
 You are also welcome to propose changes that you do not intend to implement
 yourself. Instead of `Proposal`, prefix these with `Suggestion`, e.g.
@@ -58,14 +58,14 @@ code. Go's [CodeReviewComments][crc] is a good resource.
 Git commits should follow the seven rules in [How to Write a Git Commit
 Message][commit]. Also, prefix each commit message with the package(s) it
 affects, e.g. `proto: Reduce SectorMerkleRoot allocations`. Lastly, put any
-references to issues (e.g. `Fixes #1234`) in the GitHub issue body, **not** in
-the commit message. This prevents an issue from being referenced over and over
-by the same commit when amending/rebasing.
+references to issues (e.g. `Fixes #1234`) in the issue body, **not** in the
+commit message. This prevents an issue from being referenced over and over by
+the same commit when amending/rebasing.
 
-Don't be afraid to rebase heavily when modifying a PR in response to review
-comments. Avoid commits with messages like `Address review comments`. These
-should be squashed into previous commits. [`fixup` and `autosquash`][fixup]
-are your friends here.
+Speaking of which, don't be afraid to rebase heavily when modifying a PR in
+response to review comments. Avoid commits with messages like `Address review
+comments`. These should be squashed into previous commits. [`fixup` and
+`autosquash`][fixup] are your friends here.
 
 
 [meta]: https://github.com/alecthomas/gometalinter
