@@ -6,7 +6,6 @@ import (
 	"math/bits"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"golang.org/x/crypto/blake2b"
 )
 
 // A Stack is a Merkle tree that stores only one (or zero) nodes per
@@ -30,8 +29,8 @@ type Stack struct {
 	// NOTE: 64 hashes is enough to cover 2^64 * SegmentSize bytes (1 ZiB), so
 	// we don't need to worry about running out.
 	stack [64]crypto.Hash
-	used  uint64   // one bit per stack elem; also number of nodes
-	buf   [65]byte // for hashing leaves and nodes
+	used  uint64 // one bit per stack elem; also number of nodes
+	hashBuffer
 }
 
 // MarshalSia implements the encoding.SiaMarshaler interface.
@@ -64,22 +63,6 @@ func (s *Stack) UnmarshalSia(r io.Reader) error {
 		}
 	}
 	return nil
-}
-
-func (s *Stack) leafHash(segment []byte) crypto.Hash {
-	if len(segment) != SegmentSize {
-		panic("leafHash: illegal input size")
-	}
-	s.buf[0] = leafHashPrefix
-	copy(s.buf[1:], segment)
-	return crypto.Hash(blake2b.Sum256(s.buf[:]))
-}
-
-func (s *Stack) nodeHash(left, right crypto.Hash) crypto.Hash {
-	s.buf[0] = nodeHashPrefix
-	copy(s.buf[1:], left[:])
-	copy(s.buf[1+len(left):], right[:])
-	return crypto.Hash(blake2b.Sum256(s.buf[:]))
 }
 
 // AppendNode appends node to the right side of the Merkle tree.

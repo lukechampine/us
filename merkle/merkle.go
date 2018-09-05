@@ -13,7 +13,7 @@ import (
 const (
 	// SegmentSize is the number of bytes in each leaf node of a sector's Merkle
 	// tree.
-	SegmentSize = 64
+	SegmentSize = crypto.HashSize * 2
 
 	// SegmentsPerSector is a convenience value.
 	SegmentsPerSector = renterhost.SectorSize / SegmentSize
@@ -25,6 +25,25 @@ const (
 
 // Much of this code assumes that renterhost.SectorSize is a power of 2; verify this assumption at compile time
 var _ [0]struct{} = [renterhost.SectorSize & (renterhost.SectorSize - 1)]struct{}{}
+
+// hashBuffer is a helper type for calculating hashes within a Merkle tree.
+type hashBuffer [1 + SegmentSize]byte
+
+func (buf *hashBuffer) leafHash(segment []byte) crypto.Hash {
+	if len(segment) != SegmentSize {
+		panic("leafHash: illegal input size")
+	}
+	buf[0] = leafHashPrefix
+	copy(buf[1:], segment)
+	return crypto.Hash(blake2b.Sum256(buf[:]))
+}
+
+func (buf *hashBuffer) nodeHash(left, right crypto.Hash) crypto.Hash {
+	buf[0] = nodeHashPrefix
+	copy(buf[1:], left[:])
+	copy(buf[1+len(left):], right[:])
+	return crypto.Hash(blake2b.Sum256(buf[:]))
+}
 
 // SectorRoot computes the Merkle root of a sector, using the standard Sia
 // leaf size.
@@ -47,12 +66,10 @@ func SectorRoot(sector *[renterhost.SectorSize]byte) crypto.Hash {
 			const numSubsubtrees = 256
 			subsubtrees := make([]crypto.Hash, numSubsubtrees)
 			roots := make([]crypto.Hash, rootsPerSubtree/numSubsubtrees)
-			buf := make([]byte, 1+SegmentSize)
-			buf[0] = leafHashPrefix
+			var buf hashBuffer
 			for j := range subsubtrees {
 				for k := range roots {
-					copy(buf[1:], sectorData.Next(SegmentSize))
-					roots[k] = crypto.Hash(blake2b.Sum256(buf))
+					roots[k] = buf.leafHash(sectorData.Next(SegmentSize))
 				}
 				subsubtrees[j] = cachedRootAlias(roots)
 			}
@@ -76,8 +93,7 @@ func cachedRootAlias(roots []crypto.Hash) crypto.Hash {
 		return crypto.Hash{}
 	}
 
-	buf := make([]byte, 1+crypto.HashSize*2)
-	buf[0] = nodeHashPrefix
+	var buf hashBuffer
 	newRoots := roots
 	for len(roots) > 1 {
 		newRoots = newRoots[:0]
@@ -86,9 +102,7 @@ func cachedRootAlias(roots []crypto.Hash) crypto.Hash {
 				newRoots = append(newRoots, roots[i])
 				break
 			}
-			copy(buf[1:], roots[i][:])
-			copy(buf[1+crypto.HashSize:], roots[i+1][:])
-			newRoots = append(newRoots, crypto.Hash(blake2b.Sum256(buf)))
+			newRoots = append(newRoots, buf.nodeHash(roots[i], roots[i+1]))
 		}
 		roots = newRoots
 	}
