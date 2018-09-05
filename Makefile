@@ -11,6 +11,12 @@ all:
 dev:
 	go install -ldflags "$(ldflags)" -tags='dev' ./...
 
+test:
+	go test -v ./...
+
+bench:
+	go test -v -run=XXX -bench=. ./...
+
 lint:
 	@gometalinter --disable-all \
 		--enable=ineffassign \
