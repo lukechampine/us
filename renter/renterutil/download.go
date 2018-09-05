@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"lukechampine.com/us/renter"
-	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
@@ -50,7 +50,7 @@ func download(op *Operation, f *os.File, contracts renter.ContractSet, m *renter
 			shards[i] = shard
 		}
 
-		buf := make([]byte, 0, proto.SectorSize)
+		buf := make([]byte, 0, renterhost.SectorSize)
 		var bytesVerified int64
 		for chunkIndex := range shards[0] {
 			for i := range shards {

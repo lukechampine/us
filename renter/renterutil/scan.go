@@ -10,6 +10,7 @@ import (
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
 )
@@ -136,7 +137,7 @@ func CheckupContract(contract *renter.Contract, scan renter.ScanFn) CheckupResul
 		res.Error = errors.Wrap(err, "could not get a sector to test")
 		return res
 	}
-	var sector [proto.SectorSize]byte
+	var sector [renterhost.SectorSize]byte
 	start = time.Now()
 	err = d.Sector(&sector, root)
 	bandTime := time.Since(start)
@@ -146,7 +147,7 @@ func CheckupContract(contract *renter.Contract, scan renter.ScanFn) CheckupResul
 		return res
 	}
 
-	res.Bandwidth = (proto.SectorSize * 8 / 1e6) / bandTime.Seconds()
+	res.Bandwidth = (renterhost.SectorSize * 8 / 1e6) / bandTime.Seconds()
 	return res
 }
 

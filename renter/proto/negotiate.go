@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
@@ -239,7 +240,7 @@ func newUploadRevision(current types.FileContractRevision, merkleRoot crypto.Has
 	rev.NewMissedProofOutputs[2].Value = rev.NewMissedProofOutputs[2].Value.Add(collateral)
 
 	// set new filesize and Merkle root
-	rev.NewFileSize += SectorSize
+	rev.NewFileSize += renterhost.SectorSize
 	rev.NewFileMerkleRoot = merkleRoot
 	return rev
 }

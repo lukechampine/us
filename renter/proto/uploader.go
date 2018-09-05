@@ -10,6 +10,8 @@ import (
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/merkle"
+	"lukechampine.com/us/renterhost"
 )
 
 // An Uploader uploads sectors by calling the revise RPC on a host. It updates
@@ -35,7 +37,7 @@ func (u *Uploader) Close() error {
 
 // Upload negotiates a revision that adds a sector to a file contract, and
 // revises the underlying contract to pay the host appropriately.
-func (u *Uploader) Upload(data *[SectorSize]byte) (crypto.Hash, error) {
+func (u *Uploader) Upload(data *[renterhost.SectorSize]byte) (crypto.Hash, error) {
 	root, err := u.upload(data)
 	if isHostDisconnect(err) {
 		// try reconnecting
@@ -49,7 +51,7 @@ func (u *Uploader) Upload(data *[SectorSize]byte) (crypto.Hash, error) {
 	return root, err
 }
 
-func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
+func (u *Uploader) upload(data *[renterhost.SectorSize]byte) (crypto.Hash, error) {
 	// allot 10 minutes for this exchange; sufficient to transfer 4 MB over 50 kbps
 	extendDeadline(u.conn, modules.NegotiateFileContractRevisionTime)
 	defer extendDeadline(u.conn, time.Hour) // reset deadline
@@ -64,9 +66,9 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 	contract := u.contract.Revision()
 	storageDuration := contract.Revision.NewWindowEnd - u.height
 	storageDuration += 12 // hosts may not be fully synced; allow 2 hours of leeway
-	blockBytes := types.NewCurrency64(SectorSize * uint64(storageDuration))
+	blockBytes := types.NewCurrency64(renterhost.SectorSize * uint64(storageDuration))
 	sectorStoragePrice := u.host.StoragePrice.Mul(blockBytes)
-	sectorBandwidthPrice := u.host.UploadBandwidthPrice.Mul64(SectorSize)
+	sectorBandwidthPrice := u.host.UploadBandwidthPrice.Mul64(renterhost.SectorSize)
 	sectorPrice := sectorStoragePrice.Add(sectorBandwidthPrice)
 	if contract.RenterFunds().Cmp(sectorPrice) < 0 {
 		return crypto.Hash{}, errors.Errorf("contract has insufficient funds to support upload: needed %v, have %v", sectorPrice, contract.RenterFunds())
@@ -83,7 +85,7 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 	errChan := make(chan error)
 	var sectorRoot, merkleRoot crypto.Hash
 	go func() {
-		sectorRoot = SectorMerkleRoot(data)
+		sectorRoot = merkle.SectorRoot(data)
 		var err error
 		merkleRoot, err = u.contract.AppendRoot(sectorRoot)
 		errChan <- err
@@ -135,7 +137,7 @@ func (u *Uploader) upload(data *[SectorSize]byte) (crypto.Hash, error) {
 // an Uploader.
 func NewUploader(host hostdb.ScannedHost, contract ContractEditor, currentHeight types.BlockHeight) (*Uploader, error) {
 	// check that contract has enough value to support an upload
-	sectorPrice := host.UploadBandwidthPrice.Mul64(SectorSize)
+	sectorPrice := host.UploadBandwidthPrice.Mul64(renterhost.SectorSize)
 	if contract.Revision().RenterFunds().Cmp(sectorPrice) < 0 {
 		return nil, errors.New("contract has insufficient funds to support upload")
 	}

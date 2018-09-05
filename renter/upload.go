@@ -1,13 +1,14 @@
 package renter
 
 import (
-	"golang.org/x/crypto/blake2b"
-	"lukechampine.com/us/hostdb"
-	"lukechampine.com/us/renter/proto"
-
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
+	"golang.org/x/crypto/blake2b"
+	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/merkle"
+	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/renterhost"
 )
 
 // A SectorBuilder facilitates the construction of sectors for later upload.
@@ -15,7 +16,7 @@ import (
 // sources into a single sector. The zero value for a SectorBuilder is an
 // empty sector.
 type SectorBuilder struct {
-	sector    [proto.SectorSize]byte
+	sector    [renterhost.SectorSize]byte
 	sectorLen int
 	slices    []SectorSlice
 }
@@ -31,7 +32,7 @@ func (sb *SectorBuilder) Reset() {
 
 // Append appends data to the sector being constructed, encrypting it with the
 // given key and chunkIndex. The data is also padded with random bytes to the
-// nearest multiple of proto.SegmentSize, which is required by the encryption
+// nearest multiple of merkle.SegmentSize, which is required by the encryption
 // scheme. Each call to Append creates a SectorSlice that is accessible via
 // the Slices method. This SectorSlice reflects the length and checksum of the
 // original (unpadded, unencrypted) data.
@@ -41,11 +42,11 @@ func (sb *SectorBuilder) Append(data []byte, key EncryptionKey, chunkIndex int64
 	// pad the data to a multiple of SegmentSize, which is required
 	// by the encryption scheme
 	var padding int
-	if mod := len(data) % proto.SegmentSize; mod != 0 {
-		padding = proto.SegmentSize - mod
+	if mod := len(data) % merkle.SegmentSize; mod != 0 {
+		padding = merkle.SegmentSize - mod
 	}
 
-	if sb.sectorLen+len(data)+padding > proto.SectorSize {
+	if sb.sectorLen+len(data)+padding > renterhost.SectorSize {
 		// TODO: make this nicer?
 		panic("data exceeds sector size")
 	}
@@ -64,7 +65,7 @@ func (sb *SectorBuilder) Append(data []byte, key EncryptionKey, chunkIndex int64
 	// can then store up to (2^64/SegmentsPerSector) = 2^48 bytes, or about
 	// 280 TB. In the average case, all but the final sector will be "full",
 	// so the waste is negligible.)
-	startIndex := uint64(chunkIndex * proto.SegmentsPerSector)
+	startIndex := uint64(chunkIndex * merkle.SegmentsPerSector)
 	key.EncryptSegments(sectorSlice, sectorSlice, startIndex)
 
 	// update sectorLen and record the new slice
@@ -84,7 +85,7 @@ func (sb *SectorBuilder) Len() int {
 }
 
 // Remaining returns the number of bytes remaining in the sector. It is
-// equivalent to proto.SectorSize - sb.Len().
+// equivalent to renterhost.SectorSize - sb.Len().
 func (sb *SectorBuilder) Remaining() int {
 	return len(sb.sector) - sb.sectorLen
 }
@@ -93,14 +94,14 @@ func (sb *SectorBuilder) Remaining() int {
 // returns it. The MerkleRoot field of each SectorSlice tracked by sb is set
 // to Merkle root of the resulting sector.
 //
-// After calling Finish, Len returns proto.SectorSize and Remaining returns 0;
-// no more data can be appended until Reset is called.
-func (sb *SectorBuilder) Finish() *[proto.SectorSize]byte {
+// After calling Finish, Len returns renterhost.SectorSize and Remaining
+// returns 0; no more data can be appended until Reset is called.
+func (sb *SectorBuilder) Finish() *[renterhost.SectorSize]byte {
 	fastrand.Read(sb.sector[sb.sectorLen:])
 	sb.sectorLen = len(sb.sector)
 
 	// set Merkle root of each slice
-	sectorRoot := proto.SectorMerkleRoot(&sb.sector)
+	sectorRoot := merkle.SectorRoot(&sb.sector)
 	for i := range sb.slices {
 		sb.slices[i].MerkleRoot = sectorRoot
 	}
@@ -142,10 +143,10 @@ func (u *ShardUploader) Upload(chunkIndex int64) error {
 }
 
 // EncryptAndUpload uploads the data associated with chunkIndex, creating a
-// SectorSlice. The data is encrypted and padded to proto.SectorSize before it
-// is uploaded. The resulting SectorSlice is written to u.Shard.
+// SectorSlice. The data is encrypted and padded to renterhost.SectorSize
+// before it is uploaded. The resulting SectorSlice is written to u.Shard.
 func (u *ShardUploader) EncryptAndUpload(data []byte, chunkIndex int64) (SectorSlice, error) {
-	if len(data) > proto.SectorSize {
+	if len(data) > renterhost.SectorSize {
 		return SectorSlice{}, errors.New("data exceeds sector size")
 	}
 	u.Sector.Reset()

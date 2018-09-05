@@ -1,4 +1,4 @@
-// Package proto implements the Sia renter-host protocol.
+// Package proto implements the renter side of the Sia renter-host protocol.
 package proto // import "lukechampine.com/us/renter/proto"
 
 import (

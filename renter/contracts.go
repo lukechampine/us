@@ -12,6 +12,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/types"
 
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter/proto"
 )
 
@@ -61,7 +62,7 @@ func (h *ContractHeader) Validate() error {
 type Contract struct {
 	proto.ContractRevision // for convenience
 	header                 ContractHeader
-	sectorRoots            proto.MerkleStack
+	sectorRoots            merkle.Stack
 	diskRoot               crypto.Hash
 	f                      *os.File
 }
@@ -222,13 +223,13 @@ func unmarshalRevision(b []byte, rev *proto.ContractRevision) error {
 	return nil
 }
 
-func marshalStack(stack *proto.MerkleStack) []byte {
+func marshalStack(stack *merkle.Stack) []byte {
 	var buf bytes.Buffer
 	stack.MarshalSia(&buf)
 	return buf.Bytes()
 }
 
-func unmarshalStack(b []byte, stack *proto.MerkleStack) error {
+func unmarshalStack(b []byte, stack *merkle.Stack) error {
 	return stack.UnmarshalSia(bytes.NewReader(b))
 }
 
@@ -327,7 +328,7 @@ func LoadContract(filename string) (*Contract, error) {
 	}
 	rev.RenterKey = header.key
 	// decode stack
-	var stack proto.MerkleStack
+	var stack merkle.Stack
 	err = unmarshalStack(b[ContractStackOffset:], &stack)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not read Merkle stack")

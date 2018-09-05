@@ -12,7 +12,8 @@ import (
 	"gitlab.com/NebulousLabs/fastrand"
 	"golang.org/x/crypto/xts"
 
-	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/merkle"
+	"lukechampine.com/us/renterhost"
 )
 
 func TestEncryption(t *testing.T) {
@@ -28,7 +29,7 @@ func TestEncryption(t *testing.T) {
 	}
 
 	// decrypt starting at a segment offset
-	off := proto.SegmentSize * 2
+	off := merkle.SegmentSize * 2
 	key.DecryptSegments(ciphertext[off:], ciphertext[off:], 2)
 	if !bytes.Equal(ciphertext[off:], plaintext[off:]) {
 		t.Error("decryption failed")
@@ -79,8 +80,8 @@ func BenchmarkEncryption(b *testing.B) {
 		}
 	}
 
-	segment := make([]byte, proto.SegmentSize)
-	sector := make([]byte, proto.SectorSize)
+	segment := make([]byte, merkle.SegmentSize)
+	sector := make([]byte, renterhost.SectorSize)
 	b.Run("XTS-segment", benchXTS(segment))
 	b.Run("AES-segment", benchAES(segment))
 	b.Run("ChaCha-segment", benchChaCha(segment))

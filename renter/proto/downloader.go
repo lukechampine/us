@@ -10,6 +10,8 @@ import (
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/merkle"
+	"lukechampine.com/us/renterhost"
 )
 
 // A Downloader retrieves sectors by calling the download RPC on a host. It
@@ -37,10 +39,10 @@ func (d *Downloader) Close() error {
 // underlying contract to pay the host appropriately. The sector data is
 // written to dst. Sector verifies the integrity of the retrieved data by
 // comparing its computed Merkle root to root.
-func (d *Downloader) Sector(dst *[SectorSize]byte, root crypto.Hash) error {
+func (d *Downloader) Sector(dst *[renterhost.SectorSize]byte, root crypto.Hash) error {
 	if err := d.PartialSector(dst[:], root, 0); err != nil {
 		return err
-	} else if SectorMerkleRoot(dst) != root {
+	} else if merkle.SectorRoot(dst) != root {
 		return errors.New("host sent invalid sector data")
 	}
 	return nil
@@ -72,7 +74,7 @@ func (d *Downloader) partialSector(dst []byte, root crypto.Hash, offset uint32) 
 	defer extendDeadline(d.conn, time.Hour) // reset deadline when finished
 
 	// sanity check for offset and length
-	if uint64(offset)+uint64(len(dst)) > SectorSize {
+	if uint64(offset)+uint64(len(dst)) > renterhost.SectorSize {
 		return errors.New("invalid sector range")
 	}
 
@@ -124,13 +126,13 @@ func (d *Downloader) partialSector(dst []byte, root crypto.Hash, offset uint32) 
 	totalSize := encoding.DecUint64(d.buf[0:8])
 	numSectors := encoding.DecUint64(d.buf[8:16])
 	payloadSize := encoding.DecUint64(d.buf[16:24])
-	if totalSize > SectorSize+16 {
+	if totalSize > renterhost.SectorSize+16 {
 		d.conn.Close()
 		return errors.New("reported payload size is larger than SectorSize")
 	} else if numSectors != 1 {
 		d.conn.Close()
 		return errors.New("wrong number of sectors")
-	} else if payloadSize > SectorSize {
+	} else if payloadSize > renterhost.SectorSize {
 		d.conn.Close()
 		return errors.New("reported sector data is larger than SectorSize")
 	}

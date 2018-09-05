@@ -13,7 +13,8 @@ import (
 	"time"
 
 	"lukechampine.com/us/hostdb"
-	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/merkle"
+	"lukechampine.com/us/renterhost"
 
 	"github.com/aead/chacha20/chacha"
 	"github.com/pkg/errors"
@@ -69,7 +70,7 @@ func (s *keySeed) UnmarshalJSON(b []byte) error {
 }
 
 // An EncryptionKey can encrypt and decrypt segments, where each segment is a
-// []byte with len proto.SegmentSize.
+// []byte with len merkle.SegmentSize.
 type EncryptionKey interface {
 	EncryptSegments(ciphertext, plaintext []byte, startIndex uint64)
 	DecryptSegments(plaintext, ciphertext []byte, startIndex uint64)
@@ -81,7 +82,7 @@ type chachaKey struct {
 }
 
 func (c chachaKey) EncryptSegments(ciphertext, plaintext []byte, startIndex uint64) {
-	if len(plaintext)%proto.SegmentSize != 0 {
+	if len(plaintext)%merkle.SegmentSize != 0 {
 		panic("plaintext must be a multiple of segment size")
 	} else if len(plaintext) != len(ciphertext) {
 		panic("plaintext and ciphertext must have same length")
@@ -121,15 +122,15 @@ func (m *MetaIndex) EncryptionKey(shardIndex int) EncryptionKey {
 // chunk. A chunk is a buffer of file data pre-erasure coding. When the chunk
 // is encoded, it is split into len(m.Hosts) shards of equal size. Thus the
 // MaxChunkSize is the size of such a buffer that results in shards equal to
-// proto.SectorSize. MaxChunkSize is NOT guaranteed to match the actual chunk
-// size used in the shard files of m.
+// renterhost.SectorSize. MaxChunkSize is NOT guaranteed to match the actual
+// chunk size used in the shard files of m.
 func (m *MetaIndex) MaxChunkSize() int64 {
-	return proto.SectorSize * int64(m.MinShards)
+	return renterhost.SectorSize * int64(m.MinShards)
 }
 
 // MinChunks returns the minimum number of chunks required to fully upload the
 // file. It assumes that each SectorSlice will reference a full sector
-// (proto.SectorSize bytes).
+// (renterhost.SectorSize bytes).
 func (m *MetaIndex) MinChunks() int64 {
 	n := m.Filesize / m.MaxChunkSize()
 	if m.Filesize%m.MaxChunkSize() != 0 {

@@ -9,7 +9,7 @@ import (
 
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
-	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -267,7 +267,7 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 
 	var total, uploaded int64
 	for _, h := range oldhosts {
-		total += int64(len(h.Slices)) * proto.SectorSize
+		total += int64(len(h.Slices)) * renterhost.SectorSize
 	}
 	if total == 0 {
 		// nothing to do
@@ -280,7 +280,7 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 	})
 
 	// migrate each old-new pair
-	var sector [proto.SectorSize]byte
+	var sector [renterhost.SectorSize]byte
 	for i := range oldhosts {
 		oldHost := oldhosts[i]
 		newHost := newhosts[i]
@@ -293,23 +293,23 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 			err := oldHost.Downloader.Sector(&sector, s.MerkleRoot)
 			if err != nil {
 				op.sendUpdate(MigrateSkipUpdate{Host: oldHost.HostKey(), Err: err})
-				total -= int64(len(oldHost.Slices[chunkIndex:])) * proto.SectorSize
+				total -= int64(len(oldHost.Slices[chunkIndex:])) * renterhost.SectorSize
 				break
 			}
 
 			// upload the sector to the new host
 			if _, err := newHost.Uploader.Upload(&sector); err != nil {
 				op.sendUpdate(MigrateSkipUpdate{Host: oldHost.HostKey(), Err: err})
-				total -= int64(len(oldHost.Slices[chunkIndex:])) * proto.SectorSize
+				total -= int64(len(oldHost.Slices[chunkIndex:])) * renterhost.SectorSize
 				break
 			}
 			// write SectorSlice
 			if err := newHost.Shard.WriteSlice(s, int64(chunkIndex)); err != nil {
 				op.sendUpdate(MigrateSkipUpdate{Host: oldHost.HostKey(), Err: err})
-				total -= int64(len(oldHost.Slices[chunkIndex:])) * proto.SectorSize
+				total -= int64(len(oldHost.Slices[chunkIndex:])) * renterhost.SectorSize
 				break
 			}
-			uploaded += proto.SectorSize
+			uploaded += renterhost.SectorSize
 			op.sendUpdate(TransferProgressUpdate{
 				Total:       total,
 				Transferred: uploaded,

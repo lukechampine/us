@@ -16,6 +16,7 @@ import (
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renter/renterutil"
+	"lukechampine.com/us/renterhost"
 )
 
 func serve(contractDir, metaDir, addr string) error {
@@ -300,7 +301,7 @@ func newDownloadReader(m renter.MetaIndex, shards [][]renter.SectorSlice, ds *do
 		shards: shards,
 		ds:     ds,
 		buf: chunkBuffer{
-			buf: make([]byte, 0, proto.SectorSize*m.MinShards),
+			buf: make([]byte, 0, renterhost.SectorSize*m.MinShards),
 		},
 		chunk:         -1,
 		lastChunkSize: lastChunkSize,

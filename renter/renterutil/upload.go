@@ -10,6 +10,7 @@ import (
 
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -78,7 +79,7 @@ func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.M
 		Filesize:  m.Filesize - offset,
 		MinShards: m.MinShards,
 	}).MinChunks()
-	toUpload := remainingChunks * int64(len(m.Hosts)) * proto.SectorSize
+	toUpload := remainingChunks * int64(len(m.Hosts)) * renterhost.SectorSize
 
 	// connect to hosts in parallel
 	hosts, err := dialUploaders(m, contracts, scan, currentHeight, op.cancel)
@@ -146,7 +147,7 @@ func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.M
 				errStrings = append(errStrings, err.Error())
 			} else {
 				// upload successful; send update
-				uploaded += proto.SectorSize
+				uploaded += renterhost.SectorSize
 				op.sendUpdate(TransferProgressUpdate{
 					Total:       start + toUpload,
 					Start:       start,
@@ -231,12 +232,12 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 	// different sectors from a host if one would suffice. The downside of
 	// this optimization is that it results in wasted space. The theoretical
 	// worst-case scenario is a set of files with alternating sizes of 1 byte
-	// and SectorSize bytes. If the optimization is applied naively, this
+	// renterhost SectorSize bytes. If the optimization is applied naively, this
 	// results in about a 2x storage blowup. However, this scenario is
 	// unlikely to occur in a typical setting; the expected amount of space
 	// wasted is about the average size of the files being uploaded that are
 	// smaller than one sector. By tweaking the cutoff for applying this
-	// optimization (e.g. from SectorSize to SectorSize/4), we can reduce the
+	// optimization (e.g. renterhost SectorSize renterhost SectorSize/4), we can reduce the
 	// amount of waste at the cost of requiring two sectors for more files.
 	//
 	// Once the chunk has been erasure-coded into sectors and each file in
@@ -317,7 +318,7 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 		for i := range sectors {
 			sectors[i].Reset()
 		}
-		for sectors[0].Len() < proto.SectorSize {
+		for sectors[0].Len() < renterhost.SectorSize {
 			chunk = chunk[:sectors[0].Remaining()*minShards]
 			n, err := io.ReadFull(curEntry.f, chunk)
 			if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
@@ -433,8 +434,8 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 		// transfer speed math gets messed up. Maybe put elapsed time in the
 		// update, or make caller aware that each update is part of one chunk.
 		op.sendUpdate(TransferProgressUpdate{
-			Total:       proto.SectorSize * int64(len(hosts)) * files[0].totalChunks,
-			Transferred: proto.SectorSize * int64(len(hosts)) * files[0].chunkIndex,
+			Total:       renterhost.SectorSize * int64(len(hosts)) * files[0].totalChunks,
+			Transferred: renterhost.SectorSize * int64(len(hosts)) * files[0].chunkIndex,
 		})
 		for _, f := range files {
 			if f.chunkIndex >= f.totalChunks {
