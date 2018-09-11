@@ -52,8 +52,8 @@ func SectorRoot(sector *[renterhost.SectorSize]byte) crypto.Hash {
 	return s.Root()
 }
 
-// CachedRoot calculates the root of a set of existing Merkle roots.
-func CachedRoot(roots []crypto.Hash) crypto.Hash {
+// MetaRoot calculates the root of a set of existing Merkle roots.
+func MetaRoot(roots []crypto.Hash) crypto.Hash {
 	var s Stack
 	for _, r := range roots {
 		s.AppendNode(r)

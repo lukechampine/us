@@ -71,22 +71,22 @@ func BenchmarkSectorRoot(b *testing.B) {
 	}
 }
 
-func TestCachedRoot(t *testing.T) {
+func TestMetaRoot(t *testing.T) {
 	// test some known roots
-	if CachedRoot(nil) != (crypto.Hash{}) {
+	if MetaRoot(nil) != (crypto.Hash{}) {
 		t.Error("wrong cached Merkle root for empty stack")
 	}
 	roots := make([]crypto.Hash, 1)
 	fastrand.Read(roots[0][:])
-	if CachedRoot(roots) != roots[0] {
+	if MetaRoot(roots) != roots[0] {
 		t.Error("wrong cached Merkle root for single root")
 	}
 	roots = make([]crypto.Hash, 32)
-	if CachedRoot(roots).String() != "1c23727030051d1bba1c887273addac2054afbd6926daddef6740f4f8bf1fb7f" {
+	if MetaRoot(roots).String() != "1c23727030051d1bba1c887273addac2054afbd6926daddef6740f4f8bf1fb7f" {
 		t.Error("wrong cached Merkle root for 32 empty roots")
 	}
 	roots[0][0] = 1
-	if CachedRoot(roots).String() != "c5da05749139505704ea18a5d92d46427f652ac79c5f5712e4aefb68e20dffb8" {
+	if MetaRoot(roots).String() != "c5da05749139505704ea18a5d92d46427f652ac79c5f5712e4aefb68e20dffb8" {
 		t.Error("wrong cached Merkle root for roots[0][0] = 1")
 	}
 
@@ -95,25 +95,25 @@ func TestCachedRoot(t *testing.T) {
 		for j := range roots {
 			fastrand.Read(roots[j][:])
 		}
-		if CachedRoot(roots) != recNodeRoot(roots) {
-			t.Error("CachedRoot does not match reference implementation")
+		if MetaRoot(roots) != recNodeRoot(roots) {
+			t.Error("MetaRoot does not match reference implementation")
 		}
 	}
 
 	// test an odd number of roots
 	roots = roots[:5]
 	refRoot := recNodeRoot([]crypto.Hash{recNodeRoot(roots[:4]), roots[4]})
-	if CachedRoot(roots) != refRoot {
-		t.Error("CachedRoot does not match reference implementation")
+	if MetaRoot(roots) != refRoot {
+		t.Error("MetaRoot does not match reference implementation")
 	}
 }
 
-func BenchmarkCachedRoot1TB(b *testing.B) {
+func BenchmarkMetaRoot1TB(b *testing.B) {
 	const sectorsPerTerabyte = 262144
 	b.ReportAllocs()
 	roots := make([]crypto.Hash, sectorsPerTerabyte)
 	for i := 0; i < b.N; i++ {
-		_ = CachedRoot(roots)
+		_ = MetaRoot(roots)
 	}
 }
 
@@ -274,7 +274,7 @@ func TestBuildVerifyProof(t *testing.T) {
 	for i := range leftRoots {
 		leftRoots[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
 	}
-	left = CachedRoot(leftRoots)
+	left = MetaRoot(leftRoots)
 	precalc := func(i, j int) (h crypto.Hash) {
 		if i == 0 && j == SegmentsPerSector/2 {
 			h = left
@@ -326,10 +326,10 @@ func BenchmarkBuildProofPrecalc(b *testing.B) {
 		roots[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
 	}
 	left := make([]crypto.Hash, 4)
-	left[0], roots = CachedRoot(roots[:SegmentsPerSector/2]), roots[SegmentsPerSector/2:]
-	left[1], roots = CachedRoot(roots[:SegmentsPerSector/4]), roots[SegmentsPerSector/4:]
-	left[2], roots = CachedRoot(roots[:SegmentsPerSector/8]), roots[SegmentsPerSector/8:]
-	left[3], roots = CachedRoot(roots[:SegmentsPerSector/16]), roots[SegmentsPerSector/16:]
+	left[0], roots = MetaRoot(roots[:SegmentsPerSector/2]), roots[SegmentsPerSector/2:]
+	left[1], roots = MetaRoot(roots[:SegmentsPerSector/4]), roots[SegmentsPerSector/4:]
+	left[2], roots = MetaRoot(roots[:SegmentsPerSector/8]), roots[SegmentsPerSector/8:]
+	left[3], roots = MetaRoot(roots[:SegmentsPerSector/16]), roots[SegmentsPerSector/16:]
 	_ = roots
 	precalc := func(i, j int) crypto.Hash {
 		// pattern matching would be nice here
