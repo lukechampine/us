@@ -54,28 +54,9 @@ func SectorRoot(sector *[renterhost.SectorSize]byte) crypto.Hash {
 
 // CachedRoot calculates the root of a set of existing Merkle roots.
 func CachedRoot(roots []crypto.Hash) crypto.Hash {
-	return cachedRootAlias(append([]crypto.Hash(nil), roots...))
-}
-
-// cachedRootAlias calculates the root of a set of existing Merkle
-// roots, using the memory of roots as scratch space.
-func cachedRootAlias(roots []crypto.Hash) crypto.Hash {
-	if len(roots) == 0 {
-		return crypto.Hash{}
+	var s Stack
+	for _, r := range roots {
+		s.AppendNode(r)
 	}
-
-	var buf hashBuffer
-	newRoots := roots
-	for len(roots) > 1 {
-		newRoots = newRoots[:0]
-		for i := 0; i < len(roots); i += 2 {
-			if i+1 >= len(roots) {
-				newRoots = append(newRoots, roots[i])
-				break
-			}
-			newRoots = append(newRoots, buf.nodeHash(roots[i], roots[i+1]))
-		}
-		roots = newRoots
-	}
-	return roots[0]
+	return s.Root()
 }
