@@ -2,9 +2,6 @@
 package merkle
 
 import (
-	"bytes"
-	"sync"
-
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/us/renterhost"
@@ -48,37 +45,11 @@ func (buf *hashBuffer) nodeHash(left, right crypto.Hash) crypto.Hash {
 // SectorRoot computes the Merkle root of a sector, using the standard Sia
 // leaf size.
 func SectorRoot(sector *[renterhost.SectorSize]byte) crypto.Hash {
-	// maximize parallelism by calculating each subtree on its own CPU.
-	// 8 seems like a reasonable default.
-	const numSubtrees = 8
-	subtrees := make([]crypto.Hash, numSubtrees)
-	const rootsPerSubtree = SegmentsPerSector / numSubtrees
-	var wg sync.WaitGroup
-	wg.Add(numSubtrees)
-	for i := range subtrees {
-		go func(i int) {
-			sectorData := bytes.NewBuffer(sector[i*rootsPerSubtree*SegmentSize:])
-			// instead of calculating the full set of segment roots and then
-			// merging them all, break the work into smaller pieces. Not only
-			// does this reduce total memory footprint, it also prevents a
-			// heap allocation, because the full set of segment roots is too
-			// large to fit on the stack. 256 seems to be the sweet spot.
-			const numSubsubtrees = 256
-			subsubtrees := make([]crypto.Hash, numSubsubtrees)
-			roots := make([]crypto.Hash, rootsPerSubtree/numSubsubtrees)
-			var buf hashBuffer
-			for j := range subsubtrees {
-				for k := range roots {
-					roots[k] = buf.leafHash(sectorData.Next(SegmentSize))
-				}
-				subsubtrees[j] = cachedRootAlias(roots)
-			}
-			subtrees[i] = cachedRootAlias(subsubtrees)
-			wg.Done()
-		}(i)
+	var s Stack
+	for i := 0; i < len(sector); i += SegmentSize {
+		s.AppendNode(s.leafHash(sector[i:][:SegmentSize]))
 	}
-	wg.Wait()
-	return cachedRootAlias(subtrees)
+	return s.Root()
 }
 
 // CachedRoot calculates the root of a set of existing Merkle roots.

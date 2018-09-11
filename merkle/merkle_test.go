@@ -66,7 +66,6 @@ func TestSectorRoot(t *testing.T) {
 func BenchmarkSectorRoot(b *testing.B) {
 	b.ReportAllocs()
 	var sector [renterhost.SectorSize]byte
-	fastrand.Read(sector[:])
 	for i := 0; i < b.N; i++ {
 		_ = SectorRoot(&sector)
 	}
