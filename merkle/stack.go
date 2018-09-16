@@ -85,7 +85,7 @@ func (s *Stack) UnmarshalSia(r io.Reader) error {
 	return nil
 }
 
-// AppendNode appends node to the right side of the Merkle tree.
+// AppendNode appends a leaf hash to the right side of the Merkle tree.
 func (s *Stack) AppendNode(node crypto.Hash) {
 	// seek to first open slot, merging nodes as we go
 	var i uint64
@@ -96,9 +96,9 @@ func (s *Stack) AppendNode(node crypto.Hash) {
 	s.used++ // nice
 }
 
-// NumNodes returns the number of nodes appended to the stack since the last
-// call to Reset.
-func (s *Stack) NumNodes() int {
+// NumLeaves returns the number of leaf hashes appended to the stack since the
+// last call to Reset.
+func (s *Stack) NumLeaves() int {
 	return int(s.used)
 }
 

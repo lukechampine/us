@@ -166,8 +166,8 @@ func TestStack(t *testing.T) {
 	}
 
 	// test NumRoots
-	if s.NumNodes() != 5 {
-		t.Error("wrong number of nodes reported:", s.NumNodes())
+	if s.NumLeaves() != 5 {
+		t.Error("wrong number of nodes reported:", s.NumLeaves())
 	}
 
 	// test ReadFrom

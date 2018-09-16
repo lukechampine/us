@@ -100,7 +100,7 @@ func (c *Contract) AppendRoot(root crypto.Hash) (crypto.Hash, error) {
 // NumSectors returns the number of sector roots in the contract. It does not
 // reflect any pending changes to the roots.
 func (c *Contract) NumSectors() int {
-	return c.sectorRoots.NumNodes()
+	return c.sectorRoots.NumLeaves()
 }
 
 // SectorRoot returns the sector root at index i.
@@ -134,7 +134,7 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 	// if the Merkle root is wrong, try to fix it.
 	if hostRevision.NewFileMerkleRoot != c.diskRoot {
 		// revert up to five roots
-		orig := c.sectorRoots.NumNodes()
+		orig := c.sectorRoots.NumLeaves()
 		c.sectorRoots.Reset()
 		if _, err := c.f.Seek(ContractRootOffset, io.SeekStart); err != nil {
 			return errors.Wrap(err, "could not seek to contract sector roots")
@@ -147,7 +147,7 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 		}
 
 		// re-apply each root, checking to see if the top-level root matches
-		for c.sectorRoots.NumNodes() != orig {
+		for c.sectorRoots.NumLeaves() != orig {
 			// NOTE: the first iteration of the loop simply recalculates the
 			// root without truncating. This accounts for the case where only
 			// diskRoot is out of sync.
@@ -166,7 +166,7 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 		}
 
 		// truncate disk roots
-		err := c.f.Truncate(ContractRootOffset + int64(c.sectorRoots.NumNodes()*crypto.HashSize))
+		err := c.f.Truncate(ContractRootOffset + int64(c.sectorRoots.NumLeaves()*crypto.HashSize))
 		if err != nil {
 			return errors.Wrap(err, "could not repair sector roots")
 		}
