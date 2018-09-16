@@ -27,7 +27,7 @@ var _ [0]struct{} = [renterhost.SectorSize & (renterhost.SectorSize - 1)]struct{
 func SectorRoot(sector *[renterhost.SectorSize]byte) crypto.Hash {
 	var s Stack
 	for i := 0; i < len(sector); i += LeafSize {
-		s.AppendNode(s.leafHash(sector[i:][:LeafSize]))
+		s.AppendLeafHash(s.leafHash(sector[i:][:LeafSize]))
 	}
 	return s.Root()
 }
@@ -36,7 +36,7 @@ func SectorRoot(sector *[renterhost.SectorSize]byte) crypto.Hash {
 func MetaRoot(roots []crypto.Hash) crypto.Hash {
 	var s Stack
 	for _, r := range roots {
-		s.AppendNode(r)
+		s.AppendLeafHash(r)
 	}
 	return s.Root()
 }

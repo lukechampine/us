@@ -127,7 +127,7 @@ func TestStack(t *testing.T) {
 
 	roots := make([]crypto.Hash, 32)
 	for _, root := range roots {
-		s.AppendNode(root)
+		s.AppendLeafHash(root)
 	}
 	if s.Root().String() != "1c23727030051d1bba1c887273addac2054afbd6926daddef6740f4f8bf1fb7f" {
 		t.Error("wrong Stack root for 32 empty roots")
@@ -136,7 +136,7 @@ func TestStack(t *testing.T) {
 	s.Reset()
 	roots[0][0] = 1
 	for _, root := range roots {
-		s.AppendNode(root)
+		s.AppendLeafHash(root)
 	}
 	if s.Root().String() != "c5da05749139505704ea18a5d92d46427f652ac79c5f5712e4aefb68e20dffb8" {
 		t.Error("wrong Stack root for roots[0][0] = 1")
@@ -147,7 +147,7 @@ func TestStack(t *testing.T) {
 		s.Reset()
 		for j := range roots {
 			fastrand.Read(roots[j][:])
-			s.AppendNode(roots[j])
+			s.AppendLeafHash(roots[j])
 		}
 		if s.Root() != recNodeRoot(roots) {
 			t.Error("Stack root does not match reference implementation")
@@ -158,7 +158,7 @@ func TestStack(t *testing.T) {
 	s.Reset()
 	roots = roots[:5]
 	for _, root := range roots {
-		s.AppendNode(root)
+		s.AppendLeafHash(root)
 	}
 	refRoot := recNodeRoot([]crypto.Hash{recNodeRoot(roots[:4]), roots[4]})
 	if s.Root() != refRoot {
@@ -202,7 +202,7 @@ func BenchmarkStack1TB(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		s.Reset()
 		for j := 0; j < sectorsPerTerabyte; j++ {
-			s.AppendNode(crypto.Hash{})
+			s.AppendLeafHash(crypto.Hash{})
 		}
 	}
 }

@@ -34,7 +34,7 @@ func BuildProof(sector *[renterhost.SectorSize]byte, start, end int, precalc fun
 	subtreeRoot := func(i, j int) crypto.Hash {
 		s.Reset()
 		for ; i < j; i++ {
-			s.AppendNode(s.leafHash(sector[i*LeafSize:][:LeafSize]))
+			s.AppendLeafHash(s.leafHash(sector[i*LeafSize:][:LeafSize]))
 		}
 		return s.Root()
 	}
@@ -94,7 +94,7 @@ func VerifyProof(proof []crypto.Hash, segments []byte, start, end int, root cryp
 	subtreeRoot := func(i, j int) crypto.Hash {
 		s.Reset()
 		for ; i < j; i++ {
-			s.AppendNode(s.leafHash(segments[(i-start)*LeafSize:][:LeafSize]))
+			s.AppendLeafHash(s.leafHash(segments[(i-start)*LeafSize:][:LeafSize]))
 		}
 		return s.Root()
 	}

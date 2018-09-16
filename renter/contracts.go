@@ -92,7 +92,7 @@ func (c *Contract) AppendRoot(root crypto.Hash) (crypto.Hash, error) {
 	if err := c.f.Sync(); err != nil {
 		return crypto.Hash{}, errors.Wrap(err, "could not sync contract file")
 	}
-	c.sectorRoots.AppendNode(root)
+	c.sectorRoots.AppendLeafHash(root)
 	c.diskRoot = c.sectorRoots.Root()
 	return c.diskRoot, nil
 }
