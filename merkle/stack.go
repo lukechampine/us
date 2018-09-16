@@ -34,6 +34,9 @@ type Stack struct {
 	buf   [1 + LeafSize]byte
 }
 
+// (*Stack).nodeHash assumes that LeafSize = crypto.HashSize * 2; verify this assumption at compile time
+var _ [LeafSize]struct{} = [crypto.HashSize * 2]struct{}{}
+
 func (s *Stack) leafHash(leaf []byte) crypto.Hash {
 	if len(leaf) != LeafSize {
 		panic("leafHash: illegal input size")
