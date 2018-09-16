@@ -27,19 +27,19 @@ import (
 // hashes are computed as needed at insertion time. (The total number of
 // hashes performed is the same.)
 type Stack struct {
-	// NOTE: 64 hashes is enough to cover 2^64 * SegmentSize bytes (1 ZiB), so
+	// NOTE: 64 hashes is enough to cover 2^64 * LeafSize bytes (1 ZiB), so
 	// we don't need to worry about running out.
 	stack [64]crypto.Hash
 	used  uint64 // one bit per stack elem; also number of nodes
-	buf   [1 + SegmentSize]byte
+	buf   [1 + LeafSize]byte
 }
 
-func (s *Stack) leafHash(segment []byte) crypto.Hash {
-	if len(segment) != SegmentSize {
+func (s *Stack) leafHash(leaf []byte) crypto.Hash {
+	if len(leaf) != LeafSize {
 		panic("leafHash: illegal input size")
 	}
 	s.buf[0] = leafHashPrefix
-	copy(s.buf[1:], segment)
+	copy(s.buf[1:], leaf)
 	return crypto.Hash(blake2b.Sum256(s.buf[:]))
 }
 

@@ -129,7 +129,7 @@ func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.M
 				// time.
 				//
 				// NOTE: to avoid introducing wasteful padding, the size of
-				// each slice should be a multiple of SegmentSize.
+				// each slice should be a multiple of merkle.LeafSize.
 				h.Sector.Reset()
 				buf := bytes.NewBuffer(shards[shardIndex])
 				for i := int64(0); buf.Len() > 0; i++ {

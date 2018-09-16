@@ -23,7 +23,7 @@ func nodeHash(left, right crypto.Hash) crypto.Hash {
 func refSectorRoot(sector *[renterhost.SectorSize]byte) crypto.Hash {
 	roots := make([]crypto.Hash, SegmentsPerSector)
 	for i := range roots {
-		roots[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
+		roots[i] = leafHash(sector[i*LeafSize:][:LeafSize])
 	}
 	return recNodeRoot(roots)
 }
@@ -264,7 +264,7 @@ func TestBuildVerifyProof(t *testing.T) {
 		start := fastrand.Intn(SegmentsPerSector - 1)
 		end := start + fastrand.Intn(SegmentsPerSector-start)
 		proof := BuildProof(&sector, start, end, nil)
-		if !VerifyProof(proof, sector[start*SegmentSize:end*SegmentSize], start, end, SectorRoot(&sector)) {
+		if !VerifyProof(proof, sector[start*LeafSize:end*LeafSize], start, end, SectorRoot(&sector)) {
 			t.Errorf("BuildProof constructed an incorrect proof for range %v-%v", start, end)
 		}
 	}
@@ -272,7 +272,7 @@ func TestBuildVerifyProof(t *testing.T) {
 	// test a proof with precomputed inputs
 	leftRoots := make([]crypto.Hash, SegmentsPerSector/2)
 	for i := range leftRoots {
-		leftRoots[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
+		leftRoots[i] = leafHash(sector[i*LeafSize:][:LeafSize])
 	}
 	left = MetaRoot(leftRoots)
 	precalc := func(i, j int) (h crypto.Hash) {
@@ -288,7 +288,7 @@ func TestBuildVerifyProof(t *testing.T) {
 	}
 
 	// test malformed inputs
-	if VerifyProof(nil, make([]byte, SegmentSize), 0, 1, crypto.Hash{}) {
+	if VerifyProof(nil, make([]byte, LeafSize), 0, 1, crypto.Hash{}) {
 		t.Error("VerifyProof verified an incorrect proof")
 	}
 	if VerifyProof([]crypto.Hash{{}}, sector[:], 0, SegmentsPerSector, crypto.Hash{}) {
@@ -323,7 +323,7 @@ func BenchmarkBuildProofPrecalc(b *testing.B) {
 	// precalculate left-hand nodes to depth 4
 	roots := make([]crypto.Hash, SegmentsPerSector)
 	for i := range roots {
-		roots[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
+		roots[i] = leafHash(sector[i*LeafSize:][:LeafSize])
 	}
 	left := make([]crypto.Hash, 4)
 	left[0], roots = MetaRoot(roots[:SegmentsPerSector/2]), roots[SegmentsPerSector/2:]
@@ -350,7 +350,7 @@ func BenchmarkBuildProofPrecalc(b *testing.B) {
 		return func(b *testing.B) {
 			b.ReportAllocs()
 			proof := BuildProof(&sector, start, end, precalc)
-			if !VerifyProof(proof, sector[start*SegmentSize:end*SegmentSize], start, end, root) {
+			if !VerifyProof(proof, sector[start*LeafSize:end*LeafSize], start, end, root) {
 				b.Fatal("precalculated roots are incorrect")
 			}
 			for i := 0; i < b.N; i++ {
@@ -370,7 +370,7 @@ func BenchmarkVerifyProof(b *testing.B) {
 
 	benchRange := func(start, end int) func(*testing.B) {
 		proof := BuildProof(&sector, start, end, nil)
-		proofSegs := sector[start*SegmentSize : end*SegmentSize]
+		proofSegs := sector[start*LeafSize : end*LeafSize]
 		return func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
