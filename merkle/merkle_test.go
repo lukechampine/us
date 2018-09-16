@@ -181,6 +181,18 @@ func TestStack(t *testing.T) {
 	} else if s.Root() != refRoot {
 		t.Error("wrong root after calling ReadFrom")
 	}
+
+	// test marshalling
+	var buf bytes.Buffer
+	if err := s.MarshalSia(&buf); err != nil {
+		t.Fatal(err)
+	}
+	var s2 Stack
+	if err := s2.UnmarshalSia(&buf); err != nil {
+		t.Fatal(err)
+	} else if s.Root() != s2.Root() {
+		t.Fatal("Stacks differ after marshal+unmarshal")
+	}
 }
 
 func BenchmarkStack1TB(b *testing.B) {
