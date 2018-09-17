@@ -107,6 +107,11 @@ func downloadStream(op *Operation, w io.Writer, chunkIndex int64, contracts rent
 		if h != nil {
 			defer h.Close()
 		}
+		// send dial stats
+		op.sendUpdate(DialStatsUpdate{
+			Host:  h.HostKey(),
+			Stats: h.Downloader.DialStats(),
+		})
 	}
 
 	// calculate download offset
@@ -138,10 +143,14 @@ func downloadStream(op *Operation, w io.Writer, chunkIndex int64, contracts rent
 		}
 
 		// download shards of the chunk in parallel
-		shards, shardLen, err := DownloadChunkShards(hosts, chunkIndex, m.MinShards, op.cancel)
+		shards, shardLen, stats, err := DownloadChunkShards(hosts, chunkIndex, m.MinShards, op.cancel)
 		if err != nil {
 			op.die(err)
 			return
+		}
+		// send download stats
+		for _, s := range stats {
+			op.sendUpdate(s)
 		}
 
 		// reconstruct missing data shards and write to file
@@ -291,11 +300,12 @@ func dialDownloaders(m *renter.MetaFile, contracts renter.ContractSet, scan rent
 //
 // The shards returned by DownloadChunkShards are only valid until the next
 // call to Sector on the shard's corresponding proto.Downloader.
-func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minShards int, cancel <-chan struct{}) (shards [][]byte, shardLen int, err error) {
+func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minShards int, cancel <-chan struct{}) (shards [][]byte, shardLen int, stats []DownloadStatsUpdate, err error) {
 	errNoHost := errors.New("no downloader for this host")
 	type result struct {
 		shardIndex int
 		shard      []byte
+		stats      DownloadStatsUpdate
 		err        error
 	}
 	// spawn minShards goroutines that receive download requests from
@@ -316,6 +326,10 @@ func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minS
 				} else {
 					res.shard, res.err = hosts[shardIndex].DownloadAndDecrypt(chunkIndex)
 					res.err = errors.Wrap(res.err, hosts[shardIndex].HostKey().ShortKey())
+					res.stats = DownloadStatsUpdate{
+						Host:  hosts[shardIndex].HostKey(),
+						Stats: hosts[shardIndex].Downloader.LastDownloadStats(),
+					}
 				}
 				resChan <- res
 			}
@@ -338,7 +352,7 @@ func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minS
 	for len(goodRes) < minShards && len(badRes) <= len(hosts)-minShards {
 		select {
 		case <-cancel:
-			return nil, 0, ErrCanceled
+			return nil, 0, nil, ErrCanceled
 
 		case res := <-resChan:
 			if res.err == nil {
@@ -359,12 +373,14 @@ func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minS
 				errStrings = append(errStrings, r.err.Error())
 			}
 		}
-		return nil, 0, errors.New("too many hosts did not supply their shard:\n" + strings.Join(errStrings, "\n"))
+		return nil, 0, nil, errors.New("too many hosts did not supply their shard:\n" + strings.Join(errStrings, "\n"))
 	}
 
 	shards = make([][]byte, len(hosts))
+	stats = make([]DownloadStatsUpdate, 0, len(goodRes))
 	for _, r := range goodRes {
 		shards[r.shardIndex] = r.shard
+		stats = append(stats, r.stats)
 	}
 
 	// determine shardLen
@@ -374,5 +390,5 @@ func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minS
 			break
 		}
 	}
-	return shards, shardLen, nil
+	return shards, shardLen, stats, nil
 }

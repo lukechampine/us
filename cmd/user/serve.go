@@ -79,7 +79,7 @@ func (set *downloaderSet) downloadChunkShards(m renter.MetaIndex, shards [][]ren
 			Slices:     shards[i],
 		}
 	}
-	chunkShards, shardLen, err := renterutil.DownloadChunkShards(hosts, chunkIndex, m.MinShards, nil)
+	chunkShards, shardLen, _, err := renterutil.DownloadChunkShards(hosts, chunkIndex, m.MinShards, nil)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -94,7 +94,7 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 	}
 
 	// initiate connection
-	conn, err := initiateRPC(host.NetAddress, modules.RPCRenewContract, contract)
+	conn, _, err := initiateRPC(host.NetAddress, modules.RPCRenewContract, contract)
 	if err != nil {
 		return ContractRevision{}, err
 	}

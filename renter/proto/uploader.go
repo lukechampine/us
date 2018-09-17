@@ -42,7 +42,7 @@ func (u *Uploader) Upload(data *[renterhost.SectorSize]byte) (crypto.Hash, error
 	if isHostDisconnect(err) {
 		// try reconnecting
 		u.conn.Close()
-		u.conn, err = initiateRPC(u.host.NetAddress, modules.RPCReviseContract, u.contract)
+		u.conn, _, err = initiateRPC(u.host.NetAddress, modules.RPCReviseContract, u.contract)
 		if err != nil {
 			return crypto.Hash{}, err
 		}
@@ -141,7 +141,7 @@ func NewUploader(host hostdb.ScannedHost, contract ContractEditor, currentHeight
 	if contract.Revision().RenterFunds().Cmp(sectorPrice) < 0 {
 		return nil, errors.New("contract has insufficient funds to support upload")
 	}
-	conn, err := initiateRPC(host.NetAddress, modules.RPCReviseContract, contract)
+	conn, _, err := initiateRPC(host.NetAddress, modules.RPCReviseContract, contract)
 	if err != nil {
 		return nil, err
 	}

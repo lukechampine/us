@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/renter/proto"
 )
 
 // assume metafiles have this extension
@@ -92,6 +95,25 @@ type DirQueueUpdate struct {
 type DirSkipUpdate struct {
 	Filename string
 	Err      error
+}
+
+// A MigrateSkipUpdate indicates that a host will not be migrated to.
+type MigrateSkipUpdate struct {
+	Host hostdb.HostPublicKey
+	Err  error
+}
+
+// DialStatsUpdate records metrics about dialing a host.
+type DialStatsUpdate struct {
+	Host  hostdb.HostPublicKey
+	Stats proto.DialStats
+}
+
+// DownloadStatsUpdate records metrics about downloading sector data from a
+// host.
+type DownloadStatsUpdate struct {
+	Host  hostdb.HostPublicKey
+	Stats proto.DownloadStats
 }
 
 // FileIter is an iterator that returns the next filepath and the filepath of

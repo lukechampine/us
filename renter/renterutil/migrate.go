@@ -15,12 +15,6 @@ import (
 	"gitlab.com/NebulousLabs/Sia/types"
 )
 
-// A MigrateSkipUpdate indicates that a host will not be migrated to.
-type MigrateSkipUpdate struct {
-	Host hostdb.HostPublicKey
-	Err  error
-}
-
 // MigrateFile uploads file shards to a new set of hosts. The shards are
 // retrieved by erasure-encoding f.
 func MigrateFile(f *os.File, newcontracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn, height types.BlockHeight) *Operation {
@@ -410,7 +404,7 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 		}
 
 		// download chunk shards in parallel and reconstruct
-		shards, _, err := DownloadChunkShards(oldhosts, chunkIndex, m.MinShards, op.cancel)
+		shards, _, _, err := DownloadChunkShards(oldhosts, chunkIndex, m.MinShards, op.cancel)
 		if err != nil {
 			op.die(err)
 			return

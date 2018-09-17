@@ -29,27 +29,36 @@ func isHostDisconnect(err error) bool {
 // extendDeadline is a helper function for extending the connection timeout.
 func extendDeadline(conn net.Conn, d time.Duration) { _ = conn.SetDeadline(time.Now().Add(d)) }
 
-func initiateRPC(addr modules.NetAddress, rpc types.Specifier, contract ContractEditor) (net.Conn, error) {
+func initiateRPC(addr modules.NetAddress, rpc types.Specifier, contract ContractEditor) (net.Conn, DialStats, error) {
+	dialStart := time.Now()
 	conn, err := net.DialTimeout("tcp", string(addr), 15*time.Second)
 	if err != nil {
-		return nil, errors.Wrap(err, "could not dial host")
+		return nil, DialStats{}, errors.Wrap(err, "could not dial host")
 	}
+	protoStart := time.Now()
 	// allot 2 minutes for RPC request + revision exchange
 	extendDeadline(conn, modules.NegotiateRecentRevisionTime)
 	defer extendDeadline(conn, time.Hour)
 	if err := encoding.WriteObject(conn, rpc); err != nil {
 		conn.Close()
-		return nil, errors.Wrap(err, "could not initiate RPC")
+		return nil, DialStats{}, errors.Wrap(err, "could not initiate RPC")
 	}
 	hostRev, hostSigs, err := verifyRecentRevision(conn, contract.Revision())
+	protoEnd := time.Now()
 	if err != nil {
 		conn.Close()
-		return nil, errors.Wrap(err, "could not verify most recent contract revision")
+		return nil, DialStats{}, errors.Wrap(err, "could not verify most recent contract revision")
 	} else if err := contract.SyncWithHost(hostRev, hostSigs); err != nil {
 		conn.Close() // TODO: close gracefully
-		return nil, errors.Wrap(err, "could not synchronize contract with host")
+		return nil, DialStats{}, errors.Wrap(err, "could not synchronize contract with host")
 	}
-	return conn, nil
+
+	stats := DialStats{
+		DialStart:     dialStart,
+		ProtocolStart: protoStart,
+		ProtocolEnd:   protoEnd,
+	}
+	return conn, stats, nil
 }
 
 func terminateRPC(conn net.Conn, host hostdb.ScannedHost) error {

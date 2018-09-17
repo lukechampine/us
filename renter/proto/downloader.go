@@ -22,11 +22,25 @@ type Downloader struct {
 	contract ContractEditor
 	conn     net.Conn
 	buf      [24]byte // sufficient to read three length-prefixes
+	// stats
+	dialStats DialStats
+	lastStats DownloadStats
 }
 
 // HostKey returns the public key of the host being downloaded from.
 func (d *Downloader) HostKey() hostdb.HostPublicKey {
 	return d.host.PublicKey
+}
+
+// DialStats returns the metrics of the initial connection to the host.
+func (d *Downloader) DialStats() DialStats {
+	return d.dialStats
+}
+
+// LastDownloadStats returns the metrics of the most recent successful
+// download.
+func (d *Downloader) LastDownloadStats() DownloadStats {
+	return d.lastStats
 }
 
 // Close cleanly terminates the download loop with the host and closes the
@@ -59,8 +73,11 @@ func (d *Downloader) PartialSector(dst []byte, root crypto.Hash, offset uint32) 
 	err := d.partialSector(dst, root, offset)
 	if isHostDisconnect(err) {
 		// try reconnecting
+		//
+		// NOTE: we don't update dialStats here; even if we did, how would the
+		// caller know? We don't want them checking DialStats after every call.
 		d.conn.Close()
-		d.conn, err = initiateRPC(d.host.NetAddress, modules.RPCDownload, d.contract)
+		d.conn, _, err = initiateRPC(d.host.NetAddress, modules.RPCDownload, d.contract)
 		if err != nil {
 			return err
 		}
@@ -79,6 +96,7 @@ func (d *Downloader) partialSector(dst []byte, root crypto.Hash, offset uint32) 
 	}
 
 	// initiate download, updating host settings
+	protoStart := time.Now()
 	if err := startRevision(d.conn, &d.host); err != nil {
 		return err
 	}
@@ -105,6 +123,7 @@ func (d *Downloader) partialSector(dst []byte, root crypto.Hash, offset uint32) 
 
 	// send the revision to the host for approval
 	txnSignatures, err := negotiateRevision(d.conn, rev, contract.RenterKey)
+	protoEnd := time.Now()
 	if err == modules.ErrStopResponse {
 		// if host gracefully closed, ignore the error. The next download
 		// attempt will return an error that satisfies IsHostDisconnect.
@@ -120,6 +139,7 @@ func (d *Downloader) partialSector(dst []byte, root crypto.Hash, offset uint32) 
 	}
 
 	// read payload length prefixes
+	xferStart := time.Now()
 	if _, err := io.ReadFull(d.conn, d.buf[:24]); err != nil {
 		return err
 	}
@@ -143,19 +163,30 @@ func (d *Downloader) partialSector(dst []byte, root crypto.Hash, offset uint32) 
 		d.conn.Close()
 		return err
 	}
+	xferEnd := time.Now()
+
+	d.lastStats = DownloadStats{
+		Bytes:         int64(len(dst)),
+		Cost:          sectorPrice,
+		ProtocolStart: protoStart,
+		ProtocolEnd:   protoEnd,
+		TransferStart: xferStart,
+		TransferEnd:   xferEnd,
+	}
 	return nil
 }
 
 // NewDownloader initiates the download request loop with a host, and returns a
 // Downloader.
 func NewDownloader(host hostdb.ScannedHost, contract ContractEditor) (*Downloader, error) {
-	conn, err := initiateRPC(host.NetAddress, modules.RPCDownload, contract)
+	conn, stats, err := initiateRPC(host.NetAddress, modules.RPCDownload, contract)
 	if err != nil {
 		return nil, err
 	}
 	return &Downloader{
-		contract: contract,
-		host:     host,
-		conn:     conn,
+		contract:  contract,
+		host:      host,
+		conn:      conn,
+		dialStats: stats,
 	}, nil
 }
