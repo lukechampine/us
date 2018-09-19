@@ -169,6 +169,13 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 	// NOTE: it is not necessary to explicitly check that the host supplied
 	// collateral before signing; underpayment will result in an invalid
 	// transaction.
+	for _, id := range toSign {
+		txn.TransactionSignatures = append(txn.TransactionSignatures, types.TransactionSignature{
+			ParentID:       id,
+			PublicKeyIndex: 0,
+			CoveredFields:  types.CoveredFields{WholeTransaction: true},
+		})
+	}
 	err = w.SignTransaction(&txn, toSign)
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
@@ -275,10 +282,6 @@ func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr type
 		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
 			ParentID:         types.SiacoinOutputID(o.ID),
 			UnlockConditions: uc,
-		})
-		txn.TransactionSignatures = append(txn.TransactionSignatures, types.TransactionSignature{
-			ParentID:       crypto.Hash(o.ID),
-			PublicKeyIndex: 0,
 		})
 		toSign = append(toSign, crypto.Hash(o.ID))
 	}

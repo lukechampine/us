@@ -147,6 +147,13 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 	txn.SiacoinOutputs = append(txn.SiacoinOutputs, hostOutputs...)
 
 	// sign the txn
+	for _, id := range toSign {
+		txn.TransactionSignatures = append(txn.TransactionSignatures, types.TransactionSignature{
+			ParentID:       id,
+			PublicKeyIndex: 0,
+			CoveredFields:  types.CoveredFields{WholeTransaction: true},
+		})
+	}
 	err = w.SignTransaction(&txn, toSign)
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
