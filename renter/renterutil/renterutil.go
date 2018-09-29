@@ -33,10 +33,7 @@ func (op *Operation) die(err error) {
 }
 
 func (op *Operation) sendUpdate(u interface{}) {
-	select {
-	case op.updates <- u:
-	default:
-	}
+	op.updates <- u
 }
 
 // Updates returns op's update channel. Callers should use a type switch to
