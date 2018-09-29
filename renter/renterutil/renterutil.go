@@ -75,42 +75,42 @@ func newOperation() *Operation {
 // A TransferProgressUpdate details the number of bytes transferred during the
 // course of an Operation.
 type TransferProgressUpdate struct {
-	Total       int64
-	Start       int64
-	Transferred int64
+	Total       int64 `json:"total"`
+	Start       int64 `json:"start"`
+	Transferred int64 `json:"transferred"`
 }
 
 // A DirQueueUpdate indicates that a file has been queued as part of a multi-
 // file Operation.
 type DirQueueUpdate struct {
-	Filename string
-	Filesize int64
+	Filename string `json:"filename"`
+	Filesize int64  `json:"filesize"`
 }
 
 // A DirSkipUpdate indicates that a file has been skipped as part of a multi-
 // file Operation.
 type DirSkipUpdate struct {
-	Filename string
-	Err      error
+	Filename string `json:"filename"`
+	Err      error  `json:"err"`
 }
 
 // A MigrateSkipUpdate indicates that a host will not be migrated to.
 type MigrateSkipUpdate struct {
-	Host hostdb.HostPublicKey
-	Err  error
+	Host hostdb.HostPublicKey `json:"host"`
+	Err  error                `json:"err"`
 }
 
 // DialStatsUpdate records metrics about dialing a host.
 type DialStatsUpdate struct {
-	Host  hostdb.HostPublicKey
-	Stats proto.DialStats
+	Host  hostdb.HostPublicKey `json:"host"`
+	Stats proto.DialStats      `json:"stats"`
 }
 
 // DownloadStatsUpdate records metrics about downloading sector data from a
 // host.
 type DownloadStatsUpdate struct {
-	Host  hostdb.HostPublicKey
-	Stats proto.DownloadStats
+	Host  hostdb.HostPublicKey `json:"host"`
+	Stats proto.DownloadStats  `json:"stats"`
 }
 
 // FileIter is an iterator that returns the next filepath and the filepath of
