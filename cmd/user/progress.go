@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"syscall"
@@ -44,6 +48,20 @@ func trackDownload(filename string, op *renterutil.Operation) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 
+	var log io.Writer
+	if config.LogFile != "" {
+		f, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		bw := bufio.NewWriter(f)
+		defer bw.Flush()
+		log = bw
+	} else {
+		log = ioutil.Discard
+	}
+
 	var downloadStart time.Time
 	for {
 		select {
@@ -58,6 +76,13 @@ func trackDownload(filename string, op *renterutil.Operation) error {
 					downloadStart = time.Now()
 				}
 				printSimpleProgress(filename, u, time.Since(downloadStart))
+
+			case renterutil.DialStatsUpdate:
+				js, _ := json.Marshal(u)
+				fmt.Fprintf(log, `{"type":"dial", "data": %s}`+"\n", js)
+			case renterutil.DownloadStatsUpdate:
+				js, _ := json.Marshal(u)
+				fmt.Fprintf(log, `{"type":"download", "data": %s}`+"\n", js)
 			}
 		case <-sigChan:
 			fmt.Println("\rStopping...")

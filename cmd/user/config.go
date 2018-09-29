@@ -14,9 +14,11 @@ var config struct {
 	Contracts    string   `toml:"contracts"`
 	MinShards    int      `toml:"min_shards"`
 	Hosts        []string `toml:"hosts"`
+	LogFile      string   `toml:"log_file"`
 }
 
 func loadConfig() error {
+	// TODO: cross-platform location?
 	user, err := user.Current()
 	if err != nil {
 		return err
