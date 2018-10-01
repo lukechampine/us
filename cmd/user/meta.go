@@ -67,10 +67,14 @@ func uploadmetafile(f *os.File, minShards int, contractDir, metaPath string) err
 	}()
 
 	c := makeClient()
-	if !c.Synced() {
+	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
-	op := renterutil.Upload(f, contracts, m, c.Scan, c.ChainHeight())
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
+	}
+	op := renterutil.Upload(f, contracts, m, c, currentHeight)
 	return trackUpload(f.Name(), op)
 }
 
@@ -82,12 +86,16 @@ func uploadmetadir(dir, metaDir, contractDir string, minShards int) error {
 	defer contracts.Close()
 
 	c := makeClient()
-	if !c.Synced() {
+	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
+	}
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
 	}
 
 	fileIter := renterutil.NewRecursiveFileIter(dir, metaDir)
-	op := renterutil.UploadDir(fileIter, contracts, minShards, c.Scan, c.ChainHeight())
+	op := renterutil.UploadDir(fileIter, contracts, minShards, c, currentHeight)
 	return trackUploadDir(op)
 }
 
@@ -109,10 +117,14 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 	}()
 
 	c := makeClient()
-	if !c.Synced() {
+	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
-	op := renterutil.Upload(f, contracts, m, c.Scan, c.ChainHeight())
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
+	}
+	op := renterutil.Upload(f, contracts, m, c, currentHeight)
 	return trackUpload(f.Name(), op)
 }
 
@@ -138,7 +150,7 @@ func downloadmetafile(f *os.File, contractDir, metaPath string) error {
 	}()
 
 	c := makeClient()
-	op := renterutil.Download(f, contracts, m, c.Scan)
+	op := renterutil.Download(f, contracts, m, c)
 	return trackDownload(f.Name(), op)
 }
 
@@ -164,7 +176,7 @@ func downloadmetastream(w io.Writer, contractDir, metaPath string) error {
 	}()
 
 	c := makeClient()
-	op := renterutil.DownloadStream(w, contracts, m, c.Scan)
+	op := renterutil.DownloadStream(w, contracts, m, c)
 	return trackDownloadStream(op)
 }
 
@@ -177,7 +189,7 @@ func downloadmetadir(dir, contractDir, metaDir string) error {
 
 	c := makeClient()
 	metafileIter := renterutil.NewRecursiveMetaFileIter(metaDir, dir)
-	op := renterutil.DownloadDir(metafileIter, contracts, c.Scan)
+	op := renterutil.DownloadDir(metafileIter, contracts, c)
 	return trackDownloadDir(op)
 }
 
@@ -199,7 +211,7 @@ func checkupMeta(contractDir, metaPath string) error {
 	}()
 
 	c := makeClient()
-	for r := range renterutil.Checkup(contracts, m, c.Scan) {
+	for r := range renterutil.Checkup(contracts, m, c) {
 		if r.Error != nil {
 			fmt.Printf("FAIL Host %v:\n\t%v\n", r.Host.ShortKey(), r.Error)
 		} else {
@@ -229,10 +241,14 @@ func migrateFile(f *os.File, contractDir, metaPath string) error {
 	}()
 
 	c := makeClient()
-	if !c.Synced() {
+	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
-	op := renterutil.MigrateFile(f, newcontracts, m, c.Scan, c.ChainHeight())
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
+	}
+	op := renterutil.MigrateFile(f, newcontracts, m, c, currentHeight)
 	return trackMigrateFile(metaPath, op)
 }
 
@@ -244,11 +260,15 @@ func migrateDirFile(dir, contractDir, metaDir string) error {
 	defer newcontracts.Close()
 
 	c := makeClient()
-	if !c.Synced() {
+	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
+	}
 	metafileIter := renterutil.NewRecursiveMetaFileIter(metaDir, dir)
-	op := renterutil.MigrateDirFile(newcontracts, metafileIter, c.Scan, c.ChainHeight())
+	op := renterutil.MigrateDirFile(newcontracts, metafileIter, c, currentHeight)
 	return trackMigrateDir(op)
 }
 
@@ -276,10 +296,14 @@ func migrateDirect(contractDir, metaPath string) error {
 	defer oldcontracts.Close()
 
 	c := makeClient()
-	if !c.Synced() {
+	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
-	op := renterutil.MigrateDirect(newcontracts, oldcontracts, m, c.Scan, c.ChainHeight())
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
+	}
+	op := renterutil.MigrateDirect(newcontracts, oldcontracts, m, c, currentHeight)
 	return trackMigrateFile(metaPath, op)
 }
 
@@ -291,11 +315,15 @@ func migrateDirDirect(contractDir, metaDir string) error {
 	defer newcontracts.Close()
 
 	c := makeClient()
-	if !c.Synced() {
+	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
+	}
 	fileIter := renterutil.NewRecursiveMigrateDirIter(metaDir, contractDir)
-	op := renterutil.MigrateDirDirect(newcontracts, fileIter, c.Scan, c.ChainHeight())
+	op := renterutil.MigrateDirDirect(newcontracts, fileIter, c, currentHeight)
 	return trackMigrateDir(op)
 }
 
@@ -323,10 +351,14 @@ func migrateRemote(contractDir, metaPath string) error {
 	defer oldcontracts.Close()
 
 	c := makeClient()
-	if !c.Synced() {
+	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
-	op := renterutil.MigrateRemote(newcontracts, oldcontracts, m, c.Scan, c.ChainHeight())
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
+	}
+	op := renterutil.MigrateRemote(newcontracts, oldcontracts, m, c, currentHeight)
 	return trackMigrateFile(metaPath, op)
 }
 
@@ -338,10 +370,14 @@ func migrateDirRemote(contractDir, metaDir string) error {
 	defer newcontracts.Close()
 
 	c := makeClient()
-	if !c.Synced() {
+	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
+	}
 	fileIter := renterutil.NewRecursiveMigrateDirIter(metaDir, contractDir)
-	op := renterutil.MigrateDirRemote(newcontracts, fileIter, c.Scan, c.ChainHeight())
+	op := renterutil.MigrateDirRemote(newcontracts, fileIter, c, currentHeight)
 	return trackMigrateDir(op)
 }

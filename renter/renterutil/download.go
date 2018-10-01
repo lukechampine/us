@@ -15,13 +15,13 @@ import (
 
 // Download downloads m to f, updating the specified contracts. Download may
 // write to f in parallel.
-func Download(f *os.File, contracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn) *Operation {
+func Download(f *os.File, contracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver) *Operation {
 	op := newOperation()
-	go download(op, f, contracts, m, scan)
+	go download(op, f, contracts, m, hkr)
 	return op
 }
 
-func download(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn) {
+func download(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver) {
 	if err := f.Chmod(m.Mode); err != nil {
 		op.die(errors.Wrap(err, "could not set file mode"))
 		return
@@ -86,19 +86,19 @@ func download(op *Operation, f *os.File, contracts renter.ContractSet, m *renter
 		return
 	}
 
-	downloadStream(op, f, int64(chunkIndex), contracts, m, scan)
+	downloadStream(op, f, int64(chunkIndex), contracts, m, hkr)
 }
 
 // DownloadStream writes the contents of m to w.
-func DownloadStream(w io.Writer, contracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn) *Operation {
+func DownloadStream(w io.Writer, contracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver) *Operation {
 	op := newOperation()
-	go downloadStream(op, w, 0, contracts, m, scan)
+	go downloadStream(op, w, 0, contracts, m, hkr)
 	return op
 }
 
-func downloadStream(op *Operation, w io.Writer, chunkIndex int64, contracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn) {
+func downloadStream(op *Operation, w io.Writer, chunkIndex int64, contracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver) {
 	// connect to hosts in parallel
-	hosts, err := dialDownloaders(m, contracts, scan, op.cancel)
+	hosts, err := dialDownloaders(m, contracts, hkr, op.cancel)
 	if err != nil {
 		op.die(err)
 		return
@@ -176,13 +176,13 @@ func downloadStream(op *Operation, w io.Writer, chunkIndex int64, contracts rent
 
 // DownloadDir downloads the metafiles in a directory, writing their contents
 // to a set of files whose structure mirrors the metafile directory.
-func DownloadDir(nextFile FileIter, contracts renter.ContractSet, scan renter.ScanFn) *Operation {
+func DownloadDir(nextFile FileIter, contracts renter.ContractSet, hkr renter.HostKeyResolver) *Operation {
 	op := newOperation()
-	go downloadDir(op, nextFile, contracts, scan)
+	go downloadDir(op, nextFile, contracts, hkr)
 	return op
 }
 
-func downloadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, scan renter.ScanFn) {
+func downloadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, hkr renter.HostKeyResolver) {
 	for {
 		metaPath, filePath, err := nextFile()
 		if err == io.EOF {
@@ -219,7 +219,7 @@ func downloadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet,
 
 			op.sendUpdate(DirQueueUpdate{Filename: metaPath, Filesize: m.Filesize})
 
-			dop := Download(f, contracts, m, scan)
+			dop := Download(f, contracts, m, hkr)
 			// cancel dop if op is canceled
 			done := make(chan struct{})
 			defer close(done)
@@ -243,7 +243,7 @@ func downloadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet,
 	op.die(nil)
 }
 
-func dialDownloaders(m *renter.MetaFile, contracts renter.ContractSet, scan renter.ScanFn, cancel <-chan struct{}) ([]*renter.ShardDownloader, error) {
+func dialDownloaders(m *renter.MetaFile, contracts renter.ContractSet, hkr renter.HostKeyResolver, cancel <-chan struct{}) ([]*renter.ShardDownloader, error) {
 	type result struct {
 		shardIndex int
 		host       *renter.ShardDownloader
@@ -258,7 +258,7 @@ func dialDownloaders(m *renter.MetaFile, contracts renter.ContractSet, scan rent
 			if !ok {
 				res.err = errors.Errorf("%v: no contract for host", hostKey.ShortKey())
 			} else {
-				res.host, res.err = renter.NewShardDownloader(m, contract, scan)
+				res.host, res.err = renter.NewShardDownloader(m, contract, hkr)
 			}
 			resChan <- res
 		}(i)

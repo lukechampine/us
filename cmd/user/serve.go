@@ -27,7 +27,7 @@ func serve(contractDir, metaDir, addr string) error {
 	defer contracts.Close()
 
 	c := makeClient()
-	downloaders, err := newDownloaderSet(contracts, c.Scan)
+	downloaders, err := newDownloaderSet(contracts, c)
 	if err != nil {
 		return errors.Wrap(err, "could not connect to hosts")
 	}
@@ -93,17 +93,17 @@ func (set *downloaderSet) downloadChunkShards(m renter.MetaIndex, shards [][]ren
 
 // newDownloaderSet creates a downloaderSet composed of one proto.Downloader
 // per contract.
-func newDownloaderSet(contracts renter.ContractSet, scan renter.ScanFn) (*downloaderSet, error) {
+func newDownloaderSet(contracts renter.ContractSet, hkr renter.HostKeyResolver) (*downloaderSet, error) {
 	ds := &downloaderSet{
 		downloaders: make(map[hostdb.HostPublicKey]*proto.Downloader),
 	}
 	for hostKey, contract := range contracts {
-		host, err := scan(contract.HostKey())
+		hostIP, err := hkr.ResolveHostKey(contract.HostKey())
 		if err != nil {
 			// TODO: skip instead?
-			return nil, errors.Wrapf(err, "%v: could not scan host", hostKey.ShortKey())
+			return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
 		}
-		d, err := proto.NewDownloader(host, contract)
+		d, err := proto.NewDownloader(hostIP, contract)
 		if err != nil {
 			// TODO: skip instead?
 			return nil, err

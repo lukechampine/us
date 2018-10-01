@@ -52,14 +52,26 @@ func lookupHost(prefix string, hosts []hostdb.HostPublicKey) (pubkey hostdb.Host
 func scan(hostKeyPrefix string, bytes uint64, duration types.BlockHeight, downloads float64) error {
 	c := makeClient()
 
-	hostKey, err := lookupHost(hostKeyPrefix, c.Hosts())
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		currentHeight = 1e6
+	}
+	_, maxFee, err := c.FeeEstimate()
+	if err != nil {
+		return errors.Wrap(err, "could not estimate transaction fee")
+	}
+	hosts, err := c.Hosts()
+	if err != nil {
+		return errors.Wrap(err, "could not lookup host")
+	}
+	hostKey, err := lookupHost(hostKeyPrefix, hosts)
 	if err != nil {
 		return errors.Wrap(err, "could not lookup host")
 	}
 
 	// estimate RPC latency by calling ChainHeight
 	start := time.Now()
-	_ = c.ChainHeight()
+	c.ChainHeight()
 	rpcDelay := time.Since(start)
 
 	start = time.Now()
@@ -77,8 +89,7 @@ func scan(hostKeyPrefix string, bytes uint64, duration types.BlockHeight, downlo
 	if hostCollateral.Cmp(host.MaxCollateral) > 0 {
 		hostCollateral = host.MaxCollateral
 	}
-	siafundFee := types.Tax(c.ChainHeight(), cost.Add(hostCollateral))
-	_, maxFee := c.FeeEstimate()
+	siafundFee := types.Tax(currentHeight, cost.Add(hostCollateral))
 	txnFee := maxFee.Mul64(2000) // assume 2KB transaction size
 	total := cost.Add(host.ContractPrice).Add(siafundFee).Add(txnFee)
 

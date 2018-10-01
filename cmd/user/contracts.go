@@ -16,18 +16,19 @@ import (
 
 func contractinfo(contract proto.ContractRevision) {
 	c := makeClient()
-	height := c.ChainHeight()
 	var remaining string
-	if height <= contract.EndHeight() {
-		remaining = fmt.Sprintf("%v blocks remaining", contract.EndHeight()-height)
-	} else {
-		remaining = fmt.Sprintf("expired %v blocks ago", height-contract.EndHeight())
+	if height, err := c.ChainHeight(); err == nil {
+		if height <= contract.EndHeight() {
+			remaining = fmt.Sprintf("(%v blocks remaining)", contract.EndHeight()-height)
+		} else {
+			remaining = fmt.Sprintf("(expired %v blocks ago)", height-contract.EndHeight())
+		}
 	}
 
 	fmt.Printf(`Host Key:    %v
 Contract ID: %v
 
-End Height:   %v (%v)
+End Height:   %v %v
 Renter Funds: %v remaining
 `, contract.HostKey().Key(), contract.ID(), contract.EndHeight(),
 		remaining, currencyUnits(contract.RenterFunds()))
@@ -45,8 +46,11 @@ func form(hostKeyPrefix string, funds types.Currency, endHeight types.BlockHeigh
 	if err := checkCreate(filename); err != nil {
 		return err
 	}
-
-	hostKey, err := lookupHost(hostKeyPrefix, c.Hosts())
+	hosts, err := c.Hosts()
+	if err != nil {
+		return errors.Wrap(err, "could not lookup host")
+	}
+	hostKey, err := lookupHost(hostKeyPrefix, hosts)
 	if err != nil {
 		return errors.Wrap(err, "could not lookup host")
 	}
@@ -55,7 +59,11 @@ func form(hostKeyPrefix string, funds types.Currency, endHeight types.BlockHeigh
 		return errors.Wrap(err, "could not scan host")
 	}
 
-	contract, err := proto.FormContract(c, c, host, funds, c.ChainHeight(), endHeight)
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
+	}
+	contract, err := proto.FormContract(c, c, host, funds, currentHeight, endHeight)
 	if err != nil {
 		return err
 	}
@@ -88,7 +96,11 @@ func renew(contractPath string, funds types.Currency, endHeight types.BlockHeigh
 	if err != nil {
 		return errors.Wrap(err, "could not scan host")
 	}
-	newContract, err := proto.RenewContract(c, c, uc, host, funds, c.ChainHeight(), endHeight)
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
+	}
+	newContract, err := proto.RenewContract(c, c, uc, host, funds, currentHeight, endHeight)
 	if err != nil {
 		return errors.Wrap(err, "could not renew contract")
 	}
@@ -123,7 +135,7 @@ func checkupContract(contractPath string) error {
 	defer contract.Close()
 
 	c := makeClient()
-	r := renterutil.CheckupContract(contract, c.Scan)
+	r := renterutil.CheckupContract(contract, c)
 	if r.Error != nil {
 		fmt.Printf("FAIL Host %v:\n\t%v\n", r.Host.ShortKey(), r.Error)
 	} else {

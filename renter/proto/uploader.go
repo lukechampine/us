@@ -135,18 +135,18 @@ func (u *Uploader) upload(data *[renterhost.SectorSize]byte) (crypto.Hash, error
 
 // NewUploader initiates the contract revision process with a host, and returns
 // an Uploader.
-func NewUploader(host hostdb.ScannedHost, contract ContractEditor, currentHeight types.BlockHeight) (*Uploader, error) {
-	// check that contract has enough value to support an upload
-	sectorPrice := host.UploadBandwidthPrice.Mul64(renterhost.SectorSize)
-	if contract.Revision().RenterFunds().Cmp(sectorPrice) < 0 {
-		return nil, errors.New("contract has insufficient funds to support upload")
-	}
-	conn, _, err := initiateRPC(host.NetAddress, modules.RPCReviseContract, contract)
+func NewUploader(hostIP modules.NetAddress, contract ContractEditor, currentHeight types.BlockHeight) (*Uploader, error) {
+	conn, _, err := initiateRPC(hostIP, modules.RPCReviseContract, contract)
 	if err != nil {
 		return nil, err
 	}
 	return &Uploader{
-		host:     host,
+		host: hostdb.ScannedHost{
+			HostSettings: hostdb.HostSettings{
+				NetAddress: hostIP,
+			},
+			PublicKey: contract.Revision().HostKey(),
+		},
 		height:   currentHeight,
 		contract: contract,
 		conn:     conn,

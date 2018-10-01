@@ -8,6 +8,7 @@ import (
 	"lukechampine.com/us/renter/proto"
 
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/modules"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -15,8 +16,11 @@ import (
 // validation.
 var ErrBadChecksum = errors.New("sector data failed checksum validation")
 
-// A ScanFn can scan hosts.
-type ScanFn func(hostdb.HostPublicKey) (hostdb.ScannedHost, error)
+// A HostKeyResolver resolves a host's public key to the most recent
+// NetAddress it announced on the blockchain.
+type HostKeyResolver interface {
+	ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAddress, error)
+}
 
 // A ShardDownloader wraps a proto.Downloader to provide SectorSlice-based
 // data retrieval, transparently decrypting and validating the received data.
@@ -79,20 +83,20 @@ func (d *ShardDownloader) Close() error {
 
 // NewShardDownloader connects to a host and returns a ShardDownloader capable
 // of downloading the SectorSlices of m.
-func NewShardDownloader(m *MetaFile, contract *Contract, scan ScanFn) (*ShardDownloader, error) {
+func NewShardDownloader(m *MetaFile, contract *Contract, hkr HostKeyResolver) (*ShardDownloader, error) {
 	hostKey := contract.HostKey()
 	// load sector slices
 	slices, err := ReadShard(m.ShardPath(hostKey))
 	if err != nil {
 		return nil, errors.Wrapf(err, "%v: could not load sector slices", hostKey.ShortKey())
 	}
-	// get host entry
-	host, err := scan(contract.HostKey())
+	// get host IP
+	hostIP, err := hkr.ResolveHostKey(contract.HostKey())
 	if err != nil {
-		return nil, errors.Wrapf(err, "%v: could not scan host", hostKey.ShortKey())
+		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
 	}
 	// create downloader
-	d, err := proto.NewDownloader(host, contract)
+	d, err := proto.NewDownloader(hostIP, contract)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%v: could not initiate download protocol with host", hostKey.ShortKey())
 	}

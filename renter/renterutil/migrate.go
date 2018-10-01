@@ -17,7 +17,7 @@ import (
 
 // MigrateFile uploads file shards to a new set of hosts. The shards are
 // retrieved by erasure-encoding f.
-func MigrateFile(f *os.File, newcontracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn, height types.BlockHeight) *Operation {
+func MigrateFile(f *os.File, newcontracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
 	op := newOperation()
 	if len(newcontracts) != len(m.Hosts) {
 		op.die(errors.New("new contract set must match size of previous contract set"))
@@ -28,16 +28,16 @@ func MigrateFile(f *os.File, newcontracts renter.ContractSet, m *renter.MetaFile
 		op.die(nil)
 		return op
 	}
-	go migrateFile(op, f, newcontracts, migrations, m, scan, height)
+	go migrateFile(op, f, newcontracts, migrations, m, hkr, height)
 	return op
 }
 
 // MigrateDirFile runs the MigrateFile process on each meta file in a
 // directory, using it's corresponding file on disk. The directory structure
 // of the files and metafiles must match.
-func MigrateDirFile(newcontracts renter.ContractSet, nextFile FileIter, scan renter.ScanFn, height types.BlockHeight) *Operation {
+func MigrateDirFile(newcontracts renter.ContractSet, nextFile FileIter, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
 	op := newOperation()
-	go migrateDirFile(op, newcontracts, nextFile, scan, height)
+	go migrateDirFile(op, newcontracts, nextFile, hkr, height)
 	return op
 }
 
@@ -47,7 +47,7 @@ func MigrateDirFile(newcontracts renter.ContractSet, nextFile FileIter, scan ren
 //
 // Unlike the other Migrate functions, MigrateDirect will continue migrating
 // even if some old hosts become unreachable.
-func MigrateDirect(newcontracts, oldcontracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn, height types.BlockHeight) *Operation {
+func MigrateDirect(newcontracts, oldcontracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
 	op := newOperation()
 	if len(newcontracts) != len(oldcontracts) {
 		op.die(errors.New("new contract set must match size of previous contract set"))
@@ -58,22 +58,22 @@ func MigrateDirect(newcontracts, oldcontracts renter.ContractSet, m *renter.Meta
 		op.die(nil)
 		return op
 	}
-	go migrateDirect(op, newcontracts, oldcontracts, migrations, m, scan, height)
+	go migrateDirect(op, newcontracts, oldcontracts, migrations, m, hkr, height)
 	return op
 }
 
 // MigrateDirDirect runs the MigrateDirect process on each meta file in a
 // directory.
-func MigrateDirDirect(newcontracts renter.ContractSet, nextFile MigrateDirIter, scan renter.ScanFn, height types.BlockHeight) *Operation {
+func MigrateDirDirect(newcontracts renter.ContractSet, nextFile MigrateDirIter, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
 	op := newOperation()
-	go migrateDirDirect(op, newcontracts, nextFile, scan, height)
+	go migrateDirDirect(op, newcontracts, nextFile, hkr, height)
 	return op
 }
 
 // MigrateRemote uploads file shards to a new set of hosts. The shards are
 // retrieved by downloading the file from the current set of hosts. (However,
 // MigrateRemote never downloads from hosts that are not in the new set.)
-func MigrateRemote(newcontracts, oldcontracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn, height types.BlockHeight) *Operation {
+func MigrateRemote(newcontracts, oldcontracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
 	op := newOperation()
 	if len(newcontracts) != len(oldcontracts) {
 		op.die(errors.New("new contract set must match size of previous contract set"))
@@ -87,15 +87,15 @@ func MigrateRemote(newcontracts, oldcontracts renter.ContractSet, m *renter.Meta
 		op.die(errors.New("not enough existing hosts to recover file"))
 		return op
 	}
-	go migrateRemote(op, newcontracts, oldcontracts, migrations, m, scan, height)
+	go migrateRemote(op, newcontracts, oldcontracts, migrations, m, hkr, height)
 	return op
 }
 
 // MigrateDirRemote runs the MigrateRemote process on each meta file in a
 // directory.
-func MigrateDirRemote(newcontracts renter.ContractSet, nextFile MigrateDirIter, scan renter.ScanFn, height types.BlockHeight) *Operation {
+func MigrateDirRemote(newcontracts renter.ContractSet, nextFile MigrateDirIter, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
 	op := newOperation()
-	go migrateDirRemote(op, newcontracts, nextFile, scan, height)
+	go migrateDirRemote(op, newcontracts, nextFile, hkr, height)
 	return op
 }
 
@@ -121,7 +121,7 @@ outer:
 	return migrations
 }
 
-func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, migrations map[hostdb.HostPublicKey]hostdb.HostPublicKey, m *renter.MetaFile, scan renter.ScanFn, currentHeight types.BlockHeight) {
+func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, migrations map[hostdb.HostPublicKey]hostdb.HostPublicKey, m *renter.MetaFile, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) {
 	hosts := make([]*renter.ShardUploader, len(m.Hosts))
 	for i, hostKey := range m.Hosts {
 		if op.Canceled() {
@@ -137,7 +137,7 @@ func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, mig
 		if !ok {
 			panic("missing contract for host being migrated")
 		}
-		hu, err := renter.NewShardUploader(m, m.HostIndex(hostKey), contract, scan, currentHeight)
+		hu, err := renter.NewShardUploader(m, m.HostIndex(hostKey), contract, hkr, currentHeight)
 		if err != nil {
 			op.die(err)
 			return
@@ -223,7 +223,7 @@ func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, mig
 	op.die(nil)
 }
 
-func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet, migrations map[hostdb.HostPublicKey]hostdb.HostPublicKey, m *renter.MetaFile, scan renter.ScanFn, currentHeight types.BlockHeight) {
+func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet, migrations map[hostdb.HostPublicKey]hostdb.HostPublicKey, m *renter.MetaFile, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) {
 	oldhosts := make([]*renter.ShardDownloader, 0, len(migrations))
 	newhosts := make([]*renter.ShardUploader, 0, len(migrations))
 	for oldHostKey, newHostKey := range migrations {
@@ -236,7 +236,7 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 		if !ok {
 			panic("oldcontracts does not contain one of the hosts being migrated from")
 		}
-		bd, err := renter.NewShardDownloader(m, oldContract, scan)
+		bd, err := renter.NewShardDownloader(m, oldContract, hkr)
 		if err != nil {
 			op.sendUpdate(MigrateSkipUpdate{Host: oldHostKey, Err: err})
 			continue
@@ -248,7 +248,7 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 		if !ok {
 			panic("newcontracts does not contain one of the hosts being migrated to")
 		}
-		hu, err := renter.NewShardUploader(m, m.HostIndex(oldHostKey), newContract, scan, currentHeight)
+		hu, err := renter.NewShardUploader(m, m.HostIndex(oldHostKey), newContract, hkr, currentHeight)
 		if err != nil {
 			op.sendUpdate(MigrateSkipUpdate{Host: oldHostKey, Err: err})
 			continue
@@ -316,7 +316,7 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 	op.die(nil)
 }
 
-func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet, migrations map[hostdb.HostPublicKey]hostdb.HostPublicKey, m *renter.MetaFile, scan renter.ScanFn, currentHeight types.BlockHeight) {
+func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet, migrations map[hostdb.HostPublicKey]hostdb.HostPublicKey, m *renter.MetaFile, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) {
 	// create a downloader for each old host
 	oldhosts := make([]*renter.ShardDownloader, len(m.Hosts))
 	var errStrings []string
@@ -336,7 +336,7 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 			errStrings = append(errStrings, fmt.Sprintf("%v: no contract for host", hostKey.ShortKey()))
 			continue
 		}
-		bd, err := renter.NewShardDownloader(m, contract, scan)
+		bd, err := renter.NewShardDownloader(m, contract, hkr)
 		if err != nil {
 			errStrings = append(errStrings, err.Error())
 			continue
@@ -361,7 +361,7 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 		if !ok {
 			panic("newcontracts does not contain one of the hosts being migrated to")
 		}
-		hu, err := renter.NewShardUploader(m, m.HostIndex(oldHostKey), newContract, scan, currentHeight)
+		hu, err := renter.NewShardUploader(m, m.HostIndex(oldHostKey), newContract, hkr, currentHeight)
 		if err != nil {
 			op.die(err)
 			return
@@ -438,7 +438,7 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 	op.die(nil)
 }
 
-func migrateDirFile(op *Operation, newcontracts renter.ContractSet, nextFile FileIter, scan renter.ScanFn, height types.BlockHeight) {
+func migrateDirFile(op *Operation, newcontracts renter.ContractSet, nextFile FileIter, hkr renter.HostKeyResolver, height types.BlockHeight) {
 	for {
 		metaPath, filePath, err := nextFile()
 		if err == io.EOF {
@@ -470,7 +470,7 @@ func migrateDirFile(op *Operation, newcontracts renter.ContractSet, nextFile Fil
 			defer f.Close()
 
 			op.sendUpdate(DirQueueUpdate{Filename: metaPath, Filesize: m.Filesize})
-			mop := MigrateFile(f, newcontracts, m, scan, height)
+			mop := MigrateFile(f, newcontracts, m, hkr, height)
 			// cancel mop if op is canceled
 			done := make(chan struct{})
 			defer close(done)
@@ -494,7 +494,7 @@ func migrateDirFile(op *Operation, newcontracts renter.ContractSet, nextFile Fil
 	op.die(nil)
 }
 
-func migrateDirDirect(op *Operation, newcontracts renter.ContractSet, nextFile MigrateDirIter, scan renter.ScanFn, height types.BlockHeight) {
+func migrateDirDirect(op *Operation, newcontracts renter.ContractSet, nextFile MigrateDirIter, hkr renter.HostKeyResolver, height types.BlockHeight) {
 	for {
 		metaPath, oldcontracts, err := nextFile()
 		if err == io.EOF {
@@ -524,7 +524,7 @@ func migrateDirDirect(op *Operation, newcontracts renter.ContractSet, nextFile M
 			defer m.Archive(metaPath)
 
 			op.sendUpdate(DirQueueUpdate{Filename: metaPath, Filesize: m.Filesize})
-			mop := MigrateDirect(newcontracts, oldcontracts, m, scan, height)
+			mop := MigrateDirect(newcontracts, oldcontracts, m, hkr, height)
 			// cancel mop if op is canceled
 			done := make(chan struct{})
 			defer close(done)
@@ -548,7 +548,7 @@ func migrateDirDirect(op *Operation, newcontracts renter.ContractSet, nextFile M
 	op.die(nil)
 }
 
-func migrateDirRemote(op *Operation, newcontracts renter.ContractSet, nextFile MigrateDirIter, scan renter.ScanFn, height types.BlockHeight) {
+func migrateDirRemote(op *Operation, newcontracts renter.ContractSet, nextFile MigrateDirIter, hkr renter.HostKeyResolver, height types.BlockHeight) {
 	for {
 		metaPath, oldcontracts, err := nextFile()
 		if err == io.EOF {
@@ -578,7 +578,7 @@ func migrateDirRemote(op *Operation, newcontracts renter.ContractSet, nextFile M
 			defer m.Archive(metaPath)
 
 			op.sendUpdate(DirQueueUpdate{Filename: metaPath, Filesize: m.Filesize})
-			mop := MigrateRemote(newcontracts, oldcontracts, m, scan, height)
+			mop := MigrateRemote(newcontracts, oldcontracts, m, hkr, height)
 			// cancel mop if op is canceled
 			done := make(chan struct{})
 			defer close(done)

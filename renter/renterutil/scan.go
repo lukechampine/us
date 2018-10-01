@@ -1,10 +1,12 @@
 package renterutil
 
 import (
+	"context"
 	"runtime"
 	"sync"
 	"time"
 
+	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/fastrand"
 
 	"lukechampine.com/us/hostdb"
@@ -26,13 +28,13 @@ type CheckupResult struct {
 // Checkup attempts to download a random slice from each host storing the
 // data referenced by m. It reports whether the download was successful, along
 // with network metrics.
-func Checkup(contracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn) <-chan CheckupResult {
+func Checkup(contracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver) <-chan CheckupResult {
 	results := make(chan CheckupResult, len(m.Hosts))
-	go checkup(results, contracts, m, scan)
+	go checkup(results, contracts, m, hkr)
 	return results
 }
 
-func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn) {
+func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver) {
 	defer close(results)
 	for i, hostKey := range m.Hosts {
 		res := CheckupResult{Host: hostKey}
@@ -56,20 +58,20 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 			continue
 		}
 
-		// get host entry
-		host, err := scan(hostKey)
+		// get host IP
+		hostIP, err := hkr.ResolveHostKey(hostKey)
 		if err != nil {
-			res.Error = errors.Wrap(err, "could not scan host")
+			res.Error = errors.Wrap(err, "could not resolve host key")
 			results <- res
 			continue
 		}
 
 		// TODO: record settings in CheckupResult, and refuse to continue if
-		// download is too high.
+		// download price is too high.
 
 		// create downloader
 		start := time.Now()
-		d, err := proto.NewDownloader(host, contract)
+		d, err := proto.NewDownloader(hostIP, contract)
 		res.Latency = time.Since(start)
 		if err != nil {
 			res.Error = err
@@ -103,7 +105,7 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 // contract. It reports whether the download was successful, along with
 // network metrics. Note that unlike Checkup, CheckupContracts cannot verify
 // the integrity of the downloaded sector.
-func CheckupContract(contract *renter.Contract, scan renter.ScanFn) CheckupResult {
+func CheckupContract(contract *renter.Contract, hkr renter.HostKeyResolver) CheckupResult {
 	hostKey := contract.HostKey()
 	res := CheckupResult{Host: hostKey}
 
@@ -112,10 +114,10 @@ func CheckupContract(contract *renter.Contract, scan renter.ScanFn) CheckupResul
 		return res
 	}
 
-	// get host entry
-	host, err := scan(hostKey)
+	// get host IP
+	hostIP, err := hkr.ResolveHostKey(hostKey)
 	if err != nil {
-		res.Error = errors.Wrap(err, "could not scan host")
+		res.Error = errors.Wrap(err, "could not resolve host key")
 		return res
 	}
 
@@ -124,7 +126,7 @@ func CheckupContract(contract *renter.Contract, scan renter.ScanFn) CheckupResul
 
 	// create downloader
 	start := time.Now()
-	d, err := proto.NewDownloader(host, contract)
+	d, err := proto.NewDownloader(hostIP, contract)
 	res.Latency = time.Since(start)
 	if err != nil {
 		res.Error = errors.Wrap(err, "could not initiate download protocol")
@@ -159,21 +161,27 @@ type ScanResult struct {
 
 // ScanHosts scans the provided hosts in parallel and reports their settings, along
 // with network metrics.
-func ScanHosts(hosts []hostdb.HostPublicKey, scan renter.ScanFn) <-chan ScanResult {
+func ScanHosts(hosts []hostdb.HostPublicKey, hkr renter.HostKeyResolver) <-chan ScanResult {
 	results := make(chan ScanResult, runtime.NumCPU())
-	go scanHosts(results, hosts, scan)
+	go scanHosts(results, hosts, hkr)
 	return results
 }
 
-func scanHosts(results chan<- ScanResult, hosts []hostdb.HostPublicKey, scan renter.ScanFn) {
-	hostChan := make(chan hostdb.HostPublicKey)
+func scanHosts(results chan<- ScanResult, hosts []hostdb.HostPublicKey, hkr renter.HostKeyResolver) {
+	type scanRequest struct {
+		pubkey hostdb.HostPublicKey
+		hostIP modules.NetAddress
+	}
+	reqChan := make(chan scanRequest)
 	var wg sync.WaitGroup
 	for i := 0; i < runtime.NumCPU(); i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for h := range hostChan {
-				host, err := scan(h)
+			for req := range reqChan {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				host, err := hostdb.Scan(ctx, req.hostIP, req.pubkey)
+				cancel()
 				results <- ScanResult{
 					Host:  host,
 					Error: err,
@@ -181,10 +189,18 @@ func scanHosts(results chan<- ScanResult, hosts []hostdb.HostPublicKey, scan ren
 			}
 		}()
 	}
-	for i := range hosts {
-		hostChan <- hosts[i]
+	for _, pubkey := range hosts {
+		hostIP, err := hkr.ResolveHostKey(pubkey)
+		if err != nil {
+			results <- ScanResult{Error: err}
+			continue
+		}
+		reqChan <- scanRequest{
+			pubkey: pubkey,
+			hostIP: hostIP,
+		}
 	}
-	close(hostChan)
+	close(reqChan)
 	wg.Wait()
 	close(results)
 }

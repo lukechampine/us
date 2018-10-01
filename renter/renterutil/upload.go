@@ -18,13 +18,13 @@ import (
 
 // Upload uploads the contents of f, updating the specified contracts and
 // storing metadata in m. Upload may read from f in parallel.
-func Upload(f *os.File, contracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn, currentHeight types.BlockHeight) *Operation {
+func Upload(f *os.File, contracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) *Operation {
 	op := newOperation()
-	go upload(op, f, contracts, m, scan, currentHeight)
+	go upload(op, f, contracts, m, hkr, currentHeight)
 	return op
 }
 
-func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.MetaFile, scan renter.ScanFn, currentHeight types.BlockHeight) {
+func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) {
 	if m.Filesize == 0 {
 		op.die(nil)
 		return
@@ -82,7 +82,7 @@ func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.M
 	toUpload := remainingChunks * int64(len(m.Hosts)) * renterhost.SectorSize
 
 	// connect to hosts in parallel
-	hosts, err := dialUploaders(m, contracts, scan, currentHeight, op.cancel)
+	hosts, err := dialUploaders(m, contracts, hkr, currentHeight, op.cancel)
 	if err != nil {
 		op.die(err)
 		return
@@ -174,13 +174,13 @@ func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.M
 // structure mirrors the original directory. Data from multiple files may be
 // packed into a single sector. This greatly improves efficiency when
 // uploading many small files.
-func UploadDir(nextFile FileIter, contracts renter.ContractSet, minShards int, scan renter.ScanFn, currentHeight types.BlockHeight) *Operation {
+func UploadDir(nextFile FileIter, contracts renter.ContractSet, minShards int, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) *Operation {
 	op := newOperation()
-	go uploadDir(op, nextFile, contracts, minShards, scan, currentHeight)
+	go uploadDir(op, nextFile, contracts, minShards, hkr, currentHeight)
 	return op
 }
 
-func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, minShards int, scan renter.ScanFn, currentHeight types.BlockHeight) {
+func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, minShards int, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) {
 	rsc := renter.NewRSCode(minShards, len(contracts))
 
 	// connect to hosts
@@ -190,12 +190,12 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 			op.die(ErrCanceled)
 			return
 		}
-		host, err := scan(contract.HostKey())
+		hostIP, err := hkr.ResolveHostKey(contract.HostKey())
 		if err != nil {
-			op.die(errors.Wrapf(err, "%v: could not scan host", hostKey.ShortKey()))
+			op.die(errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey()))
 			return
 		}
-		u, err := proto.NewUploader(host, contract, currentHeight)
+		u, err := proto.NewUploader(hostIP, contract, currentHeight)
 		if err != nil {
 			op.die(errors.Wrapf(err, "could not initiate upload to %v", hostKey.ShortKey()))
 			return
@@ -449,7 +449,7 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 	op.die(nil)
 }
 
-func dialUploaders(m *renter.MetaFile, contracts renter.ContractSet, scan renter.ScanFn, currentHeight types.BlockHeight, cancel <-chan struct{}) ([]*renter.ShardUploader, error) {
+func dialUploaders(m *renter.MetaFile, contracts renter.ContractSet, hkr renter.HostKeyResolver, currentHeight types.BlockHeight, cancel <-chan struct{}) ([]*renter.ShardUploader, error) {
 	type result struct {
 		shardIndex int
 		host       *renter.ShardUploader
@@ -464,7 +464,7 @@ func dialUploaders(m *renter.MetaFile, contracts renter.ContractSet, scan renter
 			if !ok {
 				res.err = errors.Errorf("%v: no contract for host", hostKey.ShortKey())
 			} else {
-				res.host, res.err = renter.NewShardUploader(m, i, contract, scan, currentHeight)
+				res.host, res.err = renter.NewShardUploader(m, i, contract, hkr, currentHeight)
 			}
 			resChan <- res
 		}(i)

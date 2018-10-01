@@ -178,14 +178,19 @@ func (d *Downloader) partialSector(dst []byte, root crypto.Hash, offset uint32) 
 
 // NewDownloader initiates the download request loop with a host, and returns a
 // Downloader.
-func NewDownloader(host hostdb.ScannedHost, contract ContractEditor) (*Downloader, error) {
-	conn, stats, err := initiateRPC(host.NetAddress, modules.RPCDownload, contract)
+func NewDownloader(hostIP modules.NetAddress, contract ContractEditor) (*Downloader, error) {
+	conn, stats, err := initiateRPC(hostIP, modules.RPCDownload, contract)
 	if err != nil {
 		return nil, err
 	}
 	return &Downloader{
-		contract:  contract,
-		host:      host,
+		contract: contract,
+		host: hostdb.ScannedHost{
+			HostSettings: hostdb.HostSettings{
+				NetAddress: hostIP,
+			},
+			PublicKey: contract.Revision().HostKey(),
+		},
 		conn:      conn,
 		dialStats: stats,
 	}, nil
