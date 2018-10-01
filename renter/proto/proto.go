@@ -21,14 +21,14 @@ type (
 	Wallet interface {
 		NewWalletAddress() (types.UnlockHash, error)
 		SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error
-		UnspentOutputs() []modules.UnspentOutput
+		UnspentOutputs() ([]modules.UnspentOutput, error)
 		UnlockConditions(addr types.UnlockHash) (types.UnlockConditions, error)
 	}
 	// A TransactionPool can broadcast transactions and estimate transaction
 	// fees.
 	TransactionPool interface {
 		AcceptTransactionSet([]types.Transaction) error
-		FeeEstimate() (min types.Currency, max types.Currency)
+		FeeEstimate() (min types.Currency, max types.Currency, err error)
 	}
 )
 
@@ -109,7 +109,10 @@ func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool)
 	}
 
 	// add the transaction fee
-	_, maxFee := tpool.FeeEstimate()
+	_, maxFee, err := tpool.FeeEstimate()
+	if err != nil {
+		return errors.Wrap(err, "could not estimate transaction fee")
+	}
 	fee := maxFee.Mul64(estTxnSize)
 	txn.MinerFees = append(txn.MinerFees, fee)
 

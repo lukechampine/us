@@ -96,7 +96,10 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 	// Calculate how much the renter needs to pay. On top of the renterPayout,
 	// the renter is responsible for paying host.ContractPrice, the siafund
 	// tax, and a transaction fee.
-	_, maxFee := tpool.FeeEstimate()
+	_, maxFee, err := tpool.FeeEstimate()
+	if err != nil {
+		return ContractRevision{}, errors.Wrap(err, "could not estimate transaction fee")
+	}
 	fee := maxFee.Mul64(estTxnSize)
 	totalCost := renterPayout.Add(host.ContractPrice).Add(types.Tax(startHeight, fc.Payout)).Add(fee)
 
@@ -255,7 +258,10 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 }
 
 func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr types.UnlockHash, w Wallet) ([]crypto.Hash, bool) {
-	outputs := w.UnspentOutputs()
+	outputs, err := w.UnspentOutputs()
+	if err != nil {
+		return nil, false
+	}
 	// sort outputs by value, high to low
 	sort.Slice(outputs, func(i, j int) bool {
 		return outputs[i].Value.Cmp(outputs[j].Value) > 0

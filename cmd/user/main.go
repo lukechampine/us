@@ -6,10 +6,11 @@ import (
 	"strings"
 	"syscall"
 
-	"gitlab.com/NebulousLabs/Sia/build"
 	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/renterutil"
 
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/build"
 	"lukechampine.com/flagg"
 )
 
@@ -202,6 +203,10 @@ func check(ctx string, err error) {
 	if err != nil {
 		log.Fatalln(ctx, err)
 	}
+}
+
+func makeClient() *renterutil.SiadClient {
+	return renterutil.NewSiadClient(config.SiadAddr, config.SiadPassword)
 }
 
 func main() {
