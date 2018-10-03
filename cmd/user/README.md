@@ -21,6 +21,7 @@ The rest of this document is a guide detailing the functionality of `user`. See
 
 You will need a synchronized `siad` that you can connect to, and a way to
 communicate with it -- preferably `siac`, although `curl` will also suffice.
+**`siad` must be v1.3.5 or higher.**
 
 First, identify the port that `siad` is listening on. We will assume `:9980`.
 If you do not already have a wallet with coins in it, create one like so:
@@ -38,21 +39,21 @@ Created new address: 40b380ebc4f08c43324ff0a9b72da0bf2c73476664a86ad16b48dd696e3
 # send coins to this address to fund your wallet
 ```
 
-Lastly, you will want to create a config file, `~/.us/user.toml`. An example is
+You will also want to create a config file, `~/.us/user.toml`. An example is
 provided below:
 
 ```toml
 # API port of siad.
-# OPTIONAL. Default: localhost:9980
+# OPTIONAL. Default: "localhost:9980"
 siad_addr = "localhost:6666"
 
 # directory where contracts are stored.
-# OPTIONAL. Default: ~/.us/contracts
-contracts = "/home/user/contracts"
+# OPTIONAL. Default: "~/.us/contracts"
+contracts = "/home/luke/.us/contracts"
 
 # minimum number of hosts required to download a file. Also controls
-# file redundancy: uploading to 4 hosts with min_shards = 2 results
-# in 2x redundancy.
+# file redundancy: uploading to 10 hosts with min_shards = 2 results
+# in 5x redundancy.
 # REQUIRED.
 min_shards = 2
 
@@ -64,6 +65,11 @@ hosts = [
   "pubkey1",
   "pubkey2",
 ]
+
+# log file. If defined, various statistics will be written to this file in
+# JSON format.
+# OPTIONAL. Default: ""
+log_file = "/home/luke/.us/log"
 ```
 
 

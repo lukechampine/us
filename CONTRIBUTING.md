@@ -6,9 +6,9 @@ The golden rule of contributing is: **Propose what you plan to do before you
 do it.** Submitting a big PR with no warning is bad manners. It imposes social
 pressure on the maintainer to accept the PR, regardless of its quality,
 because to reject the PR means discarding the hard work of the contributor. Of
-course, if a bad PR is accepted, the quality of the project suffers. It's a
-lose-lose situation that is best avoided by discussing potential changes in
-advance. That way, if the contributor and maintainer disagree on something,
+course, if a bad PR is accepted, the quality of the project suffers. To avoid
+these lose-lose situations, it's imperative to discuss your proposed changes
+in advance. That way, if the contributor and maintainer disagree on something,
 they can arrive at a decision before any code is written, saving everyone time
 and frustration.
 
@@ -56,15 +56,16 @@ Run `make lint` before submitting your PR. You will need
 code. Go's [CodeReviewComments][crc] is a good resource.
 
 Git commits should follow the seven rules in [How to Write a Git Commit
-Message][commit]. Also, prefix each commit message with the package(s) it
-affects, e.g. `proto: Reduce SectorMerkleRoot allocations`. Lastly, put any
-references to issues (e.g. `Fixes #1234`) in the issue body, **not** in the
-commit message. This prevents an issue from being referenced over and over by
-the same commit when amending/rebasing.
+Message][commit]. Also, prefix each commit message with the package it
+affects, e.g. `proto: Use smaller buffer for partial downloads`. If a commit
+affects multiple packages, use your best judgment to pick the most important
+one, or use `all`. Lastly, put any references to issues (e.g. `Fixes #1234`)
+in the issue body, **not** in the commit message. This prevents an issue from
+being referenced over and over by the same commit when amending/rebasing.
 
 Speaking of which, don't be afraid to rebase heavily when modifying a PR in
 response to review comments. Avoid commits with messages like `Address review
-comments`. These should be squashed into previous commits. [`fixup` and
+comments`; these should be squashed into previous commits. [`fixup` and
 `autosquash`][fixup] are your friends here.
 
 
