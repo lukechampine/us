@@ -24,14 +24,22 @@ infeasible, difficult, or inefficient. You can choose to only upload files to
 hosts based in a specific region. You can collect data on exactly how much you
 paid to download a file, and exactly how long it took the host to transfer it
 to you. You can use this information to manually blacklist hosts, selecting
-only the cheapest fastest hosts when downloading. You can "pack" multiple
-files into a single uploaded sector; if you're uploading an album of jpegs
-averaging 250 KB each, this reduces storage and bandwidth costs by about 400x.
-You can download one of those jpegs without downloading the full sector, too.
+only the cheapest or fastest hosts when downloading. You can "pack" multiple
+files into a single uploaded sector: if you're uploading an album of JPEGs
+averaging 250 KB each, this reduces storage and bandwidth costs by about 16x.
+You can download one of those JPEGs without downloading the full sector, too.
 You can trivially share files, just by sending the metadata to a friend. You
 can stream files over HTTP or mount a virtual Sia filesystem with FUSE,
 enjoying low latency as a result of partial downloads. And most importantly,
 you can build apps that leverage Sia to store and serve content.
+
+Here are some ideas for apps you could build with `us`:
+
+- A storage backend for [go-cloud](https://github.com/google/go-cloud), [upspin](https://github.com/upspin/upspin), or [minio](https://github.com/minio/minio)
+- A site where you can buy contracts directly, paying with BTC (via [LN](https://lightning.network/)?) instead of SC
+- A cron job that downloads 1 KB from a host every 24 hours and reports various metrics (latency, bandwidth, price)
+- A site that aggregates host metrics to provide a centralized host database
+- A gateway that serves static websites stored on Sia hosts
 
 
 ## What do I need to get started?
@@ -58,7 +66,3 @@ should **not** assume that contracts formed and files uploaded using `us` are
 transferable to `siad`, nor vice versa. Until `us` is marked as stable,
 **don't spend any siacoins on `us` that you can't afford to lose.**
 
-Lastly, in case it wasn't clear, **`us` is not a fork of the Sia blockchain**.
-It is simply a set of libraries and tools for working with the existing Sia
-storage network. As a consequence, `us` should be usable on any fork of the Sia
-blockchain, although some minor tweaks may be required.

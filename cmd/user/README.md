@@ -215,3 +215,14 @@ $ user download [contract folder] [metafile] > myfile
 This forces `user` to download the file in-order. Be aware that this restricts
 the parallelism of the download algorithm, and thus may result in slower
 speeds.
+
+---
+
+**WARNING:** `user` requires exclusive access to your contract files. That is,
+you generally can't run two instances of `user` at the same time, because they
+will both attempt to modify the same contract file. To avoid this problem, you
+must either use a synchronization mechanism (such as a lockfile) to serialize
+access to contracts, or ensure that each instance of `user` accesses a
+different set of contracts. Remember, `user` is intended to be a user-facing
+tool; if your intent is to build more complex apps, then importing the `us`
+packages directly is the recommended approach.
