@@ -78,14 +78,16 @@ func startRevision(conn net.Conn, host *hostdb.ScannedHost) error {
 	if err != nil {
 		return err
 	}
-	// return an error if any of the host's prices increased
-	// TODO: let user specify limits
-	if newhost.UploadBandwidthPrice.Cmp(host.UploadBandwidthPrice) > 0 {
-		return errors.New("host upload price increased")
-	} else if newhost.DownloadBandwidthPrice.Cmp(host.DownloadBandwidthPrice) > 0 {
-		return errors.New("host download price increased")
-	} else if newhost.StoragePrice.Cmp(host.StoragePrice) > 0 {
-		return errors.New("host storage price increased")
+	if host.SectorSize != 0 {
+		// if this isn't the first set of settings we've received, return an
+		// error if any of the host's prices increased
+		if newhost.UploadBandwidthPrice.Cmp(host.UploadBandwidthPrice) > 0 {
+			return errors.New("host upload price increased")
+		} else if newhost.DownloadBandwidthPrice.Cmp(host.DownloadBandwidthPrice) > 0 {
+			return errors.New("host download price increased")
+		} else if newhost.StoragePrice.Cmp(host.StoragePrice) > 0 {
+			return errors.New("host storage price increased")
+		}
 	}
 	*host = newhost
 	return modules.WriteNegotiationAcceptance(conn)
