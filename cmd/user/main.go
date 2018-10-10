@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bufio"
+	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"strings"
@@ -207,6 +210,16 @@ func check(ctx string, err error) {
 
 func makeClient() *renterutil.SiadClient {
 	return renterutil.NewSiadClient(config.SiadAddr, config.SiadPassword)
+}
+
+func openLog() (io.Writer, func()) {
+	if config.LogFile != "" {
+		f, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		check("Could not open log file:", err)
+		bw := bufio.NewWriter(f)
+		return bw, func() { bw.Flush(); f.Close() }
+	}
+	return ioutil.Discard, func() {}
 }
 
 func main() {

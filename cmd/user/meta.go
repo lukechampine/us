@@ -74,8 +74,10 @@ func uploadmetafile(f *os.File, minShards int, contractDir, metaPath string) err
 	if err != nil {
 		return errors.Wrap(err, "could not determine current height")
 	}
+	log, cleanup := openLog()
+	defer cleanup()
 	op := renterutil.Upload(f, contracts, m, c, currentHeight)
-	return trackUpload(f.Name(), op)
+	return trackUpload(f.Name(), op, log)
 }
 
 func uploadmetadir(dir, metaDir, contractDir string, minShards int) error {
@@ -124,8 +126,10 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 	if err != nil {
 		return errors.Wrap(err, "could not determine current height")
 	}
+	log, cleanup := openLog()
+	defer cleanup()
 	op := renterutil.Upload(f, contracts, m, c, currentHeight)
-	return trackUpload(f.Name(), op)
+	return trackUpload(f.Name(), op, log)
 }
 
 func downloadmetafile(f *os.File, contractDir, metaPath string) error {
@@ -150,8 +154,10 @@ func downloadmetafile(f *os.File, contractDir, metaPath string) error {
 	}()
 
 	c := makeClient()
+	log, cleanup := openLog()
+	defer cleanup()
 	op := renterutil.Download(f, contracts, m, c)
-	return trackDownload(f.Name(), op)
+	return trackDownload(f.Name(), op, log)
 }
 
 func downloadmetastream(w io.Writer, contractDir, metaPath string) error {

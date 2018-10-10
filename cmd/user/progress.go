@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,7 +13,7 @@ import (
 	"lukechampine.com/us/renter/renterutil"
 )
 
-func trackUpload(filename string, op *renterutil.Operation) error {
+func trackUpload(filename string, op *renterutil.Operation, log io.Writer) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 
@@ -33,6 +31,13 @@ func trackUpload(filename string, op *renterutil.Operation) error {
 					uploadStart = time.Now()
 				}
 				printSimpleProgress(filename, u, time.Since(uploadStart))
+
+			case renterutil.DialStatsUpdate:
+				js, _ := json.Marshal(u)
+				fmt.Fprintf(log, `{"type":"dial", "data": %s}`+"\n", js)
+			case renterutil.UploadStatsUpdate:
+				js, _ := json.Marshal(u)
+				fmt.Fprintf(log, `{"type":"upload", "data": %s}`+"\n", js)
 			}
 		case <-sigChan:
 			fmt.Println("\rStopping...")
@@ -44,23 +49,9 @@ func trackUpload(filename string, op *renterutil.Operation) error {
 	}
 }
 
-func trackDownload(filename string, op *renterutil.Operation) error {
+func trackDownload(filename string, op *renterutil.Operation, log io.Writer) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
-
-	var log io.Writer
-	if config.LogFile != "" {
-		f, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		bw := bufio.NewWriter(f)
-		defer bw.Flush()
-		log = bw
-	} else {
-		log = ioutil.Discard
-	}
 
 	var downloadStart time.Time
 	for {

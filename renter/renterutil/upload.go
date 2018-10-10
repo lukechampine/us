@@ -89,6 +89,11 @@ func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.M
 	}
 	for _, h := range hosts {
 		defer h.Close()
+		// send dial stats
+		op.sendUpdate(DialStatsUpdate{
+			Host:  h.HostKey(),
+			Stats: h.Uploader.DialStats(),
+		})
 	}
 
 	// send initial progress
@@ -138,6 +143,10 @@ func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.M
 				// upload the shard and write all slices to disk
 				err := h.Upload(chunkIndex)
 				errChan <- errors.Wrapf(err, "%v: could not upload sector", h.HostKey().ShortKey())
+				op.sendUpdate(UploadStatsUpdate{
+					Host:  h.HostKey(),
+					Stats: h.Uploader.LastUploadStats(),
+				})
 			}(i)
 		}
 		// collect errors

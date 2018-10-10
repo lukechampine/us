@@ -22,11 +22,24 @@ type Uploader struct {
 
 	height   types.BlockHeight
 	contract ContractEditor
+	// stats
+	dialStats DialStats
+	lastStats UploadStats
 }
 
 // HostKey returns the public key of the host being uploaded to.
 func (u *Uploader) HostKey() hostdb.HostPublicKey {
 	return u.host.PublicKey
+}
+
+// DialStats returns the metrics of the initial connection to the host.
+func (u *Uploader) DialStats() DialStats {
+	return u.dialStats
+}
+
+// LastUploadStats returns the metrics of the most recent successful upload.
+func (u *Uploader) LastUploadStats() UploadStats {
+	return u.lastStats
 }
 
 // Close cleanly terminates the revision loop with the host and closes the
@@ -92,6 +105,7 @@ func (u *Uploader) upload(data *[renterhost.SectorSize]byte) (crypto.Hash, error
 	}()
 
 	// send actions
+	xferStart := time.Now()
 	actions := actionSet{{
 		Type:        modules.ActionInsert,
 		SectorIndex: uint64(u.contract.NumSectors()),
@@ -102,13 +116,16 @@ func (u *Uploader) upload(data *[renterhost.SectorSize]byte) (crypto.Hash, error
 	} else if err := actions.MarshalSia(u.conn); err != nil {
 		return crypto.Hash{}, errors.Wrap(err, "could not send revision action")
 	}
+	xferEnd := time.Now()
 	if err := <-errChan; err != nil {
 		return crypto.Hash{}, errors.Wrap(err, "could not calculate new Merkle root")
 	}
 	rev := newUploadRevision(contract.Revision, merkleRoot, sectorPrice, sectorCollateral)
 
 	// send revision to host and exchange signatures
+	protoStart := time.Now()
 	txnSignatures, err := negotiateRevision(u.conn, rev, contract.RenterKey)
+	protoEnd := time.Now()
 	if err == modules.ErrStopResponse {
 		// if host gracefully closed, close our side too and suppress the
 		// error. The next call to Upload will return an error that
@@ -130,13 +147,22 @@ func (u *Uploader) upload(data *[renterhost.SectorSize]byte) (crypto.Hash, error
 		return crypto.Hash{}, errors.Wrap(err, "could not update contract transaction")
 	}
 
+	u.lastStats = UploadStats{
+		Bytes:         renterhost.SectorSize,
+		Cost:          sectorPrice,
+		Collateral:    sectorCollateral,
+		ProtocolStart: protoStart,
+		ProtocolEnd:   protoEnd,
+		TransferStart: xferStart,
+		TransferEnd:   xferEnd,
+	}
 	return sectorRoot, nil
 }
 
 // NewUploader initiates the contract revision process with a host, and returns
 // an Uploader.
 func NewUploader(hostIP modules.NetAddress, contract ContractEditor, currentHeight types.BlockHeight) (*Uploader, error) {
-	conn, _, err := initiateRPC(hostIP, modules.RPCReviseContract, contract)
+	conn, stats, err := initiateRPC(hostIP, modules.RPCReviseContract, contract)
 	if err != nil {
 		return nil, err
 	}
@@ -147,8 +173,9 @@ func NewUploader(hostIP modules.NetAddress, contract ContractEditor, currentHeig
 			},
 			PublicKey: contract.Revision().HostKey(),
 		},
-		height:   currentHeight,
-		contract: contract,
-		conn:     conn,
+		height:    currentHeight,
+		contract:  contract,
+		conn:      conn,
+		dialStats: stats,
 	}, nil
 }

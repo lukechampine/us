@@ -113,6 +113,12 @@ type DownloadStatsUpdate struct {
 	Stats proto.DownloadStats  `json:"stats"`
 }
 
+// UploadStatsUpdate records metrics about uploading sector data to a host.
+type UploadStatsUpdate struct {
+	Host  hostdb.HostPublicKey `json:"host"`
+	Stats proto.UploadStats    `json:"stats"`
+}
+
 // FileIter is an iterator that returns the next filepath and the filepath of
 // the file's metafile. It should return io.EOF to signal the end of
 // iteration.
