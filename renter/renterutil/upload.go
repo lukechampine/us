@@ -210,6 +210,11 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 			return
 		}
 		defer u.Close()
+		// send dial stats
+		op.sendUpdate(DialStatsUpdate{
+			Host:  u.HostKey(),
+			Stats: u.DialStats(),
+		})
 		hosts = append(hosts, u)
 	}
 
@@ -410,6 +415,10 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 					if err != nil {
 						return errors.Wrap(err, "could not upload sector")
 					}
+					op.sendUpdate(UploadStatsUpdate{
+						Host:  host.HostKey(),
+						Stats: host.LastUploadStats(),
+					})
 					slices := sb.Slices()
 					// append slices to shards
 					//
