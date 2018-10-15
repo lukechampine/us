@@ -85,14 +85,22 @@ func trackDownload(filename string, op *renterutil.Operation, log io.Writer) err
 	}
 }
 
-func trackDownloadStream(op *renterutil.Operation) error {
+func trackDownloadStream(op *renterutil.Operation, log io.Writer) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 	for {
 		select {
-		case _, ok := <-op.Updates():
+		case u, ok := <-op.Updates():
 			if !ok {
 				return op.Err()
+			}
+			switch u := u.(type) {
+			case renterutil.DialStatsUpdate:
+				js, _ := json.Marshal(u)
+				fmt.Fprintf(log, `{"type":"dial", "data": %s}`+"\n", js)
+			case renterutil.DownloadStatsUpdate:
+				js, _ := json.Marshal(u)
+				fmt.Fprintf(log, `{"type":"download", "data": %s}`+"\n", js)
 			}
 		case <-sigChan:
 			op.Cancel()
@@ -103,7 +111,7 @@ func trackDownloadStream(op *renterutil.Operation) error {
 	}
 }
 
-func trackDownloadDir(op *renterutil.Operation) error {
+func trackDownloadDir(op *renterutil.Operation, log io.Writer) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 
@@ -132,6 +140,13 @@ func trackDownloadDir(op *renterutil.Operation) error {
 			case renterutil.DirSkipUpdate:
 				fmt.Printf("Skip %v: %v\n", u.Filename, u.Err)
 				filename = ""
+
+			case renterutil.DialStatsUpdate:
+				js, _ := json.Marshal(u)
+				fmt.Fprintf(log, `{"type":"dial", "data": %s}`+"\n", js)
+			case renterutil.DownloadStatsUpdate:
+				js, _ := json.Marshal(u)
+				fmt.Fprintf(log, `{"type":"download", "data": %s}`+"\n", js)
 			}
 		case <-sigChan:
 			fmt.Println("\nStopping...")
@@ -146,7 +161,7 @@ func trackDownloadDir(op *renterutil.Operation) error {
 	}
 }
 
-func trackUploadDir(op *renterutil.Operation) error {
+func trackUploadDir(op *renterutil.Operation, log io.Writer) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
 
@@ -177,6 +192,13 @@ func trackUploadDir(op *renterutil.Operation) error {
 			case renterutil.TransferProgressUpdate:
 				newQueue = true
 				printUploadDirProgress(queue, u, uploadStart)
+
+			case renterutil.DialStatsUpdate:
+				js, _ := json.Marshal(u)
+				fmt.Fprintf(log, `{"type":"dial", "data": %s}`+"\n", js)
+			case renterutil.UploadStatsUpdate:
+				js, _ := json.Marshal(u)
+				fmt.Fprintf(log, `{"type":"upload", "data": %s}`+"\n", js)
 			}
 		case <-sigChan:
 			fmt.Println("\nStopping...")

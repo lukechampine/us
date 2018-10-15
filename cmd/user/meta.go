@@ -96,9 +96,11 @@ func uploadmetadir(dir, metaDir, contractDir string, minShards int) error {
 		return errors.Wrap(err, "could not determine current height")
 	}
 
+	log, cleanup := openLog()
+	defer cleanup()
 	fileIter := renterutil.NewRecursiveFileIter(dir, metaDir)
 	op := renterutil.UploadDir(fileIter, contracts, minShards, c, currentHeight)
-	return trackUploadDir(op)
+	return trackUploadDir(op, log)
 }
 
 func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
@@ -182,8 +184,10 @@ func downloadmetastream(w io.Writer, contractDir, metaPath string) error {
 	}()
 
 	c := makeClient()
+	log, cleanup := openLog()
+	defer cleanup()
 	op := renterutil.DownloadStream(w, contracts, m, c)
-	return trackDownloadStream(op)
+	return trackDownloadStream(op, log)
 }
 
 func downloadmetadir(dir, contractDir, metaDir string) error {
@@ -194,9 +198,11 @@ func downloadmetadir(dir, contractDir, metaDir string) error {
 	defer contracts.Close()
 
 	c := makeClient()
+	log, cleanup := openLog()
+	defer cleanup()
 	metafileIter := renterutil.NewRecursiveMetaFileIter(metaDir, dir)
 	op := renterutil.DownloadDir(metafileIter, contracts, c)
-	return trackDownloadDir(op)
+	return trackDownloadDir(op, log)
 }
 
 func checkupMeta(contractDir, metaPath string) error {
