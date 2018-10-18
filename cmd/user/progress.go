@@ -13,6 +13,11 @@ import (
 	"lukechampine.com/us/renter/renterutil"
 )
 
+func writeUpdate(w io.Writer, u interface{}, typ string) {
+	js, _ := json.Marshal(u)
+	fmt.Fprintf(w, `{"type":%q,"data":%s}`+"\n", typ, js)
+}
+
 func trackUpload(filename string, op *renterutil.Operation, log io.Writer) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
@@ -33,11 +38,9 @@ func trackUpload(filename string, op *renterutil.Operation, log io.Writer) error
 				printSimpleProgress(filename, u, time.Since(uploadStart))
 
 			case renterutil.DialStatsUpdate:
-				js, _ := json.Marshal(u)
-				fmt.Fprintf(log, `{"type":"dial", "data": %s}`+"\n", js)
+				writeUpdate(log, u, "dial")
 			case renterutil.UploadStatsUpdate:
-				js, _ := json.Marshal(u)
-				fmt.Fprintf(log, `{"type":"upload", "data": %s}`+"\n", js)
+				writeUpdate(log, u, "upload")
 			}
 		case <-sigChan:
 			fmt.Println("\rStopping...")
@@ -69,11 +72,9 @@ func trackDownload(filename string, op *renterutil.Operation, log io.Writer) err
 				printSimpleProgress(filename, u, time.Since(downloadStart))
 
 			case renterutil.DialStatsUpdate:
-				js, _ := json.Marshal(u)
-				fmt.Fprintf(log, `{"type":"dial", "data": %s}`+"\n", js)
+				writeUpdate(log, u, "dial")
 			case renterutil.DownloadStatsUpdate:
-				js, _ := json.Marshal(u)
-				fmt.Fprintf(log, `{"type":"download", "data": %s}`+"\n", js)
+				writeUpdate(log, u, "download")
 			}
 		case <-sigChan:
 			fmt.Println("\rStopping...")
@@ -96,11 +97,9 @@ func trackDownloadStream(op *renterutil.Operation, log io.Writer) error {
 			}
 			switch u := u.(type) {
 			case renterutil.DialStatsUpdate:
-				js, _ := json.Marshal(u)
-				fmt.Fprintf(log, `{"type":"dial", "data": %s}`+"\n", js)
+				writeUpdate(log, u, "dial")
 			case renterutil.DownloadStatsUpdate:
-				js, _ := json.Marshal(u)
-				fmt.Fprintf(log, `{"type":"download", "data": %s}`+"\n", js)
+				writeUpdate(log, u, "download")
 			}
 		case <-sigChan:
 			op.Cancel()
@@ -142,11 +141,9 @@ func trackDownloadDir(op *renterutil.Operation, log io.Writer) error {
 				filename = ""
 
 			case renterutil.DialStatsUpdate:
-				js, _ := json.Marshal(u)
-				fmt.Fprintf(log, `{"type":"dial", "data": %s}`+"\n", js)
+				writeUpdate(log, u, "dial")
 			case renterutil.DownloadStatsUpdate:
-				js, _ := json.Marshal(u)
-				fmt.Fprintf(log, `{"type":"download", "data": %s}`+"\n", js)
+				writeUpdate(log, u, "download")
 			}
 		case <-sigChan:
 			fmt.Println("\nStopping...")
@@ -194,11 +191,9 @@ func trackUploadDir(op *renterutil.Operation, log io.Writer) error {
 				printUploadDirProgress(queue, u, uploadStart)
 
 			case renterutil.DialStatsUpdate:
-				js, _ := json.Marshal(u)
-				fmt.Fprintf(log, `{"type":"dial", "data": %s}`+"\n", js)
+				writeUpdate(log, u, "dial")
 			case renterutil.UploadStatsUpdate:
-				js, _ := json.Marshal(u)
-				fmt.Fprintf(log, `{"type":"upload", "data": %s}`+"\n", js)
+				writeUpdate(log, u, "upload")
 			}
 		case <-sigChan:
 			fmt.Println("\nStopping...")
