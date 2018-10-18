@@ -324,9 +324,9 @@ func NewMetaFile(filename string, mode os.FileMode, size int64, contracts Contra
 	return m, nil
 }
 
-// ExtractMetaFile extracts an existing meta file archive. Like NewMetaFile,
+// OpenMetaFile extracts an existing meta file archive. Like NewMetaFile,
 // it creates a temporary directory to hold the extracted files.
-func ExtractMetaFile(filename string) (_ *MetaFile, err error) {
+func OpenMetaFile(filename string) (_ *MetaFile, err error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not open archive")

@@ -211,7 +211,7 @@ func downloadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet,
 				}
 			}()
 
-			m, err := renter.ExtractMetaFile(metaPath)
+			m, err := renter.OpenMetaFile(metaPath)
 			if err != nil {
 				return err
 			}

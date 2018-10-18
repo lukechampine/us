@@ -103,7 +103,7 @@ into sectors using the desired erasure code. Then use the `EncryptAndUpload`
 method to upload each sector. Repeat this process until the file has been
 fully uploaded, and then call `(MetaFile).Archive` to close the metafile.
 
-Downloading is the inverse. Open the metafile with `ExtractMetaFile`, and then
+Downloading is the inverse. Open the metafile with `OpenMetaFile`, and then
 connect to each host using `NewShardDownloader`. Call `DownloadAndDecrypt` on
 each host, and use the metafile's erasure code to reconstruct the original
 file data and write it to disk. Repeat this process for each chunk that was

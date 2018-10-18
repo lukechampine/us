@@ -110,7 +110,7 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 	}
 	defer contracts.Close()
 
-	m, err := renter.ExtractMetaFile(metaPath)
+	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
@@ -145,7 +145,7 @@ func downloadmetafile(f *os.File, contractDir, metaPath string) error {
 		return errors.New("file is not sufficiently uploaded")
 	}
 
-	m, err := renter.ExtractMetaFile(metaPath)
+	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
@@ -173,7 +173,7 @@ func downloadmetastream(w io.Writer, contractDir, metaPath string) error {
 		return errors.New("file is not sufficiently uploaded")
 	}
 
-	m, err := renter.ExtractMetaFile(metaPath)
+	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
@@ -212,7 +212,7 @@ func checkupMeta(contractDir, metaPath string) error {
 	}
 	defer contracts.Close()
 
-	m, err := renter.ExtractMetaFile(metaPath)
+	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
@@ -242,7 +242,7 @@ func migrateFile(f *os.File, contractDir, metaPath string) error {
 	}
 	defer newcontracts.Close()
 
-	m, err := renter.ExtractMetaFile(metaPath)
+	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
@@ -291,7 +291,7 @@ func migrateDirect(contractDir, metaPath string) error {
 	}
 	defer newcontracts.Close()
 
-	m, err := renter.ExtractMetaFile(metaPath)
+	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
@@ -346,7 +346,7 @@ func migrateRemote(contractDir, metaPath string) error {
 	}
 	defer newcontracts.Close()
 
-	m, err := renter.ExtractMetaFile(metaPath)
+	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
