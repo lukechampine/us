@@ -1,7 +1,6 @@
 package renter
 
 import (
-	"bytes"
 	"io"
 
 	"github.com/klauspost/reedsolomon"
@@ -60,28 +59,30 @@ func (r simpleRedundancy) Encode(data []byte) [][]byte {
 
 	// If data isn't evenly divisible by r, we must pad it with zeros.
 	if len(data) < int(r)*perShard {
-		data = append(data, make([]byte, int(r)*perShard-len(data))...)
+		// NOTE: we could append here instead, but if len(data) !=
+		// cap(data), we could accidentally clobber bytes. Better to be
+		// safe and always reallocate; if the caller really wants to
+		// avoid this, they can do the padding themselves.
+		padded := make([]byte, int(r)*perShard)
+		copy(padded, data)
+		data = padded
 	}
 
 	// Split into equal-length shards.
 	dst := make([][]byte, r)
-	b := bytes.NewBuffer(data)
 	for i := range dst {
-		dst[i] = b.Next(perShard)
+		dst[i] = data[i*perShard:][:perShard]
 	}
 	return dst
 }
 
 func (r simpleRedundancy) Reconstruct(shards [][]byte) error {
-	if len(shards) != int(r) {
-		return reedsolomon.ErrTooFewShards
-	}
-	return nil
+	return r.checkShards(shards)
 }
 
 func (r simpleRedundancy) Recover(dst io.Writer, shards [][]byte, outSize int) error {
-	if len(shards) != int(r) {
-		return reedsolomon.ErrTooFewShards
+	if err := r.checkShards(shards); err != nil {
+		return err
 	}
 	remaining := outSize
 	for _, shard := range shards {
@@ -93,6 +94,18 @@ func (r simpleRedundancy) Recover(dst io.Writer, shards [][]byte, outSize int) e
 			return err
 		}
 		remaining -= n
+	}
+	return nil
+}
+
+func (r simpleRedundancy) checkShards(shards [][]byte) error {
+	if len(shards) != int(r) {
+		return reedsolomon.ErrTooFewShards
+	}
+	for i := 0; i < len(shards)-1; i++ {
+		if len(shards[i]) != len(shards[i+1]) {
+			return reedsolomon.ErrShardSize
+		}
 	}
 	return nil
 }
