@@ -75,29 +75,29 @@ func newOperation() *Operation {
 // A TransferProgressUpdate details the number of bytes transferred during the
 // course of an Operation.
 type TransferProgressUpdate struct {
-	Total       int64 `json:"total"`
-	Start       int64 `json:"start"`
-	Transferred int64 `json:"transferred"`
+	Total       int64
+	Start       int64
+	Transferred int64
 }
 
 // A DirQueueUpdate indicates that a file has been queued as part of a multi-
 // file Operation.
 type DirQueueUpdate struct {
-	Filename string `json:"filename"`
-	Filesize int64  `json:"filesize"`
+	Filename string
+	Filesize int64
 }
 
 // A DirSkipUpdate indicates that a file has been skipped as part of a multi-
 // file Operation.
 type DirSkipUpdate struct {
-	Filename string `json:"filename"`
-	Err      error  `json:"err"`
+	Filename string
+	Err      error
 }
 
 // A MigrateSkipUpdate indicates that a host will not be migrated to.
 type MigrateSkipUpdate struct {
-	Host hostdb.HostPublicKey `json:"host"`
-	Err  error                `json:"err"`
+	Host hostdb.HostPublicKey
+	Err  error
 }
 
 // DialStatsUpdate records metrics about dialing a host.

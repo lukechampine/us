@@ -61,32 +61,32 @@ func (hpk HostPublicKey) SiaPublicKey() (spk types.SiaPublicKey) {
 
 // HostSettings are the settings reported by a host.
 type HostSettings struct {
-	AcceptingContracts     bool               `json:"acceptingContracts"`
-	MaxDownloadBatchSize   uint64             `json:"maxDownloadBatchSize"`
-	MaxDuration            types.BlockHeight  `json:"maxDuration"`
-	MaxReviseBatchSize     uint64             `json:"maxReviseBatchSize"`
-	NetAddress             modules.NetAddress `json:"netAddress"`
-	RemainingStorage       uint64             `json:"remainingStorage"`
-	SectorSize             uint64             `json:"sectorSize"`
-	TotalStorage           uint64             `json:"totalStorage"`
-	UnlockHash             types.UnlockHash   `json:"unlockHash"`
-	WindowSize             types.BlockHeight  `json:"windowSize"`
-	Collateral             types.Currency     `json:"collateral"`
-	MaxCollateral          types.Currency     `json:"maxCollateral"`
-	ContractPrice          types.Currency     `json:"contractPrice"`
-	DownloadBandwidthPrice types.Currency     `json:"downloadBandwidthPrice"`
-	StoragePrice           types.Currency     `json:"storagePrice"`
-	UploadBandwidthPrice   types.Currency     `json:"uploadBandwidthPrice"`
-	RevisionNumber         uint64             `json:"revisionNumber"`
-	Version                string             `json:"version"`
+	AcceptingContracts     bool
+	MaxDownloadBatchSize   uint64
+	MaxDuration            types.BlockHeight
+	MaxReviseBatchSize     uint64
+	NetAddress             modules.NetAddress
+	RemainingStorage       uint64
+	SectorSize             uint64
+	TotalStorage           uint64
+	UnlockHash             types.UnlockHash
+	WindowSize             types.BlockHeight
+	Collateral             types.Currency
+	MaxCollateral          types.Currency
+	ContractPrice          types.Currency
+	DownloadBandwidthPrice types.Currency
+	StoragePrice           types.Currency
+	UploadBandwidthPrice   types.Currency
+	RevisionNumber         uint64
+	Version                string
 }
 
 // ScannedHost groups a host's settings with its public key and other scan-
 // related metrics.
 type ScannedHost struct {
 	HostSettings
-	PublicKey HostPublicKey `json:"publicKey"`
-	Latency   time.Duration `json:"latency"`
+	PublicKey HostPublicKey
+	Latency   time.Duration
 }
 
 // Scan dials the host with the given NetAddress and public key and requests
