@@ -145,7 +145,8 @@ customization, and serves as a reference to inspire more sophisticated tools.
 In order to form contracts and learn the IP addresses of hosts, `user` must
 talk to an instance of `siad`. This dependency is intentionally minimal; it
 means that `user` can easily be modified to talk to a different daemon, or
-even a centralized service.
+even a centralized service. Use `renterutil.NewSiadClient` to create a client
+that talks to `siad`.
 
 ---
 
