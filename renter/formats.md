@@ -8,7 +8,7 @@ metadata, and one for storing file metadata.
 A contract defines a file contract formed with a host. It contains the
 contract's ID, the secret key used to revise the contract, the latest revision
 (along with signatures), and the Merkle roots of each 4MB sector stored under
-the contract, i.e. the set of hashes whose Merkle hash is the contract's
+the contract, i.e. the set of hashes whose Merkle root is the contract's
 `FileMerkleRoot`. All of the fields are encoded in binary.
 
 To ensure high throughput, the format enables efficient updates to both the
@@ -20,7 +20,7 @@ given root. (Note that the sector Merkle roots will be constitute the bulk of
 the file; a 1 TB contract requires 8 MB of Merkle roots.)
 
 The format also contains a "compressed" set of the sector Merkle roots, known
-as the Merkle *stack*. This size of this set is logarathmic with respect to the
+as the Merkle *stack*. This size of this set is logarithmic with respect to the
 full set, yet it can still recalculate the contract Merkle root when a new
 sector is uploaded. Thus, the stack serves to greatly reduce the I/O required
 when loading a contract file: only a single 4 KiB read is necessary, regardless
@@ -38,7 +38,7 @@ type Contract struct {
 
 	// latest contract revision, with signatures (see Sia/types)
 	Revision   types.FileContractRevision
-	Signatures []types.TransactionSignature
+	Signatures [2]types.TransactionSignature
 
 	// padding until byte 2040...
 
@@ -75,12 +75,12 @@ type Index struct {
 }
 ```
 
-As of version 1, files are encoded with Reed-Solomon and encrypted with XTS-AES.
-See the reference implementation for the details of how encryption keys are
-derived and how files are split into erasure-coded shards.
+As of version 1, files are encoded with Reed-Solomon and encrypted with
+ChaCha20. See the reference implementation for the details of how encryption
+keys are derived and how files are split into erasure-coded shards.
 
 The order of the `Hosts` field is significant. Specifically, the index of a
-host is also its shard index in the erasure encoding.
+host is also its shard index in the erasure code.
 
 ### shard
 
