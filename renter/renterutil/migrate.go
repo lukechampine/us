@@ -32,7 +32,7 @@ func MigrateFile(f *os.File, newcontracts renter.ContractSet, m *renter.MetaFile
 	return op
 }
 
-// MigrateDirFile runs the MigrateFile process on each meta file in a
+// MigrateDirFile runs the MigrateFile process on each metafile in a
 // directory, using it's corresponding file on disk. The directory structure
 // of the files and metafiles must match.
 func MigrateDirFile(newcontracts renter.ContractSet, nextFile FileIter, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
@@ -62,7 +62,7 @@ func MigrateDirect(newcontracts, oldcontracts renter.ContractSet, m *renter.Meta
 	return op
 }
 
-// MigrateDirDirect runs the MigrateDirect process on each meta file in a
+// MigrateDirDirect runs the MigrateDirect process on each metafile in a
 // directory.
 func MigrateDirDirect(newcontracts renter.ContractSet, nextFile MigrateDirIter, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
 	op := newOperation()
@@ -91,7 +91,7 @@ func MigrateRemote(newcontracts, oldcontracts renter.ContractSet, m *renter.Meta
 	return op
 }
 
-// MigrateDirRemote runs the MigrateRemote process on each meta file in a
+// MigrateDirRemote runs the MigrateRemote process on each metafile in a
 // directory.
 func MigrateDirRemote(newcontracts renter.ContractSet, nextFile MigrateDirIter, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
 	op := newOperation()

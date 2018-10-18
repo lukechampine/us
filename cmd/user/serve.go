@@ -151,7 +151,7 @@ func (f *httpFile) Seek(offset int64, whence int) (int64, error) {
 func HTTPFile(name string, downloaders *downloaderSet) (http.File, error) {
 	index, shards, err := renter.ReadMetaFileContents(name)
 	if err != nil {
-		return nil, errors.Wrap(err, "could not extract meta file")
+		return nil, errors.Wrap(err, "could not extract metafile")
 	}
 	if len(shards) == 0 {
 		return nil, errors.New("empty file")
@@ -186,7 +186,7 @@ func (fs *httpFS) Open(name string) (http.File, error) {
 }
 
 // httpDir returns an object that implements http.FileSystem for the given
-// meta file root directory.
+// metafile root directory.
 func httpDir(root string, downloaders *downloaderSet) http.FileSystem {
 	return &httpFS{
 		root:        root,

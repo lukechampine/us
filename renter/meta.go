@@ -24,14 +24,14 @@ import (
 )
 
 const (
-	// MetaFileVersion is the current version of the meta file format. It is
+	// MetaFileVersion is the current version of the metafile format. It is
 	// incremented after each change to the format.
 	MetaFileVersion = 1
 
 	indexFilename = "index"
 )
 
-// A MetaFile represents an extracted meta file archive.
+// A MetaFile represents an extracted metafile archive.
 type MetaFile struct {
 	MetaIndex
 	hostIndex map[hostdb.HostPublicKey]int
@@ -146,7 +146,7 @@ func (m *MetaIndex) ErasureCode() ErasureCoder {
 	return NewRSCode(m.MinShards, len(m.Hosts))
 }
 
-// Archive concatenates the meta file index with its referenced shard files and
+// Archive concatenates the metafile index with its referenced shard files and
 // writes the resulting gzipped tar archive to filename.
 func (m *MetaFile) Archive(filename string) error {
 	// sync files in workdir before creating archive; otherwise a crash could
@@ -262,7 +262,7 @@ func (m *MetaFile) HostIndex(hostKey hostdb.HostPublicKey) int {
 	return i
 }
 
-// ReplaceHost replaces a host within the meta file. The shard file of the
+// ReplaceHost replaces a host within the metafile. The shard file of the
 // replaced host is not immediately deleted, but it will not be included in
 // the new archive when Close or Archive is called.
 func (m *MetaFile) ReplaceHost(oldHostKey, newHostKey hostdb.HostPublicKey) bool {
@@ -275,10 +275,10 @@ func (m *MetaFile) ReplaceHost(oldHostKey, newHostKey hostdb.HostPublicKey) bool
 	return false
 }
 
-// NewMetaFile creates a meta file using the specified contracts and erasure-
-// coding parameters. The meta file is returned in extracted state, meaning a
+// NewMetaFile creates a metafile using the specified contracts and erasure-
+// coding parameters. The metafile is returned in extracted state, meaning a
 // temporary directory will be created to hold the archive contents. This
-// directory will be removed when Archive is called on the meta file.
+// directory will be removed when Archive is called on the metafile.
 func NewMetaFile(filename string, mode os.FileMode, size int64, contracts ContractSet, minShards int) (*MetaFile, error) {
 	if minShards > len(contracts) {
 		return nil, errors.New("minShards cannot be greater than the number of contracts")
@@ -332,7 +332,7 @@ func NewMetaFile(filename string, mode os.FileMode, size int64, contracts Contra
 	return m, nil
 }
 
-// OpenMetaFile extracts an existing meta file archive. Like NewMetaFile,
+// OpenMetaFile extracts an existing metafile archive. Like NewMetaFile,
 // it creates a temporary directory to hold the extracted files.
 func OpenMetaFile(filename string) (_ *MetaFile, err error) {
 	f, err := os.Open(filename)
@@ -417,7 +417,7 @@ func OpenMetaFile(filename string) (_ *MetaFile, err error) {
 	}, nil
 }
 
-// ReadMetaIndex returns the index of a meta file without extracting it.
+// ReadMetaIndex returns the index of a metafile without extracting it.
 func ReadMetaIndex(filename string) (MetaIndex, error) {
 	f, err := os.Open(filename)
 	if err != nil {
@@ -451,7 +451,7 @@ func ReadMetaIndex(filename string) (MetaIndex, error) {
 	return MetaIndex{}, errors.New("archive is missing an index")
 }
 
-// ReadMetaFileContents returns the meta file's index and shard slice data.
+// ReadMetaFileContents returns the metafile's index and shard slice data.
 func ReadMetaFileContents(filename string) (MetaIndex, [][]SectorSlice, error) {
 	f, err := os.Open(filename)
 	if err != nil {
@@ -500,7 +500,7 @@ func ReadMetaFileContents(filename string) (MetaIndex, [][]SectorSlice, error) {
 	return index, slices, nil
 }
 
-// MetaFileFullyUploaded reads a meta file without extracting it, reporting
+// MetaFileFullyUploaded reads a metafile without extracting it, reporting
 // whether it has been fully uploaded.
 func MetaFileFullyUploaded(filename string) (bool, error) {
 	index, shards, err := readMetaFileShards(filename)
@@ -510,7 +510,7 @@ func MetaFileFullyUploaded(filename string) (bool, error) {
 	return shards == len(index.Hosts), nil
 }
 
-// MetaFileCanDownload reads a meta file without extracting it, reporting
+// MetaFileCanDownload reads a metafile without extracting it, reporting
 // whether it can be downloaded.
 func MetaFileCanDownload(filename string) (bool, error) {
 	index, shards, err := readMetaFileShards(filename)
@@ -520,7 +520,7 @@ func MetaFileCanDownload(filename string) (bool, error) {
 	return shards >= index.MinShards, nil
 }
 
-// readMetaFileShards reads a meta file and returns its index and the number of
+// readMetaFileShards reads a metafile and returns its index and the number of
 // shards that represent fully-uploaded shards of the erasure-encoded file.
 func readMetaFileShards(filename string) (MetaIndex, int, error) {
 	f, err := os.Open(filename)

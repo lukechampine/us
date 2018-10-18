@@ -47,7 +47,7 @@ func filesizeUnits(size int64) string {
 
 func closeMetaFile(m *renter.MetaFile) {
 	if err := m.Close(); err != nil {
-		log.Println("ERROR: could not create meta file archive:", err)
+		log.Println("ERROR: could not create metafile archive:", err)
 	}
 }
 
@@ -64,7 +64,7 @@ func uploadmetafile(f *os.File, minShards int, contractDir, metaPath string) err
 	}
 	m, err := renter.NewMetaFile(metaPath, stat.Mode(), stat.Size(), contracts, minShards)
 	if err != nil {
-		return errors.Wrap(err, "could not create meta file")
+		return errors.Wrap(err, "could not create metafile")
 	}
 	defer closeMetaFile(m)
 
@@ -114,7 +114,7 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 
 	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
-		return errors.Wrap(err, "could not load meta file")
+		return errors.Wrap(err, "could not load metafile")
 	}
 	defer closeMetaFile(m)
 
@@ -145,7 +145,7 @@ func downloadmetafile(f *os.File, contractDir, metaPath string) error {
 
 	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
-		return errors.Wrap(err, "could not load meta file")
+		return errors.Wrap(err, "could not load metafile")
 	}
 	defer closeMetaFile(m)
 
@@ -169,7 +169,7 @@ func downloadmetastream(w io.Writer, contractDir, metaPath string) error {
 
 	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
-		return errors.Wrap(err, "could not load meta file")
+		return errors.Wrap(err, "could not load metafile")
 	}
 	defer closeMetaFile(m)
 
@@ -204,7 +204,7 @@ func checkupMeta(contractDir, metaPath string) error {
 
 	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
-		return errors.Wrap(err, "could not load meta file")
+		return errors.Wrap(err, "could not load metafile")
 	}
 	defer closeMetaFile(m)
 
@@ -230,7 +230,7 @@ func migrateFile(f *os.File, contractDir, metaPath string) error {
 
 	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
-		return errors.Wrap(err, "could not load meta file")
+		return errors.Wrap(err, "could not load metafile")
 	}
 	defer closeMetaFile(m)
 
@@ -275,7 +275,7 @@ func migrateDirect(contractDir, metaPath string) error {
 
 	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
-		return errors.Wrap(err, "could not load meta file")
+		return errors.Wrap(err, "could not load metafile")
 	}
 	defer closeMetaFile(m)
 
@@ -326,7 +326,7 @@ func migrateRemote(contractDir, metaPath string) error {
 
 	m, err := renter.OpenMetaFile(metaPath)
 	if err != nil {
-		return errors.Wrap(err, "could not load meta file")
+		return errors.Wrap(err, "could not load metafile")
 	}
 	defer closeMetaFile(m)
 

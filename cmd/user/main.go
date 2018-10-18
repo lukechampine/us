@@ -348,7 +348,7 @@ Define min_shards in your config file or supply the -m flag.`)
 		} else if _, readErr := renter.ReadContractRevision(path); readErr == nil {
 			err = checkupContract(path)
 		} else {
-			log.Fatalln("Not a valid contract or meta file")
+			log.Fatalln("Not a valid contract or metafile")
 		}
 		check("Checkup failed:", err)
 
@@ -403,7 +403,7 @@ Define min_shards in your config file or supply the -m flag.`)
 		} else if h, err := renter.ReadContractRevision(args[0]); err == nil {
 			contractinfo(h)
 		} else {
-			log.Fatalln("Not a contract or meta file")
+			log.Fatalln("Not a contract or metafile")
 		}
 
 	case recoverCmd:
