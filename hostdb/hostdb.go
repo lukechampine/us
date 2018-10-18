@@ -43,12 +43,11 @@ func (hpk HostPublicKey) Key() string {
 // collisions in typical usage scenarios. A ShortKey is the preferred way to
 // reference a HostPublicKey in user interfaces.
 func (hpk HostPublicKey) ShortKey() string {
-	key := hpk.Key()
-	return key[:8]
+	return hpk.Key()[:8]
 }
 
 // Ed25519 returns the HostPublicKey as a crypto.PublicKey. The returned key
-// is obviously invalid if hpk is not a Ed25519 key.
+// is invalid if hpk is not a Ed25519 key.
 func (hpk HostPublicKey) Ed25519() (cpk crypto.PublicKey) {
 	hex.Decode(cpk[:], []byte(hpk.Key()))
 	return
@@ -56,12 +55,7 @@ func (hpk HostPublicKey) Ed25519() (cpk crypto.PublicKey) {
 
 // SiaPublicKey returns the HostPublicKey as a types.SiaPublicKey.
 func (hpk HostPublicKey) SiaPublicKey() (spk types.SiaPublicKey) {
-	specLen := strings.IndexByte(string(hpk), ':')
-	if specLen < 0 {
-		return
-	}
-	copy(spk.Algorithm[:], hpk[:specLen])
-	spk.Key, _ = hex.DecodeString(string(hpk[specLen+1:]))
+	spk.LoadString(string(hpk))
 	return
 }
 
