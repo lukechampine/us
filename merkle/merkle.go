@@ -1,5 +1,5 @@
 // Package merkle provides Sia-specific Merkle tree utilities.
-package merkle
+package merkle // import "lukechampine.com/us/merkle"
 
 import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
