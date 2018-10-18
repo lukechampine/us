@@ -101,16 +101,21 @@ with the desired size, mode bits, redundancy, etc. Then connect to each host
 using `NewShardUploader`. Next, read in a *chunk* of file data and split it
 into sectors using the desired erasure code. Then use the `EncryptAndUpload`
 method to upload each sector. Repeat this process until the file has been
-fully uploaded, and then call `(MetaFile).Archive` to close the metafile.
+fully uploaded, and then call `Close` on the metafile and each uploader.
 
 Downloading is the inverse. Open the metafile with `OpenMetaFile`, and then
 connect to each host using `NewShardDownloader`. Call `DownloadAndDecrypt` on
 each host, and use the metafile's erasure code to reconstruct the original
 file data and write it to disk. Repeat this process for each chunk that was
-uploaded previously, and then call `(MetaFile).Archive` to close the metafile.
-(If the metafile is small enough that it can be held in memory, you can use
-`ReadMetaFileContents` to bypass the extraction and archival steps.)
+uploaded previously, and then call `Close` on the metafile and each downloader.
 
+It's important to keep in mind that metafiles are archives, and so modifying
+them typically requires extracting the archive into a temporary directory. If
+the modification process is interrupted, this "workdir" may be left behind in
+an inconsistent state. See `cmd/user/recover.go` for examples of how to recover
+such states. When downloading, it is typically easier and safer to read the
+entire metafile into memory with `ReadMetaFileContents` rather than extracting
+it, since no modifications are necessary.
 
 ### `renter/renterutil`
 

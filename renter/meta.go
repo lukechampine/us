@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"lukechampine.com/us/hostdb"
@@ -237,6 +238,13 @@ func (m *MetaFile) Archive(filename string) error {
 	return nil
 }
 
+// Close re-archives the MetaFile and writes it to disk using the default
+// filename, which is the same as the filename passed to NewMetaFile or
+// OpenMetaFile.
+func (m *MetaFile) Close() error {
+	return m.Archive(strings.TrimSuffix(m.Workdir, "_workdir"))
+}
+
 // ShardPath returns the canonical path on disk of a shard associated with the
 // given hostKey.
 func (m *MetaFile) ShardPath(hostKey hostdb.HostPublicKey) string {
@@ -254,9 +262,9 @@ func (m *MetaFile) HostIndex(hostKey hostdb.HostPublicKey) int {
 	return i
 }
 
-// ReplaceHost replaces a host within the meta file. The shard file
-// corresponding to the replaced host is not deleted until m.Archive is
-// called.
+// ReplaceHost replaces a host within the meta file. The shard file of the
+// replaced host is not immediately deleted, but it will not be included in
+// the new archive when Close or Archive is called.
 func (m *MetaFile) ReplaceHost(oldHostKey, newHostKey hostdb.HostPublicKey) bool {
 	for i, h := range m.Hosts {
 		if h == oldHostKey {

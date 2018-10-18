@@ -45,6 +45,12 @@ func filesizeUnits(size int64) string {
 	return fmt.Sprintf("%.*f %s", i, float64(size)/math.Pow10(3*i), sizes[i])
 }
 
+func closeMetaFile(m *renter.MetaFile) {
+	if err := m.Close(); err != nil {
+		log.Println("ERROR: could not create meta file archive:", err)
+	}
+}
+
 func uploadmetafile(f *os.File, minShards int, contractDir, metaPath string) error {
 	contracts, err := loadContracts(contractDir)
 	if err != nil {
@@ -60,11 +66,7 @@ func uploadmetafile(f *os.File, minShards int, contractDir, metaPath string) err
 	if err != nil {
 		return errors.Wrap(err, "could not create meta file")
 	}
-	defer func() {
-		if err := m.Archive(metaPath); err != nil {
-			log.Println("ERROR: could not create meta file archive")
-		}
-	}()
+	defer closeMetaFile(m)
 
 	c := makeClient()
 	if synced, err := c.Synced(); !synced && err == nil {
@@ -114,11 +116,7 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
-	defer func() {
-		if err := m.Archive(metaPath); err != nil {
-			log.Println("ERROR: could not create meta file archive:", err)
-		}
-	}()
+	defer closeMetaFile(m)
 
 	c := makeClient()
 	if synced, err := c.Synced(); !synced && err == nil {
@@ -149,11 +147,7 @@ func downloadmetafile(f *os.File, contractDir, metaPath string) error {
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
-	defer func() {
-		if err := m.Archive(metaPath); err != nil {
-			log.Println("ERROR: could not create meta file archive:", err)
-		}
-	}()
+	defer closeMetaFile(m)
 
 	c := makeClient()
 	log, cleanup := openLog()
@@ -177,11 +171,7 @@ func downloadmetastream(w io.Writer, contractDir, metaPath string) error {
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
-	defer func() {
-		if err := m.Archive(metaPath); err != nil {
-			log.Println("ERROR: could not create meta file archive:", err)
-		}
-	}()
+	defer closeMetaFile(m)
 
 	c := makeClient()
 	log, cleanup := openLog()
@@ -216,11 +206,7 @@ func checkupMeta(contractDir, metaPath string) error {
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
-	defer func() {
-		if err := m.Archive(metaPath); err != nil {
-			log.Println("ERROR: could not create meta file archive")
-		}
-	}()
+	defer closeMetaFile(m)
 
 	c := makeClient()
 	for r := range renterutil.Checkup(contracts, m, c) {
@@ -246,11 +232,7 @@ func migrateFile(f *os.File, contractDir, metaPath string) error {
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
-	defer func() {
-		if err := m.Archive(metaPath); err != nil {
-			log.Println("ERROR: could not create meta file archive:", err)
-		}
-	}()
+	defer closeMetaFile(m)
 
 	c := makeClient()
 	if synced, err := c.Synced(); !synced && err == nil {
@@ -295,11 +277,7 @@ func migrateDirect(contractDir, metaPath string) error {
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
-	defer func() {
-		if err := m.Archive(metaPath); err != nil {
-			log.Println("ERROR: could not create meta file archive:", err)
-		}
-	}()
+	defer closeMetaFile(m)
 
 	oldcontracts, err := loadMetaContracts(m, contractDir)
 	if err != nil {
@@ -350,11 +328,7 @@ func migrateRemote(contractDir, metaPath string) error {
 	if err != nil {
 		return errors.Wrap(err, "could not load meta file")
 	}
-	defer func() {
-		if err := m.Archive(metaPath); err != nil {
-			log.Println("ERROR: could not create meta file archive:", err)
-		}
-	}()
+	defer closeMetaFile(m)
 
 	oldcontracts, err := loadMetaContracts(m, contractDir)
 	if err != nil {

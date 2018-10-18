@@ -461,7 +461,7 @@ func migrateDirFile(op *Operation, newcontracts renter.ContractSet, nextFile Fil
 			if err != nil {
 				return err
 			}
-			defer m.Archive(metaPath)
+			defer m.Close()
 
 			f, err := os.Open(filePath)
 			if err != nil {
@@ -521,7 +521,7 @@ func migrateDirDirect(op *Operation, newcontracts renter.ContractSet, nextFile M
 			if err != nil {
 				return err
 			}
-			defer m.Archive(metaPath)
+			defer m.Close()
 
 			op.sendUpdate(DirQueueUpdate{Filename: metaPath, Filesize: m.Filesize})
 			mop := MigrateDirect(newcontracts, oldcontracts, m, hkr, height)
@@ -575,7 +575,7 @@ func migrateDirRemote(op *Operation, newcontracts renter.ContractSet, nextFile M
 			if err != nil {
 				return err
 			}
-			defer m.Archive(metaPath)
+			defer m.Close()
 
 			op.sendUpdate(DirQueueUpdate{Filename: metaPath, Filesize: m.Filesize})
 			mop := MigrateRemote(newcontracts, oldcontracts, m, hkr, height)

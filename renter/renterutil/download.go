@@ -215,7 +215,7 @@ func downloadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet,
 			if err != nil {
 				return err
 			}
-			defer m.Archive(metaPath)
+			defer m.Close()
 
 			op.sendUpdate(DirQueueUpdate{Filename: metaPath, Filesize: m.Filesize})
 

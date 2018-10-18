@@ -301,7 +301,7 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 		}
 		if m.Filesize == 0 {
 			f.Close()
-			m.Archive(metaPath)
+			m.Close()
 			goto retry
 		}
 		return fileEntry{
@@ -309,7 +309,7 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 			m: m,
 			Close: func() error {
 				f.Close()
-				return m.Archive(metaPath)
+				return m.Close()
 			},
 			totalChunks: m.MinChunks(),
 		}, nil

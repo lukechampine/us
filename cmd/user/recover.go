@@ -97,9 +97,10 @@ Action that will be taken:
     Bundle the working directory into a (hopefully valid) metafile.
 `
 			action = func() error {
-				m := renter.MetaFile{Workdir: workdir}
-				m.MetaIndex = workdirIndex
-				return m.Archive(metapath)
+				return (&renter.MetaFile{
+					MetaIndex: workdirIndex,
+					Workdir:   workdir,
+				}).Close()
 			}
 		}
 
@@ -129,7 +130,7 @@ Action that will be taken:
 				return (&renter.MetaFile{
 					MetaIndex: workdirIndex,
 					Workdir:   workdir,
-				}).Archive(metapath)
+				}).Close()
 			}
 			break
 		}
