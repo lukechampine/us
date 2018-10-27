@@ -23,7 +23,7 @@ func loadConfig() error {
 	if err != nil {
 		return err
 	}
-	_, err = toml.DecodeFile(filepath.Join(user.HomeDir, ".us", "user.toml"), &config)
+	_, err = toml.DecodeFile(filepath.Join(user.HomeDir, ".config", "us", "user.toml"), &config)
 	if os.IsNotExist(err) {
 		// if no config file found, proceed with empty config
 		err = nil
