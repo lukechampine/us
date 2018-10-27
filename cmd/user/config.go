@@ -11,6 +11,7 @@ import (
 var config struct {
 	SiadAddr     string   `toml:"siad_addr"`
 	SiadPassword string   `toml:"siad_password"`
+	SHARDAddr    string   `toml:"shard_addr"`
 	Contracts    string   `toml:"contracts"`
 	MinShards    int      `toml:"min_shards"`
 	Hosts        []string `toml:"hosts"`

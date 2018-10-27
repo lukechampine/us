@@ -24,7 +24,7 @@ func mount(contractDir, metaDir, mountDir string) error {
 	}
 	defer contracts.Close()
 
-	c := makeClient()
+	c := makeLimitedClient()
 	downloaders, err := newDownloaderSet(contracts, c)
 	if err != nil {
 		return errors.Wrap(err, "could not connect to hosts")

@@ -2,12 +2,18 @@ package renterutil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"net/http"
 	"time"
 
 	"lukechampine.com/us/hostdb"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
+	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/node/api/client"
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -116,4 +122,67 @@ func NewSiadClient(addr, password string) *SiadClient {
 	c := client.New(addr)
 	c.Password = password
 	return &SiadClient{siad: c}
+}
+
+// A SHARDClient communicates with a SHARD server. It satisfies the
+// renter.HostKeyResolver interface.
+type SHARDClient struct {
+	addr string
+}
+
+func (c *SHARDClient) req(route string, fn func(io.Reader) error) error {
+	resp, err := http.Get(fmt.Sprintf("http://%v%v", c.addr, route))
+	if err != nil {
+		return err
+	}
+	defer io.Copy(ioutil.Discard, resp.Body)
+	defer resp.Body.Close()
+
+	if !(200 <= resp.StatusCode && resp.StatusCode <= 299) {
+		errString, _ := ioutil.ReadAll(resp.Body)
+		return errors.New(string(errString))
+	}
+	err = fn(resp.Body)
+	return err
+
+}
+
+// ChainHeight returns the current block height.
+func (c *SHARDClient) ChainHeight() (types.BlockHeight, error) {
+	var height types.BlockHeight
+	err := c.req("/height", func(body io.Reader) error {
+		return json.NewDecoder(body).Decode(&height)
+	})
+	return height, err
+}
+
+// Synced always returns true.
+func (c *SHARDClient) Synced() (bool, error) {
+	return true, nil
+}
+
+// ResolveHostKey resolves a host public key to that host's most recently
+// announced network address.
+func (c *SHARDClient) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAddress, error) {
+	var ha modules.HostAnnouncement
+	var sig crypto.Signature
+	err := c.req("/host/"+string(pubkey), func(body io.Reader) error {
+		return encoding.NewDecoder(body).DecodeAll(&ha, &sig)
+	})
+	if err != nil {
+		return "", err
+	}
+
+	// verify signature
+	if crypto.VerifyHash(crypto.HashObject(ha), pubkey.Ed25519(), sig) != nil {
+		return "", errors.New("invalid signature")
+	}
+
+	return ha.NetAddress, err
+}
+
+// NewSHARDClient returns a SHARDClient that communicates with the SHARD
+// server at the specified address.
+func NewSHARDClient(addr string) *SHARDClient {
+	return &SHARDClient{addr: addr}
 }

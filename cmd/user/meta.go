@@ -68,7 +68,7 @@ func uploadmetafile(f *os.File, minShards int, contractDir, metaPath string) err
 	}
 	defer closeMetaFile(m)
 
-	c := makeClient()
+	c := makeLimitedClient()
 	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
@@ -89,7 +89,7 @@ func uploadmetadir(dir, metaDir, contractDir string, minShards int) error {
 	}
 	defer contracts.Close()
 
-	c := makeClient()
+	c := makeLimitedClient()
 	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
@@ -118,7 +118,7 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 	}
 	defer closeMetaFile(m)
 
-	c := makeClient()
+	c := makeLimitedClient()
 	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
@@ -149,7 +149,7 @@ func downloadmetafile(f *os.File, contractDir, metaPath string) error {
 	}
 	defer closeMetaFile(m)
 
-	c := makeClient()
+	c := makeLimitedClient()
 	log, cleanup := openLog()
 	defer cleanup()
 	op := renterutil.Download(f, contracts, m, c)
@@ -173,7 +173,7 @@ func downloadmetastream(w io.Writer, contractDir, metaPath string) error {
 	}
 	defer closeMetaFile(m)
 
-	c := makeClient()
+	c := makeLimitedClient()
 	log, cleanup := openLog()
 	defer cleanup()
 	op := renterutil.DownloadStream(w, contracts, m, c)
@@ -187,7 +187,7 @@ func downloadmetadir(dir, contractDir, metaDir string) error {
 	}
 	defer contracts.Close()
 
-	c := makeClient()
+	c := makeLimitedClient()
 	log, cleanup := openLog()
 	defer cleanup()
 	metafileIter := renterutil.NewRecursiveMetaFileIter(metaDir, dir)
@@ -208,7 +208,7 @@ func checkupMeta(contractDir, metaPath string) error {
 	}
 	defer closeMetaFile(m)
 
-	c := makeClient()
+	c := makeLimitedClient()
 	for r := range renterutil.Checkup(contracts, m, c) {
 		if r.Error != nil {
 			fmt.Printf("FAIL Host %v:\n\t%v\n", r.Host.ShortKey(), r.Error)
@@ -234,7 +234,7 @@ func migrateFile(f *os.File, contractDir, metaPath string) error {
 	}
 	defer closeMetaFile(m)
 
-	c := makeClient()
+	c := makeLimitedClient()
 	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
@@ -253,7 +253,7 @@ func migrateDirFile(dir, contractDir, metaDir string) error {
 	}
 	defer newcontracts.Close()
 
-	c := makeClient()
+	c := makeLimitedClient()
 	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
@@ -285,7 +285,7 @@ func migrateDirect(contractDir, metaPath string) error {
 	}
 	defer oldcontracts.Close()
 
-	c := makeClient()
+	c := makeLimitedClient()
 	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
@@ -304,7 +304,7 @@ func migrateDirDirect(contractDir, metaDir string) error {
 	}
 	defer newcontracts.Close()
 
-	c := makeClient()
+	c := makeLimitedClient()
 	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
@@ -336,7 +336,7 @@ func migrateRemote(contractDir, metaPath string) error {
 	}
 	defer oldcontracts.Close()
 
-	c := makeClient()
+	c := makeLimitedClient()
 	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
@@ -355,7 +355,7 @@ func migrateDirRemote(contractDir, metaDir string) error {
 	}
 	defer newcontracts.Close()
 
-	c := makeClient()
+	c := makeLimitedClient()
 	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}

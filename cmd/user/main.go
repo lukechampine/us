@@ -14,6 +14,7 @@ import (
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/build"
+	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/flagg"
 )
 
@@ -210,6 +211,19 @@ func check(ctx string, err error) {
 
 func makeClient() *renterutil.SiadClient {
 	return renterutil.NewSiadClient(config.SiadAddr, config.SiadPassword)
+}
+
+type limitedClient interface {
+	Synced() (bool, error)
+	ChainHeight() (types.BlockHeight, error)
+	renter.HostKeyResolver
+}
+
+func makeLimitedClient() limitedClient {
+	if config.SHARDAddr == "" {
+		return makeClient()
+	}
+	return renterutil.NewSHARDClient(config.SHARDAddr)
 }
 
 func openLog() (io.Writer, func()) {

@@ -26,7 +26,7 @@ func serve(contractDir, metaDir, addr string) error {
 	}
 	defer contracts.Close()
 
-	c := makeClient()
+	c := makeLimitedClient()
 	downloaders, err := newDownloaderSet(contracts, c)
 	if err != nil {
 		return errors.Wrap(err, "could not connect to hosts")
