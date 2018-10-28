@@ -59,9 +59,12 @@ Git commits should follow the seven rules in [How to Write a Git Commit
 Message][commit]. Also, prefix each commit message with the package it
 affects, e.g. `proto: Use smaller buffer for partial downloads`. If a commit
 affects multiple packages, use your best judgment to pick the most important
-one, or use `all`. Lastly, put any references to issues (e.g. `Fixes #1234`)
-in the issue body, **not** in the commit message. This prevents an issue from
-being referenced over and over by the same commit when amending/rebasing.
+one, or use `all`. A commit-msg hook is provided to enforce this style; to
+install it, run `ln -s ../../commit-msg.sh .git/hooks/pre-commit`.
+
+Lastly, put any references to issues (e.g. `Fixes #1234`) in the issue body,
+**not** in the commit message. This prevents an issue from being referenced
+over and over by the same commit when amending/rebasing.
 
 Speaking of which, don't be afraid to rebase heavily when modifying a PR in
 response to review comments. Avoid commits with messages like `Address review
