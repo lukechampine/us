@@ -69,14 +69,9 @@ func scan(hostKeyPrefix string, bytes uint64, duration types.BlockHeight, downlo
 		return errors.Wrap(err, "could not lookup host")
 	}
 
-	// estimate RPC latency by calling ChainHeight
 	start := time.Now()
-	c.ChainHeight()
-	rpcDelay := time.Since(start)
-
-	start = time.Now()
 	host, err := c.Scan(hostKey)
-	scanTime := time.Since(start) - rpcDelay
+	scanTime := time.Since(start)
 	if err != nil {
 		return errors.Wrap(err, "could not scan host")
 	}
