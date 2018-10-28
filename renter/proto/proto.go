@@ -121,9 +121,9 @@ func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool)
 	if err != nil {
 		return errors.Wrap(err, "could not get a change address to use")
 	}
-	toSign, ok := fundSiacoins(&txn, fee, changeAddr, w)
-	if !ok {
-		return errors.New("not enough coins to fund transaction fee")
+	toSign, err := fundSiacoins(&txn, fee, changeAddr, w)
+	if err != nil {
+		return err
 	}
 	if err := w.SignTransaction(&txn, toSign); err != nil {
 		return errors.Wrap(err, "failed to sign transaction")

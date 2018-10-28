@@ -91,9 +91,9 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 		FileContracts: []types.FileContract{fc},
 		MinerFees:     []types.Currency{fee},
 	}
-	toSign, ok := fundSiacoins(&txn, totalCost, changeAddr, w)
-	if !ok {
-		return ContractRevision{}, errors.New("not enough coins to fund contract transaction")
+	toSign, err := fundSiacoins(&txn, totalCost, changeAddr, w)
+	if err != nil {
+		return ContractRevision{}, err
 	}
 
 	// initiate connection

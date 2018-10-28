@@ -108,9 +108,9 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 		FileContracts: []types.FileContract{fc},
 		MinerFees:     []types.Currency{fee},
 	}
-	toSign, ok := fundSiacoins(&txn, totalCost, changeAddr, w)
-	if !ok {
-		return ContractRevision{}, errors.New("not enough coins to fund contract transaction")
+	toSign, err := fundSiacoins(&txn, totalCost, changeAddr, w)
+	if err != nil {
+		return ContractRevision{}, err
 	}
 
 	// initiate connection
@@ -257,10 +257,10 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 	}, nil
 }
 
-func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr types.UnlockHash, w Wallet) ([]crypto.Hash, bool) {
+func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr types.UnlockHash, w Wallet) ([]crypto.Hash, error) {
 	outputs, err := w.UnspentOutputs()
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
 	// sort outputs by value, high to low
 	sort.Slice(outputs, func(i, j int) bool {
@@ -280,14 +280,14 @@ func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr type
 		}
 	}
 	if outputSum.Cmp(amount) < 0 {
-		return nil, false
+		return nil, errors.New("insufficient funds to fund contract transaction")
 	}
 
 	var toSign []crypto.Hash
 	for _, o := range fundingOutputs {
 		uc, err := w.UnlockConditions(o.UnlockHash)
 		if err != nil {
-			return nil, false
+			return nil, err
 		}
 		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
 			ParentID:         types.SiacoinOutputID(o.ID),
@@ -302,7 +302,7 @@ func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr type
 			Value:      change,
 		})
 	}
-	return toSign, true
+	return toSign, nil
 }
 
 // NOTE: due to a bug in the transaction validation code, calculating payouts
