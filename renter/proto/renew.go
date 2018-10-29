@@ -30,10 +30,14 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 	blockBytes := host.UploadBandwidthPrice.Add(host.StoragePrice).Add(host.DownloadBandwidthPrice).Mul64(uint64(endHeight - startHeight))
 	if !blockBytes.IsZero() {
 		bytes := renterPayout.Div(blockBytes)
-		hostCollateral := host.Collateral.Mul(bytes).Mul64(uint64(endHeight - startHeight))
-		if hostCollateral.Cmp(host.MaxCollateral) > 0 {
-			hostCollateral = host.MaxCollateral
-		}
+		hostCollateral = host.Collateral.Mul(bytes).Mul64(uint64(endHeight - startHeight))
+	}
+	// hostCollateral can't be greater than MaxCollateral, and (due to a host-
+	// side bug) it can't be zero either.
+	if hostCollateral.Cmp(host.MaxCollateral) > 0 {
+		hostCollateral = host.MaxCollateral
+	} else if hostCollateral.IsZero() {
+		hostCollateral = types.NewCurrency64(1)
 	}
 
 	// Calculate additional basePrice and baseCollateral. If the contract
