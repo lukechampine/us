@@ -19,17 +19,16 @@ func TestTaxAdjustedPayout(t *testing.T) {
 		{in: types.PostTax(types.TaxHardforkHeight+1, types.SiacoinPrecision), out: types.SiacoinPrecision},
 	}
 	for _, tt := range tests {
-		if p := taxAdjustedPayout(tt.in, types.TaxHardforkHeight+1); !p.Equals(tt.out) {
+		if p := taxAdjustedPayout(tt.in); !p.Equals(tt.out) {
 			t.Errorf("expected taxAdjustedPayout(%v) = %v, got %v", tt.in, tt.out, p)
 		}
 	}
-	taxAdjustedPayout(types.NewCurrency(fastrand.BigIntn(types.SiacoinPrecision.Big())), types.TaxHardforkHeight+1)
 }
 
 func BenchmarkTaxAdjustedPayout(b *testing.B) {
 	b.ReportAllocs()
 	target := types.NewCurrency(fastrand.BigIntn(types.SiacoinPrecision.Big()))
 	for i := 0; i < b.N; i++ {
-		taxAdjustedPayout(target, types.TaxHardforkHeight+1)
+		taxAdjustedPayout(target)
 	}
 }

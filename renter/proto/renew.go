@@ -53,7 +53,7 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 
 	// calculate payouts
 	hostPayout := host.ContractPrice.Add(hostCollateral).Add(basePrice)
-	payout := taxAdjustedPayout(renterPayout.Add(hostPayout), startHeight)
+	payout := taxAdjustedPayout(renterPayout.Add(hostPayout))
 
 	// create file contract
 	fc := types.FileContract{

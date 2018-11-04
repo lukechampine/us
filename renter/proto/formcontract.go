@@ -66,7 +66,7 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 
 	// calculate payouts
 	hostPayout := host.ContractPrice.Add(hostCollateral)
-	payout := taxAdjustedPayout(renterPayout.Add(hostPayout), startHeight)
+	payout := taxAdjustedPayout(renterPayout.Add(hostPayout))
 
 	// create file contract
 	fc := types.FileContract{
@@ -318,7 +318,7 @@ func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr type
 // that multiplies by a fraction and then rounds down to the nearest multiple
 // of the siafund count. Thus, when inverting the function, we have to make an
 // initial guess and then fix the rounding error.
-func taxAdjustedPayout(target types.Currency, startHeight types.BlockHeight) types.Currency {
+func taxAdjustedPayout(target types.Currency) types.Currency {
 	// compute initial guess as target * (1 / 1-tax); since this does not take
 	// the siafund rounding into account, the guess will be up to
 	// types.SiafundCount greater than the actual payout value.
