@@ -61,6 +61,14 @@ func TestSectorRoot(t *testing.T) {
 			t.Error("SectorRoot does not match reference implementation")
 		}
 	}
+
+	// SectorRoot should not allocate
+	allocs := testing.AllocsPerRun(10, func() {
+		_ = SectorRoot(&sector)
+	})
+	if allocs > 0 {
+		t.Error("expected SectorRoot to allocate 0 times, got", allocs)
+	}
 }
 
 func BenchmarkSectorRoot(b *testing.B) {
@@ -105,6 +113,13 @@ func TestMetaRoot(t *testing.T) {
 	refRoot := recNodeRoot([]crypto.Hash{recNodeRoot(roots[:4]), roots[4]})
 	if MetaRoot(roots) != refRoot {
 		t.Error("MetaRoot does not match reference implementation")
+	}
+
+	allocs := testing.AllocsPerRun(10, func() {
+		_ = MetaRoot(roots)
+	})
+	if allocs > 0 {
+		t.Error("expected MetaRoot to allocate 0 times, got", allocs)
 	}
 }
 
@@ -305,6 +320,21 @@ func TestBuildVerifyProof(t *testing.T) {
 	}
 	if VerifyProof([]crypto.Hash{{}}, sector[:], 0, SegmentsPerSector, crypto.Hash{}) {
 		t.Error("VerifyProof verified an incorrect proof")
+	}
+
+	allocs := testing.AllocsPerRun(10, func() {
+		_ = BuildProof(&sector, SegmentsPerSector-1, SegmentsPerSector, nil)
+	})
+	if allocs > 1 {
+		t.Error("expected BuildProof to allocate one time, got", allocs)
+	}
+
+	proof = BuildProof(&sector, midl, midr, nil)
+	allocs = testing.AllocsPerRun(10, func() {
+		_ = VerifyProof(proof, sector[midl*64:midr*64], midl, midr, hash)
+	})
+	if allocs > 0 {
+		t.Error("expected VerifyProof to allocate 0 times, got", allocs)
 	}
 }
 
