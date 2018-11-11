@@ -226,6 +226,10 @@ func TestBuildVerifyProof(t *testing.T) {
 	// test some known proofs
 	var sector [renterhost.SectorSize]byte
 	fastrand.Read(sector[:])
+	segmentRoots := make([]crypto.Hash, SegmentsPerSector)
+	for i := range segmentRoots {
+		segmentRoots[i] = leafHash(sector[i*LeafSize:][:LeafSize])
+	}
 
 	proof := BuildProof(&sector, 0, SegmentsPerSector, nil)
 	if len(proof) != 0 {
@@ -286,13 +290,16 @@ func TestBuildVerifyProof(t *testing.T) {
 		t.Error("VerifyProof failed to verify a known correct proof")
 	}
 
-	// test some random proofs against VerifyProof
+	// test some random proofs against VerifyProof and VerifyProofWithRoots
 	for i := 0; i < 5; i++ {
 		start := fastrand.Intn(SegmentsPerSector - 1)
 		end := start + fastrand.Intn(SegmentsPerSector-start)
 		proof := BuildProof(&sector, start, end, nil)
 		if !VerifyProof(proof, sector[start*LeafSize:end*LeafSize], start, end, SectorRoot(&sector)) {
 			t.Errorf("BuildProof constructed an incorrect proof for range %v-%v", start, end)
+		}
+		if !VerifyProofWithRoots(proof, segmentRoots[start:end], start, end, SectorRoot(&sector)) {
+			t.Errorf("VerifyProofWithRoots failed to verify known correct proof")
 		}
 	}
 
