@@ -11,7 +11,7 @@ func proofSize(start, end int) int {
 	// NOTE: I realize this is a bit magical (in a bad way), but it's too
 	// pretty for me not to use it. If you have some spare time, try to figure
 	// out why it works!
-	zerosCount := func(x uint) int { return bits.OnesCount(^x) - (bits.LeadingZeros(SegmentsPerSector) + 1) }
+	zerosCount := func(x uint) int { return bits.OnesCount(^x & (SegmentsPerSector - 1)) }
 	return bits.OnesCount(uint(start)) + zerosCount(uint(end-1))
 }
 
