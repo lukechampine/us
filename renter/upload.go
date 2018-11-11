@@ -32,18 +32,18 @@ func (sb *SectorBuilder) Reset() {
 
 // Append appends data to the sector being constructed, encrypting it with the
 // given key and chunkIndex. The data is also padded with random bytes to the
-// nearest multiple of merkle.LeafSize. Each call to Append creates a
+// nearest multiple of merkle.SegmentSize. Each call to Append creates a
 // SectorSlice that is accessible via the Slices method. This SectorSlice
 // reflects the length and checksum of the original (unpadded, unencrypted)
 // data.
 //
 // Append panics if len(data) > sb.Remaining().
 func (sb *SectorBuilder) Append(data []byte, key EncryptionKey, chunkIndex int64) {
-	// pad the data to a multiple of LeafSize, which is required
+	// pad the data to a multiple of SegmentSize, which is required
 	// by the encryption scheme
 	var padding int
-	if mod := len(data) % merkle.LeafSize; mod != 0 {
-		padding = merkle.LeafSize - mod
+	if mod := len(data) % merkle.SegmentSize; mod != 0 {
+		padding = merkle.SegmentSize - mod
 	}
 
 	if sb.sectorLen+len(data)+padding > renterhost.SectorSize {

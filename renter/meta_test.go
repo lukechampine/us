@@ -29,7 +29,7 @@ func TestEncryption(t *testing.T) {
 	}
 
 	// decrypt starting at a segment offset
-	off := merkle.LeafSize * 2
+	off := merkle.SegmentSize * 2
 	key.DecryptSegments(ciphertext[off:], ciphertext[off:], 2)
 	if !bytes.Equal(ciphertext[off:], plaintext[off:]) {
 		t.Error("decryption failed")
@@ -80,7 +80,7 @@ func BenchmarkEncryption(b *testing.B) {
 		}
 	}
 
-	segment := make([]byte, merkle.LeafSize)
+	segment := make([]byte, merkle.SegmentSize)
 	sector := make([]byte, renterhost.SectorSize)
 	b.Run("XTS-segment", benchXTS(segment))
 	b.Run("AES-segment", benchAES(segment))

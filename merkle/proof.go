@@ -34,7 +34,7 @@ func BuildProof(sector *[renterhost.SectorSize]byte, start, end int, precalc fun
 	subtreeRoot := func(i, j int) crypto.Hash {
 		s.Reset()
 		for ; i < j; i++ {
-			s.AppendLeafHash(s.leafHash(sector[i*LeafSize:][:LeafSize]))
+			s.AppendLeafHash(s.leafHash(sector[i*SegmentSize:][:SegmentSize]))
 		}
 		return s.Root()
 	}
@@ -119,9 +119,9 @@ func verifyProof(proof []crypto.Hash, subtreeRoot func(i, j int) crypto.Hash, st
 // VerifyProof verifies a proof produced by BuildProof. Only sector-sized
 // proofs can be verified.
 func VerifyProof(proof []crypto.Hash, segments []byte, start, end int, root crypto.Hash) bool {
-	if len(segments)%LeafSize != 0 {
-		panic("VerifyProof: segments must be a multiple of LeafSize")
-	} else if len(segments) != (end-start)*LeafSize {
+	if len(segments)%SegmentSize != 0 {
+		panic("VerifyProof: segments must be a multiple of SegmentSize")
+	} else if len(segments) != (end-start)*SegmentSize {
 		panic("VerifyProof: segments length does not match range")
 	} else if start < 0 || end > SegmentsPerSector || start > end || start == end {
 		panic("VerifyProof: illegal proof range")
@@ -131,7 +131,7 @@ func VerifyProof(proof []crypto.Hash, segments []byte, start, end int, root cryp
 	subtreeRoot := func(i, j int) crypto.Hash {
 		s.Reset()
 		for ; i < j; i++ {
-			s.AppendLeafHash(s.leafHash(segments[(i-start)*LeafSize:][:LeafSize]))
+			s.AppendLeafHash(s.leafHash(segments[(i-start)*SegmentSize:][:SegmentSize]))
 		}
 		return s.Root()
 	}

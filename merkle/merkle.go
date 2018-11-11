@@ -7,12 +7,13 @@ import (
 )
 
 const (
-	// LeafSize is the number of bytes in each leaf node of a sector's Merkle
-	// tree.
-	LeafSize = crypto.HashSize * 2
+	// SegmentSize is the number of bytes in each leaf node of a sector's Merkle
+	// tree. Although "LeafSize" would be a more accurate term, Sia refers to
+	// leaves as "segments", so we will follow suit.
+	SegmentSize = crypto.HashSize * 2
 
 	// SegmentsPerSector is a convenience value.
-	SegmentsPerSector = renterhost.SectorSize / LeafSize
+	SegmentsPerSector = renterhost.SectorSize / SegmentSize
 
 	// prefixes used during hashing, as specified by RFC 6962
 	leafHashPrefix = 0
@@ -23,12 +24,12 @@ const (
 // this assumption at compile time.
 var _ [0]struct{} = [renterhost.SectorSize & (renterhost.SectorSize - 1)]struct{}{}
 
-// SectorRoot computes the Merkle root of a sector, using the standard Sia
-// leaf size.
+// SectorRoot computes the Merkle root of a sector using SegmentSize bytes per
+// leaf.
 func SectorRoot(sector *[renterhost.SectorSize]byte) crypto.Hash {
 	var s Stack
-	for i := 0; i < len(sector); i += LeafSize {
-		s.AppendLeafHash(s.leafHash(sector[i:][:LeafSize]))
+	for i := 0; i < len(sector); i += SegmentSize {
+		s.AppendLeafHash(s.leafHash(sector[i:][:SegmentSize]))
 	}
 	return s.Root()
 }

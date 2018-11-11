@@ -71,7 +71,7 @@ func (s *keySeed) UnmarshalJSON(b []byte) error {
 }
 
 // An EncryptionKey can encrypt and decrypt segments, where each segment is a
-// []byte with len merkle.LeafSize.
+// []byte with len merkle.SegmentSize.
 type EncryptionKey interface {
 	EncryptSegments(ciphertext, plaintext []byte, startIndex uint64)
 	DecryptSegments(plaintext, ciphertext []byte, startIndex uint64)
@@ -83,7 +83,7 @@ type chachaKey struct {
 }
 
 func (c chachaKey) EncryptSegments(ciphertext, plaintext []byte, startIndex uint64) {
-	if len(plaintext)%merkle.LeafSize != 0 {
+	if len(plaintext)%merkle.SegmentSize != 0 {
 		panic("plaintext must be a multiple of segment size")
 	} else if len(plaintext) != len(ciphertext) {
 		panic("plaintext and ciphertext must have same length")
