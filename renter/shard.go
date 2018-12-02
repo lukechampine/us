@@ -1,6 +1,7 @@
 package renter
 
 import (
+	"bufio"
 	"encoding/binary"
 	"io"
 	"os"
@@ -27,16 +28,14 @@ var _ [SectorSliceSize]struct{} = [unsafe.Sizeof(SectorSlice{})]struct{}{}
 
 // A Shard is a shard file open for writing.
 type Shard struct {
-	f   *os.File
-	buf [SectorSliceSize]byte
+	f         *os.File
+	numSlices int64
 }
 
 // WriteSlice writes slice at the specified index, growing the underlying
 // file as necessary.
 func (s *Shard) WriteSlice(slice SectorSlice, index int64) error {
-	if stat, err := s.f.Stat(); err != nil {
-		return errors.Wrap(err, "could not stat shard")
-	} else if stat.Size() < index*SectorSliceSize {
+	if index > s.numSlices {
 		// truncate Shard to appropriate size
 		//
 		// NOTE: for best performance, avoid this branch by writing slices
@@ -44,21 +43,21 @@ func (s *Shard) WriteSlice(slice SectorSlice, index int64) error {
 		if err := s.f.Truncate(index * SectorSliceSize); err != nil {
 			return errors.Wrap(err, "could not resize shard")
 		}
+		s.numSlices = index
 	}
 
 	// encode slice
-	encSlice := s.buf[:]
-	n := copy(encSlice[:], slice.MerkleRoot[:])
-	binary.LittleEndian.PutUint32(encSlice[n:], slice.SegmentIndex)
-	n += 4
-	binary.LittleEndian.PutUint32(encSlice[n:], slice.NumSegments)
-	n += 4
-	copy(encSlice[n:], slice.Checksum[:])
+	encSlice := make([]byte, SectorSliceSize)
+	copy(encSlice, slice.MerkleRoot[:])
+	binary.LittleEndian.PutUint32(encSlice[32:], slice.SegmentIndex)
+	binary.LittleEndian.PutUint32(encSlice[36:], slice.NumSegments)
+	copy(encSlice[40:], slice.Checksum[:])
 
 	// write slice
 	if _, err := s.f.WriteAt(encSlice, index*SectorSliceSize); err != nil {
 		return errors.Wrap(err, "could not write shard slice")
 	}
+	s.numSlices++
 	return nil
 }
 
@@ -75,16 +74,22 @@ func OpenShard(filename string) (*Shard, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "could not open shard for writing")
 	}
-	// truncate to multiple of SectorSliceSize
-	if stat, err := file.Stat(); err != nil {
+	// determine number of slices in shard
+	stat, err := file.Stat()
+	if err != nil {
 		return nil, errors.Wrap(err, "could not stat shard")
-	} else if size := stat.Size(); size%SectorSliceSize != 0 {
-		n := size / SectorSliceSize
-		if err = file.Truncate(n * SectorSliceSize); err != nil {
+	}
+	numSlices := stat.Size() / SectorSliceSize
+	// if necessary, truncate to multiple of SectorSliceSize
+	if numSlices*SectorSliceSize != stat.Size() {
+		if err := file.Truncate(numSlices * SectorSliceSize); err != nil {
 			return nil, errors.Wrap(err, "could not repair shard")
 		}
 	}
-	return &Shard{f: file}, nil
+	return &Shard{
+		f:         file,
+		numSlices: numSlices,
+	}, nil
 }
 
 // ReadShard loads the slices of a shard file into memory.
@@ -99,17 +104,16 @@ func ReadShard(filename string) ([]SectorSlice, error) {
 		return nil, errors.Wrap(err, "could not stat shard")
 	}
 	slices := make([]SectorSlice, stat.Size()/SectorSliceSize)
+	bf := bufio.NewReader(f)
 	buf := make([]byte, SectorSliceSize)
 	for i := range slices {
-		if _, err := io.ReadFull(f, buf); err != nil {
+		if _, err := io.ReadFull(bf, buf); err != nil {
 			return nil, errors.Wrap(err, "could not read shard")
 		}
-		n := copy(slices[i].MerkleRoot[:], buf)
-		slices[i].SegmentIndex = binary.LittleEndian.Uint32(buf[n:])
-		n += 4
-		slices[i].NumSegments = binary.LittleEndian.Uint32(buf[n:])
-		n += 4
-		copy(slices[i].Checksum[:], buf[n:])
+		copy(slices[i].MerkleRoot[:], buf[:32])
+		slices[i].SegmentIndex = binary.LittleEndian.Uint32(buf[32:36])
+		slices[i].NumSegments = binary.LittleEndian.Uint32(buf[36:40])
+		copy(slices[i].Checksum[:], buf[40:72])
 	}
 	return slices, nil
 }
