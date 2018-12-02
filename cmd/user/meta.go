@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 
+	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/renterutil"
 
@@ -16,8 +17,8 @@ import (
 func metainfo(m renter.MetaIndex, shards [][]renter.SectorSlice) {
 	var uploaded int64
 	for _, shard := range shards {
-		for _, slice := range shard {
-			uploaded += int64(slice.Length)
+		for _, s := range shard {
+			uploaded += int64(s.NumSegments * merkle.SegmentSize)
 		}
 	}
 	redundantSize := m.Filesize * int64(len(m.Hosts)) / int64(m.MinShards)

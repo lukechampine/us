@@ -13,6 +13,7 @@ import (
 
 	"github.com/pkg/errors"
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renter/renterutil"
@@ -281,7 +282,7 @@ func (dr *downloadReader) chunkOffset(offset int64) (chunkIndex, chunkOffset int
 	}
 	rem := offset
 	for i, s := range dr.shards[0] {
-		chunkSize := int64(s.Length) * int64(dr.m.MinShards)
+		chunkSize := int64(s.NumSegments*merkle.SegmentSize) * int64(dr.m.MinShards)
 		if rem < chunkSize {
 			return int64(i), rem
 		}
@@ -294,7 +295,7 @@ func newDownloadReader(m renter.MetaIndex, shards [][]renter.SectorSlice, ds *do
 	// determine lastChunkSize
 	lastChunkSize := m.Filesize
 	for _, s := range shards[0][:len(shards[0])-1] {
-		lastChunkSize -= int64(s.Length) * int64(m.MinShards)
+		lastChunkSize -= int64(s.NumSegments*merkle.SegmentSize) * int64(m.MinShards)
 	}
 	return &downloadReader{
 		m:      m,

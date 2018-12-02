@@ -12,10 +12,10 @@ import (
 // A SectorSlice is the unit element of a shard file. Each SectorSlice uniquely
 // identifies a contiguous slice of data stored on a host.
 type SectorSlice struct {
-	MerkleRoot crypto.Hash
-	Offset     uint32
-	Length     uint32
-	Checksum   crypto.Hash
+	MerkleRoot   crypto.Hash
+	SegmentIndex uint32
+	NumSegments  uint32
+	Checksum     crypto.Hash
 }
 
 // SectorSliceSize is the encoded size of a SectorSlice.
@@ -45,9 +45,9 @@ func (s *Shard) WriteSlice(slice SectorSlice, index int64) error {
 	// encode slice
 	encSlice := s.buf[:]
 	n := copy(encSlice[:], slice.MerkleRoot[:])
-	binary.LittleEndian.PutUint32(encSlice[n:], slice.Offset)
+	binary.LittleEndian.PutUint32(encSlice[n:], slice.SegmentIndex)
 	n += 4
-	binary.LittleEndian.PutUint32(encSlice[n:], slice.Length)
+	binary.LittleEndian.PutUint32(encSlice[n:], slice.NumSegments)
 	n += 4
 	copy(encSlice[n:], slice.Checksum[:])
 
@@ -101,9 +101,9 @@ func ReadShard(filename string) ([]SectorSlice, error) {
 			return nil, errors.Wrap(err, "could not read shard")
 		}
 		n := copy(slices[i].MerkleRoot[:], buf)
-		slices[i].Offset = binary.LittleEndian.Uint32(buf[n:])
+		slices[i].SegmentIndex = binary.LittleEndian.Uint32(buf[n:])
 		n += 4
-		slices[i].Length = binary.LittleEndian.Uint32(buf[n:])
+		slices[i].NumSegments = binary.LittleEndian.Uint32(buf[n:])
 		n += 4
 		copy(slices[i].Checksum[:], buf[n:])
 	}

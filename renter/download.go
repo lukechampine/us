@@ -39,14 +39,8 @@ func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 		return nil, errors.Errorf("unknown chunk index %v", chunkIndex)
 	}
 	s := d.Slices[chunkIndex]
-	// align the offset and length to segment boundaries
-	startSegment := s.Offset / merkle.SegmentSize
-	endSegment := (s.Offset + s.Length) / merkle.SegmentSize
-	if (s.Offset+s.Length)%merkle.SegmentSize != 0 {
-		endSegment++
-	}
-	offset := startSegment * merkle.SegmentSize
-	length := (endSegment - startSegment) * merkle.SegmentSize
+	offset := s.SegmentIndex * merkle.SegmentSize
+	length := s.NumSegments * merkle.SegmentSize
 	// resize buffer and download
 	d.buf.Reset()
 	d.buf.Grow(int(length))
@@ -62,8 +56,6 @@ func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 	// SectorBuilder.Append.
 	startIndex := uint64(chunkIndex * merkle.SegmentsPerSector)
 	d.Key.DecryptSegments(data, data, startIndex)
-	// trim according to s
-	data = data[s.Offset%merkle.SegmentSize:][:s.Length]
 	// validate checksum
 	if blake2b.Sum256(data) != s.Checksum {
 		return nil, ErrBadChecksum

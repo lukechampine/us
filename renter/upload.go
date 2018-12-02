@@ -70,9 +70,9 @@ func (sb *SectorBuilder) Append(data []byte, key EncryptionKey, chunkIndex int64
 
 	// update sectorLen and record the new slice
 	sb.slices = append(sb.slices, SectorSlice{
-		Offset:   uint32(sb.sectorLen),
-		Length:   uint32(len(data)),
-		Checksum: blake2b.Sum256(data),
+		SegmentIndex: uint32(sb.sectorLen / merkle.SegmentSize),
+		NumSegments:  uint32(len(sectorSlice) / merkle.SegmentSize),
+		Checksum:     blake2b.Sum256(data),
 	})
 	sb.sectorLen += len(sectorSlice)
 }

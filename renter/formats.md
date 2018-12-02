@@ -90,8 +90,13 @@ the sector, an offset within it, and a length. The shard as a whole represents
 a contiguous slice of data that may span many sectors. As such, the order of
 the array is significant.
 
+The offset and length are in terms of segments (64 bytes), which are the
+atomic unit of transfer in the Sia renter-host protocol. Storing data thus
+requires adding (and later removing) padding if the file's size is not an
+exact multiple of 64 bytes.
+
 Each slice also includes a checksum of the original data (before encryption).
-As of version 1, the checksum is a BLAKE-2b hash. The checksum serves two
+As of version 1, the checksum is a BLAKE2b hash. The checksum serves two
 purposes: it assures data integrity when downloading, and it allows for
 comparisons between a local file and a metafile. For example, when resuming a
 download, the checksums can be used to determine which slices have already
@@ -101,9 +106,9 @@ been downloaded.
 type Shard []SectorSlice
 
 type SectorSlice struct {
-	MerkleRoot [32]byte
-	Offset     uint32
-	Length     uint32
-	Checksum   [32]byte
+	MerkleRoot   [32]byte
+	SegmentIndex uint32
+	NumSugments  uint32
+	Checksum     [32]byte
 }
 ```

@@ -1,13 +1,13 @@
 package renterutil
 
 import (
-	"bytes"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renterhost"
@@ -66,8 +66,8 @@ func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.M
 	}
 	var start, offset int64
 	for _, s := range slices[:chunkIndex] {
-		start += int64(s.Length) * int64(len(m.Hosts))
-		offset += int64(s.Length) * int64(m.MinShards)
+		start += int64(s.NumSegments*merkle.SegmentSize) * int64(len(m.Hosts))
+		offset += int64(s.NumSegments*merkle.SegmentSize) * int64(m.MinShards)
 	}
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		op.die(err)

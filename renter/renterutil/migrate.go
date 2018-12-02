@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renterhost"
 
@@ -166,8 +167,8 @@ func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, mig
 	var total, uploaded int64
 	chunkSizes := make([]int, len(shard))
 	for i, s := range shard {
-		chunkSizes[i] = int(s.Length) * m.MinShards
-		total += int64(s.Length)
+		chunkSizes[i] = int(s.NumSegments*merkle.SegmentSize) * m.MinShards
+		total += int64(s.NumSegments * merkle.SegmentSize)
 	}
 	if total == 0 {
 		// nothing to do
@@ -208,7 +209,7 @@ func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, mig
 				op.die(errors.Wrap(err, "could not upload sector"))
 				return
 			}
-			uploaded += int64(s.Length)
+			uploaded += int64(s.NumSegments * merkle.SegmentSize)
 			op.sendUpdate(TransferProgressUpdate{
 				Total:       total,
 				Transferred: uploaded,
@@ -380,7 +381,7 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 			continue
 		}
 		for _, s := range h.Slices {
-			total += int64(s.Length) * int64(len(migrations))
+			total += int64(s.NumSegments*merkle.SegmentSize) * int64(len(migrations))
 		}
 		numChunks = int64(len(h.Slices))
 		break
@@ -423,7 +424,7 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 				op.die(err)
 				return
 			}
-			uploaded += int64(s.Length)
+			uploaded += int64(s.NumSegments * merkle.SegmentSize)
 			op.sendUpdate(TransferProgressUpdate{
 				Total:       total,
 				Transferred: uploaded,

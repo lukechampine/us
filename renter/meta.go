@@ -555,7 +555,7 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 			var shardSize int64
 			err = binary.Read(tr, binary.LittleEndian, &s)
 			for err != io.EOF {
-				shardSize += int64(s.Length)
+				shardSize += int64(s.NumSegments) * merkle.SegmentSize
 				err = binary.Read(tr, binary.LittleEndian, &s)
 			}
 			if err != io.EOF {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renterhost"
 
@@ -55,7 +56,7 @@ func download(op *Operation, f *os.File, contracts renter.ContractSet, m *renter
 		for chunkIndex := range shards[0] {
 			for i := range shards {
 				s := shards[i][chunkIndex]
-				buf = buf[:s.Length]
+				buf = buf[:s.NumSegments*merkle.SegmentSize]
 				_, err := io.ReadFull(f, buf)
 				if err == io.EOF || err == io.ErrUnexpectedEOF {
 					return chunkIndex, bytesVerified, nil
@@ -121,7 +122,7 @@ func downloadStream(op *Operation, w io.Writer, chunkIndex int64, contracts rent
 			continue
 		}
 		for _, s := range h.Slices[:chunkIndex] {
-			offset += int64(s.Length) * int64(m.MinShards)
+			offset += int64(s.NumSegments) * merkle.SegmentSize * int64(m.MinShards)
 		}
 		break
 	}
@@ -324,11 +325,11 @@ func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minS
 				if host == nil {
 					res.err = errNoHost
 				} else {
-					res.shard, res.err = hosts[shardIndex].DownloadAndDecrypt(chunkIndex)
-					res.err = errors.Wrap(res.err, hosts[shardIndex].HostKey().ShortKey())
+					res.shard, res.err = host.DownloadAndDecrypt(chunkIndex)
+					res.err = errors.Wrap(res.err, host.HostKey().ShortKey())
 					res.stats = DownloadStatsUpdate{
-						Host:  hosts[shardIndex].HostKey(),
-						Stats: hosts[shardIndex].Downloader.LastDownloadStats(),
+						Host:  host.HostKey(),
+						Stats: host.Downloader.LastDownloadStats(),
 					}
 				}
 				resChan <- res
