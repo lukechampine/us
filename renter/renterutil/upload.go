@@ -129,24 +129,14 @@ func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.M
 					errChan <- nil
 					return
 				}
-				// split shard into 1 MiB slices; this reduces seek latency
-				// when downloading, since we only need to download 1 MiB at a
-				// time.
-				//
-				// NOTE: to avoid introducing wasteful padding, the size of
-				// each slice should be a multiple of merkle.SegmentSize.
-				h.Sector.Reset()
-				buf := bytes.NewBuffer(shards[shardIndex])
-				for i := int64(0); buf.Len() > 0; i++ {
-					h.Sector.Append(buf.Next(1<<20), h.Key, chunkIndex+i)
-				}
-				// upload the shard and write all slices to disk
-				err := h.Upload(chunkIndex)
+				_, err = h.EncryptAndUpload(shards[shardIndex], chunkIndex)
 				errChan <- errors.Wrapf(err, "%v: could not upload sector", h.HostKey().ShortKey())
-				op.sendUpdate(UploadStatsUpdate{
-					Host:  h.HostKey(),
-					Stats: h.Uploader.LastUploadStats(),
-				})
+				if err == nil {
+					op.sendUpdate(UploadStatsUpdate{
+						Host:  h.HostKey(),
+						Stats: h.Uploader.LastUploadStats(),
+					})
+				}
 			}(i)
 		}
 		// collect errors
