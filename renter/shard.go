@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
+	"unsafe"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
@@ -19,7 +20,10 @@ type SectorSlice struct {
 }
 
 // SectorSliceSize is the encoded size of a SectorSlice.
-const SectorSliceSize = 32 + 4 + 4 + 32
+const SectorSliceSize = 72
+
+// assert that SectorSliceSize is accurate
+var _ [SectorSliceSize]struct{} = [unsafe.Sizeof(SectorSlice{})]struct{}{}
 
 // A Shard is a shard file open for writing.
 type Shard struct {
