@@ -102,10 +102,10 @@ type Encoder interface {
 	Join(dst io.Writer, shards [][]byte, outSize int) error
 }
 
-// reedSolomon contains a matrix for a specific
+// ReedSolomon contains a matrix for a specific
 // distribution of datashards and parity shards.
 // Construct if using New()
-type reedSolomon struct {
+type ReedSolomon struct {
 	DataShards   int // Number of data shards, should not be modified.
 	ParityShards int // Number of parity shards, should not be modified.
 	Shards       int // Total number of shards. Calculated, and should not be modified.
@@ -211,8 +211,8 @@ func buildMatrixCauchy(dataShards, totalShards int) (matrix, error) {
 // you want to use. You can reuse this encoder.
 // Note that the maximum number of total shards is 256.
 // If no options are supplied, default options are used.
-func New(dataShards, parityShards int, opts ...Option) (Encoder, error) {
-	r := reedSolomon{
+func New(dataShards, parityShards int, opts ...Option) (*ReedSolomon, error) {
+	r := &ReedSolomon{
 		DataShards:   dataShards,
 		ParityShards: parityShards,
 		Shards:       dataShards + parityShards,
@@ -282,7 +282,7 @@ func New(dataShards, parityShards int, opts ...Option) (Encoder, error) {
 		r.parity[i] = r.m[dataShards+i]
 	}
 
-	return &r, err
+	return r, err
 }
 
 // ErrTooFewShards is returned if too few shards where given to
@@ -296,7 +296,7 @@ var ErrTooFewShards = errors.New("too few shards given")
 // Each shard is a byte array, and they must all be the same size.
 // The parity shards will always be overwritten and the data shards
 // will remain the same.
-func (r reedSolomon) Encode(shards [][]byte) error {
+func (r *ReedSolomon) Encode(shards [][]byte) error {
 	if len(shards) != r.Shards {
 		return ErrTooFewShards
 	}
@@ -317,7 +317,7 @@ func (r reedSolomon) Encode(shards [][]byte) error {
 // ErrInvalidInput is returned if invalid input parameter of Update.
 var ErrInvalidInput = errors.New("invalid input")
 
-func (r reedSolomon) Update(shards [][]byte, newDatashards [][]byte) error {
+func (r *ReedSolomon) Update(shards [][]byte, newDatashards [][]byte) error {
 	if len(shards) != r.Shards {
 		return ErrTooFewShards
 	}
@@ -357,7 +357,7 @@ func (r reedSolomon) Update(shards [][]byte, newDatashards [][]byte) error {
 	return nil
 }
 
-func (r reedSolomon) updateParityShards(matrixRows, oldinputs, newinputs, outputs [][]byte, outputCount, byteCount int) {
+func (r *ReedSolomon) updateParityShards(matrixRows, oldinputs, newinputs, outputs [][]byte, outputCount, byteCount int) {
 	if r.o.maxGoroutines > 1 && byteCount > r.o.minSplitSize {
 		r.updateParityShardsP(matrixRows, oldinputs, newinputs, outputs, outputCount, byteCount)
 		return
@@ -377,7 +377,7 @@ func (r reedSolomon) updateParityShards(matrixRows, oldinputs, newinputs, output
 	}
 }
 
-func (r reedSolomon) updateParityShardsP(matrixRows, oldinputs, newinputs, outputs [][]byte, outputCount, byteCount int) {
+func (r *ReedSolomon) updateParityShardsP(matrixRows, oldinputs, newinputs, outputs [][]byte, outputCount, byteCount int) {
 	var wg sync.WaitGroup
 	do := byteCount / r.o.maxGoroutines
 	if do < r.o.minSplitSize {
@@ -411,7 +411,7 @@ func (r reedSolomon) updateParityShardsP(matrixRows, oldinputs, newinputs, outpu
 
 // Verify returns true if the parity shards contain the right data.
 // The data is the same format as Encode. No data is modified.
-func (r reedSolomon) Verify(shards [][]byte) (bool, error) {
+func (r *ReedSolomon) Verify(shards [][]byte) (bool, error) {
 	if len(shards) != r.Shards {
 		return false, ErrTooFewShards
 	}
@@ -436,7 +436,7 @@ func (r reedSolomon) Verify(shards [][]byte) (bool, error) {
 // The number of outputs computed, and the
 // number of matrix rows used, is determined by
 // outputCount, which is the number of outputs to compute.
-func (r reedSolomon) codeSomeShards(matrixRows, inputs, outputs [][]byte, outputCount, byteCount int) {
+func (r *ReedSolomon) codeSomeShards(matrixRows, inputs, outputs [][]byte, outputCount, byteCount int) {
 	for c := 0; c < r.DataShards; c++ {
 		in := inputs[c]
 		for iRow := 0; iRow < outputCount; iRow++ {
@@ -452,7 +452,7 @@ func (r reedSolomon) codeSomeShards(matrixRows, inputs, outputs [][]byte, output
 // checkSomeShards is mostly the same as codeSomeShards,
 // except this will check values and return
 // as soon as a difference is found.
-func (r reedSolomon) checkSomeShards(matrixRows, inputs, toCheck [][]byte, outputCount, byteCount int) bool {
+func (r *ReedSolomon) checkSomeShards(matrixRows, inputs, toCheck [][]byte, outputCount, byteCount int) bool {
 	if r.o.maxGoroutines > 1 && byteCount > r.o.minSplitSize {
 		return r.checkSomeShardsP(matrixRows, inputs, toCheck, outputCount, byteCount)
 	}
@@ -475,7 +475,7 @@ func (r reedSolomon) checkSomeShards(matrixRows, inputs, toCheck [][]byte, outpu
 	return true
 }
 
-func (r reedSolomon) checkSomeShardsP(matrixRows, inputs, toCheck [][]byte, outputCount, byteCount int) bool {
+func (r *ReedSolomon) checkSomeShardsP(matrixRows, inputs, toCheck [][]byte, outputCount, byteCount int) bool {
 	same := true
 	var mu sync.RWMutex // For above
 
@@ -579,7 +579,7 @@ func shardSize(shards [][]byte) int {
 //
 // The reconstructed shard set is complete, but integrity is not verified.
 // Use the Verify function to check if data set is ok.
-func (r reedSolomon) Reconstruct(shards [][]byte) error {
+func (r *ReedSolomon) Reconstruct(shards [][]byte) error {
 	return r.reconstruct(shards, false)
 }
 
@@ -598,7 +598,7 @@ func (r reedSolomon) Reconstruct(shards [][]byte) error {
 //
 // As the reconstructed shard set may contain missing parity shards,
 // calling the Verify function is likely to fail.
-func (r reedSolomon) ReconstructData(shards [][]byte) error {
+func (r *ReedSolomon) ReconstructData(shards [][]byte) error {
 	return r.reconstruct(shards, true)
 }
 
@@ -610,7 +610,7 @@ func (r reedSolomon) ReconstructData(shards [][]byte) error {
 //
 // If there are too few shards to reconstruct the missing
 // ones, ErrTooFewShards will be returned.
-func (r reedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
+func (r *ReedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
 	if len(shards) != r.Shards {
 		return ErrTooFewShards
 	}
@@ -765,7 +765,7 @@ var ErrShortData = errors.New("not enough data to fill the number of requested s
 //
 // The data will not be copied, except for the last shard, so you
 // should not modify the data of the input slice afterwards.
-func (r reedSolomon) Split(data []byte) ([][]byte, error) {
+func (r *ReedSolomon) Split(data []byte) ([][]byte, error) {
 	if len(data) == 0 {
 		return nil, ErrShortData
 	}
@@ -805,7 +805,7 @@ var ErrReconstructRequired = errors.New("reconstruction required as one or more 
 // If there are to few shards given, ErrTooFewShards will be returned.
 // If the total data size is less than outSize, ErrShortData will be returned.
 // If one or more required data shards are nil, ErrReconstructRequired will be returned.
-func (r reedSolomon) Join(dst io.Writer, shards [][]byte, outSize int) error {
+func (r *ReedSolomon) Join(dst io.Writer, shards [][]byte, outSize int) error {
 	// Do we have enough shards?
 	if len(shards) < r.DataShards {
 		return ErrTooFewShards
