@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/klauspost/reedsolomon"
+	"lukechampine.com/us/internal/reedsolomon"
 	"lukechampine.com/us/merkle"
 )
 
