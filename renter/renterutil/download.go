@@ -1,6 +1,7 @@
 package renterutil
 
 import (
+	"bufio"
 	"io"
 	"os"
 	"strings"
@@ -136,6 +137,7 @@ func downloadStream(op *Operation, w io.Writer, chunkIndex int64, contracts rent
 	})
 
 	// download in parallel
+	bw := bufio.NewWriter(w)
 	rsc := m.ErasureCode()
 	for remaining > 0 {
 		if op.Canceled() {
@@ -159,7 +161,7 @@ func downloadStream(op *Operation, w io.Writer, chunkIndex int64, contracts rent
 		if writeLen > remaining {
 			writeLen = remaining
 		}
-		err = rsc.Recover(w, shards, int(writeLen))
+		err = rsc.Recover(bw, shards, int(writeLen))
 		if err != nil {
 			op.die(err)
 			return
@@ -171,6 +173,10 @@ func downloadStream(op *Operation, w io.Writer, chunkIndex int64, contracts rent
 			Transferred: m.Filesize - offset - remaining,
 		})
 		chunkIndex++
+	}
+	if err := bw.Flush(); err != nil {
+		op.die(err)
+		return
 	}
 	op.die(nil)
 }
