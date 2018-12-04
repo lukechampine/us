@@ -106,6 +106,10 @@ func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.M
 	// upload in parallel
 	rsc := m.ErasureCode()
 	chunk := make([]byte, m.MaxChunkSize())
+	shards := make([][]byte, len(m.Hosts))
+	for i := range shards {
+		shards[i] = make([]byte, renterhost.SectorSize)
+	}
 	var uploaded int64
 	for {
 		// read chunk
@@ -118,7 +122,7 @@ func upload(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.M
 			break
 		}
 		// encode the chunk into shards
-		shards := rsc.Encode(chunk[:n])
+		rsc.Encode(chunk[:n], shards)
 
 		// upload each shard in parallel
 		errChan := make(chan error)
@@ -315,6 +319,10 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 	}
 	chunk := make([]byte, curEntry.m.MaxChunkSize())
 	sectors := make([]renter.SectorBuilder, len(hosts))
+	shards := make([][]byte, len(hosts))
+	for i := range shards {
+		shards[i] = make([]byte, renterhost.SectorSize)
+	}
 	for curEntry.f != nil {
 		var files []fileEntry
 
@@ -356,7 +364,7 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 			chunk = chunk[:n]
 
 			// split the chunk into shards
-			shards := rsc.Encode(chunk)
+			rsc.Encode(chunk, shards)
 
 			// append each shard to its corresponding sector
 			for i := range sectors {

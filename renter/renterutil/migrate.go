@@ -181,8 +181,12 @@ func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, mig
 	})
 
 	// upload one chunk at a time
-	chunk := make([]byte, m.MaxChunkSize()) // no chunk will be larger than this
 	rsc := m.ErasureCode()
+	chunk := make([]byte, m.MaxChunkSize()) // no chunk will be larger than this
+	shards := make([][]byte, len(hosts))
+	for i := range shards {
+		shards[i] = make([]byte, renterhost.SectorSize)
+	}
 	for chunkIndex, chunkSize := range chunkSizes {
 		if op.Canceled() {
 			op.die(ErrCanceled)
@@ -198,7 +202,7 @@ func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, mig
 		}
 
 		// encode the chunk, then encrypt and upload each shard
-		shards := rsc.Encode(chunk[:n])
+		rsc.Encode(chunk[:n], shards)
 		for shardIndex, host := range hosts {
 			if host == nil {
 				// already uploaded to this host

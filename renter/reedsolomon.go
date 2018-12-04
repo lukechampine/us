@@ -1,110 +1,224 @@
 package renter
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 
 	"github.com/klauspost/reedsolomon"
+	"lukechampine.com/us/merkle"
 )
 
-// An ErasureCoder encodes and decodes data to/from a set of shards.
+// An ErasureCoder encodes and decodes data to/from a set of shards. The
+// encoding is done piecewise, such that every segment can be decoded
+// individually.
 type ErasureCoder interface {
-	Encode(data []byte) [][]byte
+	// Encode encodes data into shards. The resulting shards do not constitute
+	// a single matrix, but a series of matrices, each with a shard size of
+	// merkletree.Segmentsize. The supplied shards must each have a capacity
+	// of at least len(data)/m.
+	Encode(data []byte, shards [][]byte)
+	// Reconstruct recalculates any missing shards in the input. Missing
+	// shards must have the same capacity as a normal shard, but a length of
+	// zero.
 	Reconstruct(shards [][]byte) error
-	Recover(w io.Writer, shards [][]byte, writeLen int) error
+	// Recover recalculates any missing data shards and writes them to w,
+	// stopping after n bytes.
+	Recover(w io.Writer, shards [][]byte, n int) error
+}
+
+type rsCode struct {
+	enc  reedsolomon.Encoder
+	m, n int
+
+	subshards [][]byte
+}
+
+func checkShards(shards [][]byte, n int) (shardSize int) {
+	if len(shards) != n {
+		panic(fmt.Sprintf("expected %v shards, got %v", n, len(shards)))
+	}
+	for i := range shards {
+		if len(shards[i]) != 0 {
+			if shardSize == 0 {
+				shardSize = len(shards[i])
+			} else if len(shards[i]) != shardSize {
+				panic(reedsolomon.ErrShardSize)
+			}
+		}
+	}
+	if shardSize%merkle.SegmentSize != 0 {
+		panic("shard size must be a multiple of SegmentSize")
+	}
+	return shardSize
+}
+
+func (rsc rsCode) Encode(data []byte, shards [][]byte) {
+	chunkSize := rsc.m * merkle.SegmentSize
+	numChunks := len(data) / chunkSize
+	if len(data)%chunkSize != 0 {
+		numChunks++
+	}
+	checkShards(shards, rsc.n)
+
+	// extend shards to proper len
+	shardSize := numChunks * merkle.SegmentSize
+	for i := range shards {
+		if cap(shards[i]) < shardSize {
+			panic("each shard must have capacity of at least len(data)/m")
+		}
+		shards[i] = shards[i][:shardSize]
+	}
+	// treat shards as a sequence of segments. Iterate over each segment,
+	// copying some data into the data shards, then calling Encode to fill the
+	// parity shards.
+	buf := bytes.NewBuffer(data)
+	for off := 0; buf.Len() > 0; off += merkle.SegmentSize {
+		for i := 0; i < rsc.m; i++ {
+			copy(shards[i][off:], buf.Next(merkle.SegmentSize))
+		}
+		for i := range rsc.subshards {
+			rsc.subshards[i] = shards[i][off:][:merkle.SegmentSize]
+		}
+		if err := rsc.enc.Encode(rsc.subshards); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func (rsc rsCode) Reconstruct(shards [][]byte) error {
+	shardSize := checkShards(shards, rsc.n)
+
+	for off := 0; off < shardSize; off += merkle.SegmentSize {
+		for i := range shards {
+			if len(shards[i]) == 0 {
+				rsc.subshards[i] = shards[i][:shardSize][off:][:0]
+			} else {
+				rsc.subshards[i] = shards[i][off:][:merkle.SegmentSize]
+			}
+		}
+		if err := rsc.enc.Reconstruct(rsc.subshards); err != nil {
+			return err
+		}
+	}
+
+	for i := range shards {
+		shards[i] = shards[i][:shardSize]
+	}
+	return nil
+}
+
+func (rsc rsCode) Recover(w io.Writer, shards [][]byte, n int) error {
+	checkShards(shards, rsc.n)
+
+	rem := n
+	for off := 0; rem > 0; off += merkle.SegmentSize {
+		for i := range shards {
+			if len(shards[i]) == 0 {
+				rsc.subshards[i] = shards[i] // allow for use of extra capacity
+			} else {
+				rsc.subshards[i] = shards[i][off:][:merkle.SegmentSize]
+			}
+		}
+		if err := rsc.enc.ReconstructData(rsc.subshards); err != nil {
+			return err
+		}
+		writeLen := rsc.m * merkle.SegmentSize
+		if writeLen > rem {
+			writeLen = rem
+		}
+		if err := rsc.enc.Join(w, rsc.subshards, writeLen); err != nil {
+			return err
+		}
+		rem -= writeLen
+	}
+	return nil
 }
 
 // NewRSCode returns an m-of-n ErasureCoder. It panics if m <= 0 or n < m.
 func NewRSCode(m, n int) ErasureCoder {
-	if n == m {
+	if m == n {
 		return simpleRedundancy(m)
 	}
 	rsc, err := reedsolomon.New(m, n-m)
 	if err != nil {
 		panic(err)
 	}
-	return rsCode{rsc}
-}
-
-type rsCode struct {
-	reedsolomon.Encoder
-}
-
-func (rsc rsCode) Encode(data []byte) [][]byte {
-	shards, err := rsc.Split(data)
-	if err != nil {
-		panic(err)
-	} else if err := rsc.Encoder.Encode(shards); err != nil {
-		panic(err)
+	return rsCode{
+		enc:       rsc,
+		m:         m,
+		n:         n,
+		subshards: make([][]byte, n),
 	}
-	return shards
-}
-
-func (rsc rsCode) Recover(w io.Writer, shards [][]byte, n int) error {
-	if err := rsc.ReconstructData(shards); err != nil {
-		return err
-	}
-	return rsc.Join(w, shards, n)
 }
 
 // simpleRedundancy implements the ErasureCoder interface when no
 // parity shards are desired
 type simpleRedundancy int
 
-func (r simpleRedundancy) Encode(data []byte) [][]byte {
-	// Calculate number of bytes per shard.
-	perShard := len(data) / int(r)
-	if int(r)*perShard < len(data) {
-		perShard++
+func (r simpleRedundancy) Encode(data []byte, shards [][]byte) {
+	checkShards(shards, int(r))
+	chunkSize := int(r) * merkle.SegmentSize
+	numChunks := len(data) / chunkSize
+	if len(data)%chunkSize != 0 {
+		numChunks++
 	}
 
-	// If data isn't evenly divisible by r, we must pad it with zeros.
-	if len(data) < int(r)*perShard {
-		// NOTE: we could append here instead, but if len(data) !=
-		// cap(data), we could accidentally clobber bytes. Better to be
-		// safe and always reallocate; if the caller really wants to
-		// avoid this, they can do the padding themselves.
-		padded := make([]byte, int(r)*perShard)
-		copy(padded, data)
-		data = padded
+	// extend shards to proper len
+	shardSize := numChunks * merkle.SegmentSize
+	for i := range shards {
+		if cap(shards[i]) < shardSize {
+			panic("each shard must have capacity of at least len(data)/m")
+		}
+		shards[i] = shards[i][:shardSize]
 	}
 
-	// Split into equal-length shards.
-	dst := make([][]byte, r)
-	for i := range dst {
-		dst[i] = data[i*perShard:][:perShard]
+	// treat shards as a sequence of segments. Iterate over each segment,
+	// copying data into each shard.
+	buf := bytes.NewBuffer(data)
+	for off := 0; buf.Len() > 0; off += merkle.SegmentSize {
+		for i := range shards {
+			copy(shards[i][off:], buf.Next(merkle.SegmentSize))
+		}
 	}
-	return dst
 }
 
 func (r simpleRedundancy) Reconstruct(shards [][]byte) error {
 	return r.checkShards(shards)
 }
 
-func (r simpleRedundancy) Recover(dst io.Writer, shards [][]byte, outSize int) error {
+func (r simpleRedundancy) Recover(dst io.Writer, shards [][]byte, n int) error {
 	if err := r.checkShards(shards); err != nil {
 		return err
 	}
-	remaining := outSize
-	for _, shard := range shards {
-		if remaining < len(shard) {
-			shard = shard[:remaining]
+	rem := n
+	for off := 0; rem > 0; off += merkle.SegmentSize {
+		for _, shard := range shards {
+			s := shard[off:][:merkle.SegmentSize]
+			if rem < len(s) {
+				s = s[:rem]
+			}
+			n, err := dst.Write(s)
+			if err != nil {
+				return err
+			}
+			rem -= n
 		}
-		n, err := dst.Write(shard)
-		if err != nil {
-			return err
-		}
-		remaining -= n
 	}
 	return nil
 }
 
 func (r simpleRedundancy) checkShards(shards [][]byte) error {
 	if len(shards) != int(r) {
-		return reedsolomon.ErrTooFewShards
+		panic(fmt.Sprintf("expected %v shards, got %v", r, len(shards)))
 	}
-	for i := 0; i < len(shards)-1; i++ {
-		if len(shards[i]) != len(shards[i+1]) {
-			return reedsolomon.ErrShardSize
+	for i := range shards {
+		if len(shards[i]) == 0 {
+			return reedsolomon.ErrTooFewShards
+		} else if i > 0 && len(shards[i]) != len(shards[i-1]) {
+			panic(reedsolomon.ErrShardSize)
+		} else if len(shards[i])%merkle.SegmentSize != 0 {
+			panic("shard size must be a multiple of SegmentSize")
 		}
 	}
 	return nil
