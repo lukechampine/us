@@ -437,10 +437,6 @@ func (r reedSolomon) Verify(shards [][]byte) (bool, error) {
 // number of matrix rows used, is determined by
 // outputCount, which is the number of outputs to compute.
 func (r reedSolomon) codeSomeShards(matrixRows, inputs, outputs [][]byte, outputCount, byteCount int) {
-	if r.o.maxGoroutines > 1 && byteCount > r.o.minSplitSize {
-		r.codeSomeShardsP(matrixRows, inputs, outputs, outputCount, byteCount)
-		return
-	}
 	for c := 0; c < r.DataShards; c++ {
 		in := inputs[c]
 		for iRow := 0; iRow < outputCount; iRow++ {
@@ -451,40 +447,6 @@ func (r reedSolomon) codeSomeShards(matrixRows, inputs, outputs [][]byte, output
 			}
 		}
 	}
-}
-
-// Perform the same as codeSomeShards, but split the workload into
-// several goroutines.
-func (r reedSolomon) codeSomeShardsP(matrixRows, inputs, outputs [][]byte, outputCount, byteCount int) {
-	var wg sync.WaitGroup
-	do := byteCount / r.o.maxGoroutines
-	if do < r.o.minSplitSize {
-		do = r.o.minSplitSize
-	}
-	// Make sizes divisible by 16
-	do = (do + 15) & (^15)
-	start := 0
-	for start < byteCount {
-		if start+do > byteCount {
-			do = byteCount - start
-		}
-		wg.Add(1)
-		go func(start, stop int) {
-			for c := 0; c < r.DataShards; c++ {
-				in := inputs[c][start:stop]
-				for iRow := 0; iRow < outputCount; iRow++ {
-					if c == 0 {
-						galMulSlice(matrixRows[iRow][c], in, outputs[iRow][start:stop], r.o.useSSSE3, r.o.useAVX2)
-					} else {
-						galMulSliceXor(matrixRows[iRow][c], in, outputs[iRow][start:stop], r.o.useSSSE3, r.o.useAVX2)
-					}
-				}
-			}
-			wg.Done()
-		}(start, start+do)
-		start += do
-	}
-	wg.Wait()
 }
 
 // checkSomeShards is mostly the same as codeSomeShards,
@@ -686,9 +648,9 @@ func (r reedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
 	//
 	// Also, create an array of indices of the valid rows we do have
 	// and the invalid rows we don't have up until we have enough valid rows.
-	subShards := make([][]byte, r.DataShards)
-	validIndices := make([]int, r.DataShards)
-	invalidIndices := make([]int, 0)
+	subShards := make([][]byte, 256)[:r.DataShards]
+	validIndices := make([]int, 256)[:r.DataShards]
+	invalidIndices := make([]int, 0, 256)
 	subMatrixRow := 0
 	for matrixRow := 0; matrixRow < r.Shards && subMatrixRow < r.DataShards; matrixRow++ {
 		if len(shards[matrixRow]) != 0 {
@@ -741,8 +703,8 @@ func (r reedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
 	// The input to the coding is all of the shards we actually
 	// have, and the output is the missing data shards.  The computation
 	// is done using the special decode matrix we just built.
-	outputs := make([][]byte, r.ParityShards)
-	matrixRows := make([][]byte, r.ParityShards)
+	outputs := make([][]byte, 256)[:r.ParityShards]
+	matrixRows := make([][]byte, 256)[:r.ParityShards]
 	outputCount := 0
 
 	for iShard := 0; iShard < r.DataShards; iShard++ {
