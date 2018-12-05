@@ -28,10 +28,8 @@ type ErasureCoder interface {
 }
 
 type rsCode struct {
-	enc  reedsolomon.Encoder
+	enc  *reedsolomon.ReedSolomon
 	m, n int
-
-	subshards [][]byte
 }
 
 func checkShards(shards [][]byte, n int) (shardSize int) {
@@ -72,15 +70,16 @@ func (rsc rsCode) Encode(data []byte, shards [][]byte) {
 	// treat shards as a sequence of segments. Iterate over each segment,
 	// copying some data into the data shards, then calling Encode to fill the
 	// parity shards.
+	subshards := make([][]byte, 256)[:rsc.n]
 	buf := bytes.NewBuffer(data)
 	for off := 0; buf.Len() > 0; off += merkle.SegmentSize {
 		for i := 0; i < rsc.m; i++ {
 			copy(shards[i][off:], buf.Next(merkle.SegmentSize))
 		}
-		for i := range rsc.subshards {
-			rsc.subshards[i] = shards[i][off:][:merkle.SegmentSize]
+		for i := range subshards {
+			subshards[i] = shards[i][off:][:merkle.SegmentSize]
 		}
-		if err := rsc.enc.Encode(rsc.subshards); err != nil {
+		if err := rsc.enc.Encode(subshards); err != nil {
 			panic(err)
 		}
 	}
@@ -89,15 +88,16 @@ func (rsc rsCode) Encode(data []byte, shards [][]byte) {
 func (rsc rsCode) Reconstruct(shards [][]byte) error {
 	shardSize := checkShards(shards, rsc.n)
 
+	subshards := make([][]byte, 256)[:rsc.n]
 	for off := 0; off < shardSize; off += merkle.SegmentSize {
 		for i := range shards {
 			if len(shards[i]) == 0 {
-				rsc.subshards[i] = shards[i][:shardSize][off:][:0]
+				subshards[i] = shards[i][:shardSize][off:][:0]
 			} else {
-				rsc.subshards[i] = shards[i][off:][:merkle.SegmentSize]
+				subshards[i] = shards[i][off:][:merkle.SegmentSize]
 			}
 		}
-		if err := rsc.enc.Reconstruct(rsc.subshards); err != nil {
+		if err := rsc.enc.Reconstruct(subshards); err != nil {
 			return err
 		}
 	}
@@ -111,23 +111,24 @@ func (rsc rsCode) Reconstruct(shards [][]byte) error {
 func (rsc rsCode) Recover(w io.Writer, shards [][]byte, n int) error {
 	checkShards(shards, rsc.n)
 
+	subshards := make([][]byte, 256)[:rsc.n]
 	rem := n
 	for off := 0; rem > 0; off += merkle.SegmentSize {
 		for i := range shards {
 			if len(shards[i]) == 0 {
-				rsc.subshards[i] = shards[i] // allow for use of extra capacity
+				subshards[i] = shards[i] // allow for use of extra capacity
 			} else {
-				rsc.subshards[i] = shards[i][off:][:merkle.SegmentSize]
+				subshards[i] = shards[i][off:][:merkle.SegmentSize]
 			}
 		}
-		if err := rsc.enc.ReconstructData(rsc.subshards); err != nil {
+		if err := rsc.enc.ReconstructData(subshards); err != nil {
 			return err
 		}
 		writeLen := rsc.m * merkle.SegmentSize
 		if writeLen > rem {
 			writeLen = rem
 		}
-		if err := rsc.enc.Join(w, rsc.subshards, writeLen); err != nil {
+		if err := rsc.enc.Join(w, subshards, writeLen); err != nil {
 			return err
 		}
 		rem -= writeLen
@@ -148,7 +149,6 @@ func NewRSCode(m, n int) ErasureCoder {
 		enc:       rsc,
 		m:         m,
 		n:         n,
-		subshards: make([][]byte, n),
 	}
 }
 
