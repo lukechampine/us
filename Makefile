@@ -1,5 +1,4 @@
-ldflags = -X 'main.version=0.1.0' \
-          -X 'main.githash=`git rev-parse --short HEAD`' \
+ldflags = -X 'main.githash=`git rev-parse --short HEAD`' \
           -X 'main.goversion=`go version`' \
           -X 'main.builddate=`date`'
 

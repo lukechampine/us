@@ -20,7 +20,6 @@ import (
 
 var (
 	// to be supplied at build time
-	version   = "?"
 	githash   = "?"
 	goversion = "?"
 	builddate = "?"
@@ -298,8 +297,8 @@ func main() {
 		fallthrough
 	case versionCmd:
 		goversion = strings.TrimPrefix(goversion, "go version ")
-		log.Printf("user v%s\nCommit:     %s\nRelease:    %s\nGo version: %s\nBuild Date: %s\n",
-			version, githash, build.Release, goversion, builddate)
+		log.Printf("user v0.1.0%s\nCommit:     %s\nRelease:    %s\nGo version: %s\nBuild Date: %s\n",
+			githash, build.Release, goversion, builddate)
 
 	case scanCmd:
 		hostkey, bytes, duration, downloads := parseScan(args, scanCmd)
