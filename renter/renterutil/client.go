@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"time"
 
 	"lukechampine.com/us/hostdb"
@@ -156,9 +157,18 @@ func (c *SHARDClient) ChainHeight() (types.BlockHeight, error) {
 	return height, err
 }
 
-// Synced always returns true.
+// Synced returns whether the blockchain is synced.
 func (c *SHARDClient) Synced() (bool, error) {
-	return true, nil
+	var synced bool
+	err := c.req("/synced", func(body io.Reader) error {
+		resp, err := ioutil.ReadAll(io.LimitReader(body, 8))
+		if err != nil {
+			return err
+		}
+		synced, err = strconv.ParseBool(string(resp))
+		return err
+	})
+	return synced, err
 }
 
 // ResolveHostKey resolves a host public key to that host's most recently
