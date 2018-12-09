@@ -30,7 +30,8 @@ averaging 250 KB each, this reduces storage and bandwidth costs by about 16x.
 You can download one of those JPEGs without downloading the full sector, too.
 You can trivially share files, just by sending the metadata to a friend. You
 can stream files over HTTP or mount a virtual Sia filesystem with FUSE,
-enjoying low latency as a result of partial downloads. And most importantly,
+enjoying low latency as a result of partial downloads. You can upload and
+download without needing to run a full consensus node. And most importantly,
 you can build apps that leverage Sia to store and serve content.
 
 Here are some ideas for apps you could build with `us`:
@@ -40,6 +41,7 @@ Here are some ideas for apps you could build with `us`:
 - A cron job that downloads 1 KB from a host every 24 hours and reports various metrics (latency, bandwidth, price)
 - A site that aggregates host metrics to provide a centralized host database
 - A gateway that serves static websites stored on Sia hosts
+- A mobile app that stores and retrieves files stored on Sia
 
 
 ## What do I need to get started?
@@ -55,7 +57,7 @@ If you would like to contribute (thank you!), please read [CONTRIBUTING.md](CONT
 
 ## What else do I need to know?
 
-`us` demands much more work on behalf of the user than `siad`. You are
+`user` demands much more work on behalf of the user than `siad`. You are
 responsible for choosing good hosts to form contracts with, and for migrating
 file data to new hosts if the old hosts flake out. Failure to perform these
 duties can result in loss of data.

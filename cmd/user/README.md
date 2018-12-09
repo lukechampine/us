@@ -216,6 +216,28 @@ This forces `user` to download the file in-order. Be aware that this restricts
 the parallelism of the download algorithm, and thus may result in slower
 speeds.
 
+
+## Using a SHARD server
+
+`user` can talk to a SHARD server to learn the current blockheight and lookup
+host IP addresses. Forming and renewing contracts still requires `siad`, but
+once you have contracts, a SHARD server allows you to upload and download
+without needing to communicate with a full consensus node. You can run your
+own SHARD server, or talk to a public instance, although the latter carries
+some risk: the server may lie to you about the current blockheight and/or the
+most recent IP announced by a given host (although it cannot lie about *which*
+IP the host announced). To reduce risk, querying multiple public instances is
+recommended.
+
+To configure `user` to talk to a SHARD server, simply add its address to your
+`user.toml`, e.g.:
+
+```toml
+shard_addr = "12.34.56.78"
+```
+
+`user` will then use the SHARD server when it can, and `siad` otherwise.
+
 ---
 
 **WARNING:** `user` requires exclusive access to your contract files. That is,
