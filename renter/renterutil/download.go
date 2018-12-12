@@ -397,5 +397,14 @@ func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minS
 			break
 		}
 	}
+
+	// allocate space for missing shards, in case the caller wants to
+	// reconstruct them
+	for i := range shards {
+		if len(shards[i]) == 0 {
+			shards[i] = make([]byte, 0, shardLen)
+		}
+	}
+
 	return shards, shardLen, stats, nil
 }
