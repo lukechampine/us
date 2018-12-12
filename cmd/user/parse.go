@@ -25,9 +25,9 @@ func isCharDevice(f *os.File) bool {
 
 var redirStdout = !isCharDevice(os.Stdout)
 
-// form [hostkey] [funds] [endheight]
-// form [hostkey] [funds] [endheight] [contract]
-func parseForm(args []string, cmd *flag.FlagSet) (string, types.Currency, types.BlockHeight, string) {
+// form [hostkey] [funds] [endheight/duration]
+// form [hostkey] [funds] [endheight/duration] [contract]
+func parseForm(args []string, cmd *flag.FlagSet) (string, types.Currency, string, string) {
 	if len(args) == 3 {
 		args = append(args, "") // contract filename is optional
 	}
@@ -35,12 +35,12 @@ func parseForm(args []string, cmd *flag.FlagSet) (string, types.Currency, types.
 		cmd.Usage()
 		os.Exit(2)
 	}
-	return args[0], scanCurrency(args[1]), scanBlockHeight(args[2]), args[3]
+	return args[0], scanCurrency(args[1]), args[2], args[3]
 }
 
-// renew [contract] [funds] [endheight]
-// renew [contract] [funds] [endheight] [newcontract]
-func parseRenew(args []string, cmd *flag.FlagSet) (string, types.Currency, types.BlockHeight, string) {
+// renew [contract] [funds] [endheight/duration]
+// renew [contract] [funds] [endheight/duration] [newcontract]
+func parseRenew(args []string, cmd *flag.FlagSet) (string, types.Currency, string, string) {
 	if len(args) == 3 {
 		args = append(args, "") // contract filename is optional
 	}
@@ -48,7 +48,7 @@ func parseRenew(args []string, cmd *flag.FlagSet) (string, types.Currency, types
 		cmd.Usage()
 		os.Exit(2)
 	}
-	return args[0], scanCurrency(args[1]), scanBlockHeight(args[2]), args[3]
+	return args[0], scanCurrency(args[1]), args[2], args[3]
 }
 
 // scan [hostkey] [bytes] [duration] [downloads]

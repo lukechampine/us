@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -39,7 +40,7 @@ func contractName(contract proto.ContractRevision) string {
 	return fmt.Sprintf("%s-%s.contract", contract.HostKey().ShortKey(), id[:8])
 }
 
-func form(hostKeyPrefix string, funds types.Currency, endHeight types.BlockHeight, filename string) error {
+func form(hostKeyPrefix string, funds types.Currency, end string, filename string) error {
 	c := makeClient()
 
 	// check that we can create the contract file
@@ -63,6 +64,27 @@ func form(hostKeyPrefix string, funds types.Currency, endHeight types.BlockHeigh
 	if err != nil {
 		return errors.Wrap(err, "could not determine current height")
 	}
+
+	// parse end string
+	if end == "" {
+		return errors.New("invalid end height or duration")
+	}
+	var endHeight types.BlockHeight
+	switch end[0] {
+	case '@':
+		intHeight, err := strconv.Atoi(end[1:])
+		if err != nil {
+			return errors.Wrap(err, "invalid end height")
+		}
+		endHeight = types.BlockHeight(intHeight)
+	default:
+		intDuration, err := strconv.Atoi(end)
+		if err != nil {
+			return errors.Wrap(err, "invalid duration")
+		}
+		endHeight = currentHeight + types.BlockHeight(intDuration)
+	}
+
 	contract, err := proto.FormContract(c, c, host, funds, currentHeight, endHeight)
 	if err != nil {
 		return err
@@ -79,7 +101,7 @@ func form(hostKeyPrefix string, funds types.Currency, endHeight types.BlockHeigh
 	return nil
 }
 
-func renew(contractPath string, funds types.Currency, endHeight types.BlockHeight, filename string) error {
+func renew(contractPath string, funds types.Currency, end string, filename string) error {
 	c := makeClient()
 
 	uc, err := renter.LoadContract(contractPath)
@@ -100,6 +122,33 @@ func renew(contractPath string, funds types.Currency, endHeight types.BlockHeigh
 	if err != nil {
 		return errors.Wrap(err, "could not determine current height")
 	}
+
+	// parse end string
+	if end == "" {
+		return errors.New("invalid end height or duration")
+	}
+	var endHeight types.BlockHeight
+	switch end[0] {
+	case '@':
+		intHeight, err := strconv.Atoi(end[1:])
+		if err != nil {
+			return errors.Wrap(err, "invalid end height")
+		}
+		endHeight = types.BlockHeight(intHeight)
+	case '+':
+		extendDuration, err := strconv.Atoi(end[1:])
+		if err != nil {
+			return errors.Wrap(err, "invalid extension duration")
+		}
+		endHeight = uc.ContractRevision.EndHeight() + types.BlockHeight(extendDuration)
+	default:
+		intDuration, err := strconv.Atoi(end)
+		if err != nil {
+			return errors.Wrap(err, "invalid duration")
+		}
+		endHeight = currentHeight + types.BlockHeight(intDuration)
+	}
+
 	newContract, err := proto.RenewContract(c, c, uc, host, funds, currentHeight, endHeight)
 	if err != nil {
 		return errors.Wrap(err, "could not renew contract")

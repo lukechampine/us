@@ -53,23 +53,31 @@ expected ratio of downloads to uploads, i.e. downloads = 0.5 means the user
 expects to download half of the uploaded data.
 `
 	formUsage = `Usage:
-    user form hostkey funds endheight [filename]
+    user form hostkey funds duration [filename]
+    user form hostkey funds @endheight [filename]
 
 Forms a contract with the specified host for the specified duration with the
-specified amount of funds. Due to various fees, the total number of coins
-deducted from the wallet may be greater than funds. Run 'user scan' on the host
-to see a breakdown of these fees.
+specified amount of funds. To specify an exact end height for the contract,
+use @endheight; otherwise, the end height will be the current height plus the
+supplied duration. Due to various fees, the total number of coins deducted
+from the wallet may be greater than funds. Run 'user scan' on the host to see
+a breakdown of these fees.
 
 If filename is provided, the resulting contract file will be written to
 filename. Otherwise, it will be written to the default contracts directory.
 `
 	renewUsage = `Usage:
-    user renew contract funds endheight [filename]
+    user renew contract funds duration [filename]
+    user renew contract funds @endheight [filename]
+    user renew contract funds +extension [filename]
 
 Renews the specified contract (that is, a .contract file) for the specified
-duration and with the specified amount of funds. Due to various fees, the
-total number of coins deducted from the wallet may be greater than funds. Run
-'user scan' on the host to see a breakdown of these fees.
+duration and with the specified amount of funds. Like 'user form', an exact
+end height can be specified using the @ prefix; additionally, a + prefix will
+set the end height equal to the old contract end height plus the supplied
+extension. Due to various fees, the total number of coins deducted from the
+wallet may be greater than funds. Run 'user scan' on the host to see a
+breakdown of these fees.
 
 If filename is provided, the resulting contract file will be written to
 filename. Otherwise, it will be written to the default contracts directory.
@@ -306,13 +314,13 @@ func main() {
 		check("Scan failed:", err)
 
 	case formCmd:
-		host, funds, endHeight, filename := parseForm(args, formCmd)
-		err := form(host, funds, endHeight, filename)
+		host, funds, end, filename := parseForm(args, formCmd)
+		err := form(host, funds, end, filename)
 		check("Contract formation failed:", err)
 
 	case renewCmd:
-		contract, funds, endHeight, filename := parseRenew(args, renewCmd)
-		err := renew(contract, funds, endHeight, filename)
+		contract, funds, end, filename := parseRenew(args, renewCmd)
+		err := renew(contract, funds, end, filename)
 		check("Renew failed:", err)
 
 	case uploadCmd:
