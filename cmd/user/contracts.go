@@ -13,6 +13,7 @@ import (
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renter/renterutil"
+	"lukechampine.com/us/renterhost"
 )
 
 func contractinfo(contract proto.ContractRevision) {
@@ -31,8 +32,10 @@ Contract ID: %v
 
 End Height:   %v %v
 Renter Funds: %v remaining
+Sectors:      %v (%v)
 `, contract.HostKey().Key(), contract.ID(), contract.EndHeight(),
-		remaining, currencyUnits(contract.RenterFunds()))
+		remaining, currencyUnits(contract.RenterFunds()),
+		contract.Revision.NewFileSize/renterhost.SectorSize, filesizeUnits(int64(contract.Revision.NewFileSize)))
 }
 
 func contractName(contract proto.ContractRevision) string {
