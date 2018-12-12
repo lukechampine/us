@@ -381,7 +381,7 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 	// the same pattern of slice lengths, but it feels ugly.
 	var total, uploaded, numChunks int64
 	for _, h := range oldhosts {
-		if len(h.Slices) == 0 {
+		if h == nil {
 			continue
 		}
 		for _, s := range h.Slices {
