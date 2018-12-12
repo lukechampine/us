@@ -551,17 +551,16 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 			}
 		} else {
 			// read shard contents, adding each length value
-			var s SectorSlice
-			var shardSize int64
-			err = binary.Read(tr, binary.LittleEndian, &s)
-			for err != io.EOF {
-				shardSize += int64(s.NumSegments) * merkle.SegmentSize
-				err = binary.Read(tr, binary.LittleEndian, &s)
+			numSlices := int(hdr.FileInfo().Size() / SectorSliceSize)
+			var numSegments int64
+			buf := make([]byte, SectorSliceSize)
+			for i := 0; i < numSlices; i++ {
+				if _, err := io.ReadFull(tr, buf); err != nil {
+					return MetaIndex{}, 0, errors.Wrap(err, "could not read shard")
+				}
+				numSegments += int64(binary.LittleEndian.Uint32(buf[36:40]))
 			}
-			if err != io.EOF {
-				return MetaIndex{}, 0, err
-			}
-			shardSizes = append(shardSizes, shardSize)
+			shardSizes = append(shardSizes, numSegments*merkle.SegmentSize)
 		}
 	}
 
