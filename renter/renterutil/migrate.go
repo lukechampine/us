@@ -77,7 +77,7 @@ func MigrateDirDirect(newcontracts renter.ContractSet, nextFile MigrateDirIter, 
 func MigrateRemote(newcontracts, oldcontracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
 	op := newOperation()
 	if len(newcontracts) != len(oldcontracts) {
-		op.die(errors.New("new contract set must match size of previous contract set"))
+		op.die(errors.Errorf("new contract set must match size of previous contract set (%v vs %v)", len(newcontracts), len(oldcontracts)))
 		return op
 	}
 	migrations := computeMigrations(newcontracts, m.Hosts)
@@ -164,23 +164,30 @@ func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, mig
 			break
 		}
 	}
-	var total, uploaded int64
-	chunkSizes := make([]int, len(shard))
-	for i, s := range shard {
-		chunkSizes[i] = int(s.NumSegments*merkle.SegmentSize) * m.MinShards
-		total += int64(s.NumSegments * merkle.SegmentSize)
-	}
-	if total == 0 {
+	if len(shard) == 0 {
 		// nothing to do
 		op.die(nil)
 		return
 	}
+
+	// for each host we're migrating to, we need to upload a full sector for
+	// each SectorSlice in the file.
+	total := int64(len(migrations)*len(shard)) * renterhost.SectorSize
+	uploaded := int64(0)
 	op.sendUpdate(TransferProgressUpdate{
 		Total:       total,
 		Transferred: uploaded,
 	})
 
 	// upload one chunk at a time
+	//
+	// NOTE: technically, we should be checking for multiple SectorSlices with
+	// the same MerkleRoot, and upload those together in order to save
+	// bandwidth.
+	chunkSizes := make([]int, len(shard))
+	for i, s := range shard {
+		chunkSizes[i] = int(s.NumSegments*merkle.SegmentSize) * m.MinShards
+	}
 	rsc := m.ErasureCode()
 	chunk := make([]byte, m.MaxChunkSize()) // no chunk will be larger than this
 	shards := make([][]byte, len(hosts))
@@ -208,12 +215,12 @@ func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, mig
 				// already uploaded to this host
 				continue
 			}
-			s, err := host.EncryptAndUpload(shards[shardIndex], int64(chunkIndex))
+			_, err := host.EncryptAndUpload(shards[shardIndex], int64(chunkIndex))
 			if err != nil {
 				op.die(errors.Wrap(err, "could not upload sector"))
 				return
 			}
-			uploaded += int64(s.NumSegments * merkle.SegmentSize)
+			uploaded += renterhost.SectorSize
 			op.sendUpdate(TransferProgressUpdate{
 				Total:       total,
 				Transferred: uploaded,
@@ -376,25 +383,24 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 	}
 
 	// determine how many bytes will be uploaded
-	// NOTE: currently we just use the first shard and multiply its total
-	// length by the number of new hosts. This works as long as all shards have
-	// the same pattern of slice lengths, but it feels ugly.
-	var total, uploaded, numChunks int64
+	var numChunks int64
 	for _, h := range oldhosts {
 		if h == nil {
 			continue
 		}
-		for _, s := range h.Slices {
-			total += int64(s.NumSegments*merkle.SegmentSize) * int64(len(migrations))
-		}
 		numChunks = int64(len(h.Slices))
 		break
 	}
-	if total == 0 {
+	if numChunks == 0 {
 		// nothing to do
 		op.die(nil)
 		return
 	}
+
+	// for each host we're migrating to, we need to upload a full sector for
+	// each SectorSlice in the file.
+	total := int64(len(migrations)) * numChunks * renterhost.SectorSize
+	uploaded := int64(0)
 	op.sendUpdate(TransferProgressUpdate{
 		Total:       total,
 		Transferred: uploaded,
@@ -423,12 +429,12 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 			if h == nil {
 				continue
 			}
-			s, err := h.EncryptAndUpload(shards[shardIndex], chunkIndex)
+			_, err := h.EncryptAndUpload(shards[shardIndex], chunkIndex)
 			if err != nil {
 				op.die(err)
 				return
 			}
-			uploaded += int64(s.NumSegments * merkle.SegmentSize)
+			uploaded += renterhost.SectorSize
 			op.sendUpdate(TransferProgressUpdate{
 				Total:       total,
 				Transferred: uploaded,
