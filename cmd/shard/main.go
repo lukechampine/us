@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
-	"strings"
 
 	"gitlab.com/NebulousLabs/Sia/build"
 	"gitlab.com/NebulousLabs/Sia/modules/consensus"
@@ -62,9 +62,8 @@ func main() {
 
 	if len(os.Args) == 2 && os.Args[1] == "version" {
 		log.SetFlags(0)
-		goversion = strings.TrimPrefix(goversion, "go version ")
-		log.Printf("shard v0.1.0\nCommit:     %s\nRelease:    %s\nGo version: %s\nBuild Date: %s\n",
-			githash, build.Release, goversion, builddate)
+		log.Printf("shard v0.1.0\nCommit:     %s\nRelease:    %s\nGo version: %s %s/%s\nBuild Date: %s\n",
+			githash, build.Release, runtime.Version(), runtime.GOOS, runtime.GOARCH, builddate)
 		return
 	} else if len(os.Args) != 1 {
 		flag.Usage()

@@ -1,5 +1,4 @@
 ldflags = -X 'main.githash=`git rev-parse --short HEAD`' \
-          -X 'main.goversion=`go version`' \
           -X 'main.builddate=`date`'
 
 # all builds a binary with the current commit hash
