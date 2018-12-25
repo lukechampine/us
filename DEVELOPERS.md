@@ -72,7 +72,7 @@ provide file-based operations. It has three core elements:
 The contract format has the extension `.contract`. It contains the file
 contract for a particular host, alongside the Merkle roots of each sector that
 was uploaded to that host via the contract. The `Contract` type that
-encapsulates this format satisfies the `proto.ContractEditor` interface; when
+encapsulates this format satisfies the `proto.ContractEditor` interface: when
 a `proto.Uploader` uploads a sector, for example, it calls the `AppendRoot`
 method of `Contract`, which writes the Merkle root of that sector to the
 `.contract` file.
@@ -142,11 +142,12 @@ passes them to `renterutil` functions that perform various user-initiated
 operations. Like `renterutil`, it prioritizes ease-of-use over absolute
 customization, and serves as a reference to inspire more sophisticated tools.
 
-In order to form contracts and learn the IP addresses of hosts, `user` must
-talk to an instance of `siad`. This dependency is intentionally minimal; it
-means that `user` can easily be modified to talk to a different daemon, or
-even a centralized service. Use `renterutil.NewSiadClient` to create a client
-that talks to `siad`.
+In order to form contracts, `user` must talk to an instance of `siad`. After
+you have contracts, `user` just needs a way to learn the current blockheight
+and resolve a host's public key to its most-recently-announced IP address.
+This functionality can be provided by either `siad` or a SHARD server. Use
+`renterutil.NewSiadClient` to create a client that talks to `siad`, and
+`renterutil.NewSHARDClient` to create a client that talks to a SHARD server.
 
 ---
 

@@ -47,15 +47,15 @@ provided below:
 # OPTIONAL. Default: "localhost:9980"
 siad_addr = "localhost:6666"
 
-# directory where contracts are stored.
+# directory where contracts are stored. An absolute path is recommended.
 # OPTIONAL. Default: "~/.us/contracts"
 contracts = "/home/luke/.us/contracts"
 
 # minimum number of hosts required to download a file. Also controls
-# file redundancy: uploading to 10 hosts with min_shards = 2 results
-# in 5x redundancy.
+# file redundancy: uploading to 40 hosts with min_shards = 10 results
+# in 4x redundancy.
 # REQUIRED.
-min_shards = 2
+min_shards = 10
 
 # host pubkey whitelist. If defined, only these hosts will be used
 # when uploading or downloading. This is useful if you don't want
@@ -67,7 +67,7 @@ hosts = [
 ]
 
 # log file. If defined, various statistics will be written to this file in
-# JSON format.
+# JSON format. An absolute path is recommended.
 # OPTIONAL. Default: ""
 log_file = "/home/luke/.us/log"
 ```
@@ -117,13 +117,8 @@ four bytes of the host's public key and `01234567` is the first four bytes of
 the resulting contract ID. The file will be stored in the contract directory
 specified by `user.toml` or the `-c` flag.
 
-If you scanned with `user scan`, the public key of the host is the first column
-of output. If you scanned with `siac hosts --verbose`, the public key will be
-prefixed with `ed25519:`. Drop this prefix and use the next 6 characters of the
-public key as your `hostkey`.
-
 Note that `funds` does not include the transaction fee, the host's contract
-fee, or the siafund tax. `funds` is simply the number of coins in the renter's
+feeor the siafund tax. `funds` is simply the number of coins in the renter's
 half of the payment channel, i.e. the amount reserved for paying the host when
 uploading and downloading. For convenience, `user` provides a command that
 estimates the additional fees:

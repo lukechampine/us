@@ -15,17 +15,17 @@ and frustration.
 This rule does not apply to small PRs. Small PRs are more likely to be
 accepted, and if they are rejected, the amount of wasted effort isn't terribly
 large. Please note, however, that "small" in this context does not mean "under
-100 lines of code changed." Adding a test, correcting a bunch of spelling
-errors, or running existing code through a linter are all small PRs, even
-though they may change hundreds of lines. Conversely, you may invest days of
-effort optimizing a 50-line function, only to find out later that your
-optimization backfires under real-world conditions, or that the function was
-slated to be removed entirely as part of a larger refactor. Use your best
-judgment when deciding what counts as "small," but when in doubt, err on the
-side of caution and propose your change first.
+100 lines of code changed," but rather "little effort invested." Adding a
+test, correcting a bunch of spelling errors, or running existing code through
+a linter are all small PRs, even though they may change hundreds of lines.
+Conversely, you may invest days of effort optimizing a 50-line function, only
+to find out later that the function was slated to be removed entirely as part
+of a larger refactor. Use your best judgment when deciding what counts as
+"small," but when in doubt, err on the side of caution and propose your change
+first.
 
 The preferred method of proposing a change is to open an issue with the
-`Proposal` prefix, e.g. `Proposal: new chunk caching algorithm`. The issue
+`Proposal` prefix, e.g. `Proposal: New chunk caching algorithm`. The issue
 should contain a description of the problem being addressed and a basic
 outline of how you intend to fix it. You can propose changes via other
 channels, like Discord, but issues are preferred because they leave a
@@ -33,10 +33,10 @@ permanent record of the discussion that can be referenced later.
 
 You are also welcome to propose changes that you do not intend to implement
 yourself. Instead of `Proposal`, prefix these with `Suggestion`, e.g.
-`Suggestion: allow custom User-Agent string`. A suggestion does not need to be
+`Suggestion: Allow custom User-Agent string`. A suggestion does not need to be
 a feature request; it can propose refactoring a function, expanding
 documentation, or any other issue relevant to the project, e.g. `Suggestion:
-add spellcheck pre-commit hook`. Also note that, unlike proposals, suggestions
+Add spellcheck pre-commit hook`. Also note that, unlike proposals, suggestions
 do not need to include an implementation plan.
 
 
