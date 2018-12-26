@@ -6,7 +6,10 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"os/user"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"lukechampine.com/us/renter"
@@ -216,6 +219,14 @@ func check(ctx string, err error) {
 }
 
 func makeClient() *renterutil.SiadClient {
+	if config.SiadPassword == "" {
+		// attempt to read the standard siad password file
+		user, err := user.Current()
+		check("Could not locate siad password file:", err)
+		pw, err := ioutil.ReadFile(filepath.Join(user.HomeDir, ".sia", "apipassword"))
+		check("Could not read siad password file:", err)
+		config.SiadPassword = strings.TrimSpace(string(pw))
+	}
 	return renterutil.NewSiadClient(config.SiadAddr, config.SiadPassword)
 }
 
