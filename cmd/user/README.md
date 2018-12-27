@@ -39,41 +39,49 @@ Created new address: 40b380ebc4f08c43324ff0a9b72da0bf2c73476664a86ad16b48dd696e3
 # send coins to this address to fund your wallet
 ```
 
-You will also want to create a config file, `~/.us/user.toml`. An example is
+You will also want to create a config file, `~/.config/us/user.toml`. An example is
 provided below:
 
 ```toml
 # API port of siad.
 # OPTIONAL. Default: "localhost:9980"
-siad_addr = "localhost:6666"
+siad_addr = "localhost:1993"
 
-# directory where contracts are stored. An absolute path is recommended.
-# OPTIONAL. Default: "~/.us/contracts"
-contracts = "/home/luke/.us/contracts"
+# API password of siad. If not defined, user will attempt to read the standard
+# siad password file, ~/.sia/apipassword.
+# OPTIONAL. Default: ""
+siad_password = "foobarbaz"
 
-# minimum number of hosts required to download a file. Also controls
+# Directory where contracts are stored. An absolute path is recommended.
+# OPTIONAL. Default: "~/.config/us/contracts-available"
+contracts_available = "~/us/available"
+
+# Directory where enabled contracts are stored. This directory should contain
+# only symlinks to the contracts folder. An absolute path is recommended.
+# OPTIONAL. Default: "~/.config/us/contracts-enabled"
+contracts_enabled = "~/us/enabled"
+
+# Minimum number of hosts required to download a file. Also controls
 # file redundancy: uploading to 40 hosts with min_shards = 10 results
 # in 4x redundancy.
-# REQUIRED.
+# REQUIRED (unless the -m flag is passed to user).
 min_shards = 10
-
-# host pubkey whitelist. If defined, only these hosts will be used
-# when uploading or downloading. This is useful if you don't want
-# to use all of the contracts in your contracts directory.
-# OPTIONAL. Default: []
-hosts = [
-  "pubkey1",
-  "pubkey2",
-]
 
 # log file. If defined, various statistics will be written to this file in
 # JSON format. An absolute path is recommended.
 # OPTIONAL. Default: ""
-log_file = "/home/luke/.us/log"
+log_file = "~/us/log"
+```
+
+A more minimal example, using defaults for most values, is:
+
+```toml
+min_shards = 10
+log_file = "~/.config/us/log"
 ```
 
 
-## Scanning for hosts
+## Scanning for Hosts
 
 The first step of forming a contract is choosing a host to form the contract
 with. You can get a ranked list of hosts by running `siac hostdb -v`.
@@ -100,7 +108,7 @@ the key are retained. The key above, for example, could be shortened to
 the key is unambiguous; eight is a safe choice.
 
 
-## Forming contracts
+## Forming Contracts
 
 Now, we are ready to form a contract. The command syntax is:
 
@@ -114,8 +122,9 @@ obligated to store the data; and `contract` is the filepath where the contract
 metadata file will be written. If `contract` is not supplied, the contract
 will be written to `abcdefab-01234567.contract`, where `abcdefab` is the first
 four bytes of the host's public key and `01234567` is the first four bytes of
-the resulting contract ID. The file will be stored in the contract directory
-specified by `user.toml` or the `-c` flag.
+the resulting contract ID. The file will be stored in the `contracts_available`
+directory, and the contract is automatically enabled by creating a symlink in
+the `contracts_enabled` directory.
 
 Note that `funds` does not include the transaction fee, the host's contract
 feeor the siafund tax. `funds` is simply the number of coins in the renter's
@@ -139,7 +148,7 @@ should be specified when calling `form`, and the `Total` field estimates how
 many coins will be spent from the wallet when `form` is called.
 
 
-## Renewing contracts
+## Renewing Contracts
 
 Once you have a contract, renewing is easy:
 
@@ -152,10 +161,15 @@ $ user renew [contract] [funds] [endheight] [newcontract]
 `newcontract` is not supplied, the new contract will be written to a file
 named according to the same scheme as `user form`.
 
+When a contract is renewed, the new contract is automatically enabled and the
+old contract is disabled (if applicable). Lastly, a suffix, `_old`, is also
+appended to the filename of the old contract to ensure that it will no longer
+be used.
+
 The host may be offline when you attempt to renew, in which case you will have
-to try again later. It is recommended that you renew contracts within at least
-1000 blocks of their endheight. This provides a safety buffer if the host is
-offline close to the endheight.
+to try again later. For this reason, it is recommended that you first attempt
+to renew a contract within at least 1000 blocks (approx. 1 week) of its end
+height.
 
 
 ## Uploading and Downloading Files
@@ -163,10 +177,10 @@ offline close to the endheight.
 `user` stores and retrieves files using *metafiles*, which are small files
 containing the metadata necessary to retrieve and update a file stored on a
 host. Uploading a file creates a metafile, and downloading a metafile creates
-a file. Metafiles can be freely shared with other users, but are useless
-unless the user has contracts with the hosts specified in the metafile. To
-share multiple files, add their corresponding metafiles to an archive such as
-a `.tar` or `.zip`.
+a file. Metafiles can be download by anyone possessing contracts with at least
+`min_shards` of the file's hosts. Thus metafiles can be freely shared with
+other users. To share multiple files, bundle their corresponding metafiles in
+an archive such as a `.tar` or `.zip`.
 
 The upload and download commands are straightforward:
 
@@ -179,8 +193,8 @@ $ user download [metafile] [file]
 `file` is the path of the file to be read (during upload) or written (during
 download), and `metafile` is the path where the file metadata will be written.
 The extension for metafiles is `.usa` (`a` for "archive"). Both commands use
-the contract directory specified in `user.toml` or the `-c` flag. If `user.toml`
-specifies a host set, only contracts formed with those hosts will be used.
+the `contracts_enabled` directory specified in `user.toml` or by the `-c`
+flag.
 
 The `upload` command splits `file` into shards, encrypts each shard with a
 different key, and uploads the shards to the host. The `download` command is
@@ -212,7 +226,93 @@ the parallelism of the download algorithm, and thus may result in slower
 speeds.
 
 
-## Using a SHARD server
+## Blacklisting Hosts
+
+Sia's design assumes that hosts may fail or provide poor quality of service.
+If a host goes offline, transfers data too slowly, raises their prices too
+high, etc., naturally we would like to blacklist them. This is as simple as:
+
+```bash
+$ user contracts disable [hostkey]
+```
+
+Disabling a contract does not delete it permanently; the actual contract file
+remains in the `contracts-available` directory. This command simply removes
+the corresponding symlink in the `contracts-enabled` directory.
+
+Of course, if you blacklist too many hosts, you may not be able to download
+your files from the remaining set. To re-enable a contract, run:
+
+```bash
+$ user contracts enable [hostkey]
+```
+
+As expected, this command simply recreates a symlink in the `contracts-enabled`
+directory.
+
+The use of symlinks allows you to create multiple sets of enabled contracts
+and quickly switch between them. For example, you could have a directory
+called `contracts-cheap` that references the cheapest hosts, and another
+directory called `contracts-fast` that references the fastest hosts. You can
+then pass the `-c` flag to `user` to switch between these sets at will.
+
+
+## Migrating Files
+
+Blacklisting hosts will improve your quality of service, but it also reduces
+the redundancy of your files. In the long-term, it is safest to re-upload your
+data to better hosts. In `us`, this process is called "migration."
+
+There are three ways to migrate a file, depending on how you obtain the data
+that will be uploaded to the new hosts. If you have a copy of the original
+file, you can simply use that data. Alternatively, if you are able and willing
+to download from the bad hosts, you can get the data that way. Finally, if you
+don't have a copy of the file and the bad hosts are offline, too expensive, or
+too slow, you can download from just the good hosts and then reconstruct the
+missing redundancy. In `user`, these options are called `file`, `direct`, and
+`remote`, respectively. `file` is the cheapest and fastest option; `remote` is
+the slowest and most expensive, but is often the only choice; and `direct` may
+be better or worse than `remote` depending on the quality of the bad hosts.
+
+Let's assume that you uploaded a file to three hosts with `min_shards = 2`,
+and one of them is now unresponsive. You would like to repair the missing
+redundancy by migrating the shard on the unresponsive host to a new host.
+First, if you haven't already done so, blacklist the old host by running:
+
+```bash
+$ user contracts disable [hostkey]
+```
+
+Next, form a new contract with the new host. (The new contract will be enabled
+automatically.) Now, you can perform the actual migration. If you had a copy
+of the original file, you could run:
+
+```bash
+$ user migrate -file=[file] [metafile]
+```
+
+Unfortunately, in this example, you do not have the original file.
+
+If the old host were not unresponsive, you could run:
+
+```bash
+$ user migrate -direct [metafile]
+```
+
+Unfortunately, in this example, the host is unresponsive.
+
+However, there are two good hosts available, so you can download their shards
+and use them to reconstruct the third shard by running:
+
+```bash
+$ user migrate -remote [metafile]
+```
+
+All three migration options can be resumed if interrupted, and can also be
+applied to directories.
+
+
+## Using a SHARD Server
 
 `user` can talk to a SHARD server to learn the current blockheight and lookup
 host IP addresses. Forming and renewing contracts still requires `siad`, but
