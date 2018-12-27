@@ -1,11 +1,14 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -37,6 +40,85 @@ Sectors:      %v (%v)
 `, contract.HostKey().Key(), contract.ID(), contract.EndHeight(),
 		remaining, currencyUnits(contract.RenterFunds()),
 		contract.Revision.NewFileSize/renterhost.SectorSize, filesizeUnits(int64(contract.Revision.NewFileSize)))
+}
+
+func listcontracts() error {
+	os.MkdirAll(config.ContractsAvailable, 0700)
+	os.MkdirAll(config.ContractsEnabled, 0700)
+	// first build set of enabled contracts
+	d, err := os.Open(config.ContractsEnabled)
+	if err != nil {
+		return errors.Wrap(err, "could not open enabled contract dir")
+	}
+	defer d.Close()
+	filenames, err := d.Readdirnames(-1)
+	if err != nil {
+		return errors.Wrap(err, "could not read enabled contract dir")
+	}
+	enabled := make(map[string]struct{})
+	for _, name := range filenames {
+		if filepath.Ext(name) != ".contract" {
+			continue
+		}
+		enabled[name] = struct{}{}
+	}
+	d.Close()
+
+	// then read available contracts
+	d, err = os.Open(config.ContractsAvailable)
+	if err != nil {
+		return errors.Wrap(err, "could not open available contract dir")
+	}
+	defer d.Close()
+	filenames, err = d.Readdirnames(-1)
+	if err != nil {
+		return errors.Wrap(err, "could not read available contract dir")
+	}
+	type entry struct {
+		host      hostdb.HostPublicKey
+		id        types.FileContractID
+		enabled   bool
+		endHeight types.BlockHeight
+		funds     types.Currency
+	}
+	var entries []entry
+	for _, name := range filenames {
+		if filepath.Ext(name) != ".contract" {
+			// skip archived contracts and other files
+			continue
+		}
+		rev, err := renter.ReadContractRevision(filepath.Join(config.ContractsAvailable, name))
+		if err != nil {
+			return errors.Wrap(err, "could not read contract")
+		}
+		_, ok := enabled[name]
+		entries = append(entries, entry{
+			host:      rev.HostKey(),
+			id:        rev.ID(),
+			enabled:   ok,
+			endHeight: rev.EndHeight(),
+			funds:     rev.RenterFunds(),
+		})
+	}
+	// sort by Enabled, then alphabetically by host
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].enabled != entries[j].enabled {
+			return entries[i].enabled
+		}
+		return entries[i].host.Key() < entries[j].host.Key()
+	})
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 4, ' ', 0)
+	fmt.Fprintf(tw, "Host\tContract\tEnabled\tEnd Height\tFunds Remaining\n")
+	for _, e := range entries {
+		id := hex.EncodeToString(e.id[:4])
+		en := " "
+		if e.enabled {
+			en = "*"
+		}
+		fmt.Fprintf(tw, "%v\t%v\t%v\t%v\t%v\n", e.host.ShortKey(), id, en, e.endHeight, currencyUnits(e.funds))
+	}
+	return tw.Flush()
 }
 
 func contractName(contract proto.ContractRevision) string {
@@ -320,7 +402,7 @@ func enableContract(hostKey string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Enabled contract by creating", filepath.Join(config.ContractsEnabled, contractName))
+	fmt.Println("Enabled contract by creating symlink", filepath.Join(config.ContractsEnabled, contractName))
 	return nil
 }
 
@@ -363,7 +445,7 @@ func disableContract(hostKey string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Disabled contract by removing", contractPath)
+	fmt.Println("Disabled contract by removing symlink", contractPath)
 	return nil
 }
 

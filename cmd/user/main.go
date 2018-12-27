@@ -141,8 +141,15 @@ this operation is not free.
     user contracts action
 
 Actions:
+    list            list contracts
     enable          enable a contract
     disable         disable a contract
+`
+
+	contractsListUsage = `Usage:
+    user contracts list
+
+Lists available and enabled contracts, along with various metadata.
 `
 
 	contractsEnableUsage = `Usage:
@@ -299,6 +306,7 @@ func main() {
 	downloadCmd := flagg.New("download", downloadUsage)
 	checkupCmd := flagg.New("checkup", checkupUsage)
 	contractsCmd := flagg.New("contracts", contractsUsage)
+	contractsListCmd := flagg.New("list", contractsListUsage)
 	contractsEnableCmd := flagg.New("enable", contractsEnableUsage)
 	contractsDisableCmd := flagg.New("disable", contractsDisableUsage)
 	migrateCmd := flagg.New("migrate", migrateUsage)
@@ -323,6 +331,7 @@ func main() {
 			{Cmd: downloadCmd},
 			{Cmd: checkupCmd},
 			{Cmd: contractsCmd, Sub: []flagg.Tree{
+				{Cmd: contractsListCmd},
 				{Cmd: contractsEnableCmd},
 				{Cmd: contractsDisableCmd},
 			}},
@@ -414,6 +423,14 @@ Define min_shards in your config file or supply the -m flag.`)
 
 	case contractsCmd:
 		contractsCmd.Usage()
+
+	case contractsListCmd:
+		if len(args) != 0 {
+			contractsListCmd.Usage()
+			return
+		}
+		err := listcontracts()
+		check("Could not list contracts:", err)
 
 	case contractsEnableCmd:
 		if len(args) != 1 {
