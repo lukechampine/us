@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -60,12 +59,12 @@ func main() {
 	apiAddr := flag.String("a", ":8080", "host:port that the API server listens on")
 	flag.Parse()
 
-	if len(os.Args) == 2 && os.Args[1] == "version" {
+	if len(flag.Args()) == 1 && flag.Arg(0) == "version" {
 		log.SetFlags(0)
 		log.Printf("shard v0.1.0\nCommit:     %s\nRelease:    %s\nGo version: %s %s/%s\nBuild Date: %s\n",
 			githash, build.Release, runtime.Version(), runtime.GOOS, runtime.GOARCH, builddate)
 		return
-	} else if len(os.Args) != 1 {
+	} else if len(flag.Args()) != 0 {
 		flag.Usage()
 		return
 	}
