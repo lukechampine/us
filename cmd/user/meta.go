@@ -53,7 +53,7 @@ func closeMetaFile(m *renter.MetaFile) {
 }
 
 func uploadmetafile(f *os.File, minShards int, contractDir, metaPath string) error {
-	contracts, err := loadContracts(contractDir)
+	contracts, err := renter.LoadContracts(contractDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -84,7 +84,7 @@ func uploadmetafile(f *os.File, minShards int, contractDir, metaPath string) err
 }
 
 func uploadmetadir(dir, metaDir, contractDir string, minShards int) error {
-	contracts, err := loadContracts(contractDir)
+	contracts, err := renter.LoadContracts(contractDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -107,7 +107,7 @@ func uploadmetadir(dir, metaDir, contractDir string, minShards int) error {
 }
 
 func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
-	contracts, err := loadContracts(contractDir)
+	contracts, err := renter.LoadContracts(contractDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -134,7 +134,7 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 }
 
 func downloadmetafile(f *os.File, contractDir, metaPath string) error {
-	contracts, err := loadContracts(contractDir)
+	contracts, err := renter.LoadContracts(contractDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -158,7 +158,7 @@ func downloadmetafile(f *os.File, contractDir, metaPath string) error {
 }
 
 func downloadmetastream(w io.Writer, contractDir, metaPath string) error {
-	contracts, err := loadContracts(contractDir)
+	contracts, err := renter.LoadContracts(contractDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -182,7 +182,7 @@ func downloadmetastream(w io.Writer, contractDir, metaPath string) error {
 }
 
 func downloadmetadir(dir, contractDir, metaDir string) error {
-	contracts, err := loadContracts(contractDir)
+	contracts, err := renter.LoadContracts(contractDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -197,7 +197,7 @@ func downloadmetadir(dir, contractDir, metaDir string) error {
 }
 
 func checkupMeta(contractDir, metaPath string) error {
-	contracts, err := loadContracts(contractDir)
+	contracts, err := renter.LoadContracts(contractDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -222,8 +222,8 @@ func checkupMeta(contractDir, metaPath string) error {
 	return nil
 }
 
-func migrateFile(f *os.File, contractDir, metaPath string) error {
-	newcontracts, err := loadContracts(contractDir)
+func migrateFile(f *os.File, newContractsDir, metaPath string) error {
+	newcontracts, err := renter.LoadContracts(newContractsDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -247,8 +247,8 @@ func migrateFile(f *os.File, contractDir, metaPath string) error {
 	return trackMigrateFile(metaPath, op)
 }
 
-func migrateDirFile(dir, contractDir, metaDir string) error {
-	newcontracts, err := loadContracts(contractDir)
+func migrateDirFile(dir, newContractsDir, metaDir string) error {
+	newcontracts, err := renter.LoadContracts(newContractsDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -267,8 +267,8 @@ func migrateDirFile(dir, contractDir, metaDir string) error {
 	return trackMigrateDir(op)
 }
 
-func migrateDirect(contractDir, metaPath string) error {
-	newcontracts, err := loadContracts(contractDir)
+func migrateDirect(allContractsDir, newContractsDir, metaPath string) error {
+	newcontracts, err := renter.LoadContracts(newContractsDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -280,7 +280,7 @@ func migrateDirect(contractDir, metaPath string) error {
 	}
 	defer closeMetaFile(m)
 
-	oldcontracts, err := loadMetaContracts(m, contractDir)
+	oldcontracts, err := loadMetaContracts(m, allContractsDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -298,8 +298,8 @@ func migrateDirect(contractDir, metaPath string) error {
 	return trackMigrateFile(metaPath, op)
 }
 
-func migrateDirDirect(contractDir, metaDir string) error {
-	newcontracts, err := loadContracts(contractDir)
+func migrateDirDirect(allContractsDir, newContractsDir, metaDir string) error {
+	newcontracts, err := renter.LoadContracts(newContractsDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -313,13 +313,13 @@ func migrateDirDirect(contractDir, metaDir string) error {
 	if err != nil {
 		return errors.Wrap(err, "could not determine current height")
 	}
-	fileIter := renterutil.NewRecursiveMigrateDirIter(metaDir, contractDir)
+	fileIter := renterutil.NewRecursiveMigrateDirIter(metaDir, allContractsDir)
 	op := renterutil.MigrateDirDirect(newcontracts, fileIter, c, currentHeight)
 	return trackMigrateDir(op)
 }
 
-func migrateRemote(contractDir, metaPath string) error {
-	newcontracts, err := loadContracts(contractDir)
+func migrateRemote(newContractsDir, metaPath string) error {
+	newcontracts, err := renter.LoadContracts(newContractsDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -331,7 +331,7 @@ func migrateRemote(contractDir, metaPath string) error {
 	}
 	defer closeMetaFile(m)
 
-	oldcontracts, err := loadMetaContracts(m, contractDir)
+	oldcontracts, err := loadMetaContracts(m, newContractsDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -349,8 +349,8 @@ func migrateRemote(contractDir, metaPath string) error {
 	return trackMigrateFile(metaPath, op)
 }
 
-func migrateDirRemote(contractDir, metaDir string) error {
-	newcontracts, err := loadContracts(contractDir)
+func migrateDirRemote(newContractsDir, metaDir string) error {
+	newcontracts, err := renter.LoadContracts(newContractsDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
@@ -364,7 +364,7 @@ func migrateDirRemote(contractDir, metaDir string) error {
 	if err != nil {
 		return errors.Wrap(err, "could not determine current height")
 	}
-	fileIter := renterutil.NewRecursiveMigrateDirIter(metaDir, contractDir)
+	fileIter := renterutil.NewRecursiveMigrateDirIter(metaDir, newContractsDir)
 	op := renterutil.MigrateDirRemote(newcontracts, fileIter, c, currentHeight)
 	return trackMigrateDir(op)
 }

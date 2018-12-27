@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
 
+	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renter/renterutil"
@@ -94,13 +95,26 @@ func form(hostKeyPrefix string, funds types.Currency, end string, filename strin
 	}
 
 	if filename == "" {
-		filename = filepath.Join(config.Contracts, contractName(contract))
+		filename = contractName(contract)
 	}
-	err = renter.SaveContract(contract, filename)
+	allPath := filepath.Join(config.ContractsAvailable, filename)
+	activePath := filepath.Join(config.ContractsEnabled, filename)
+	err = renter.SaveContract(contract, allPath)
 	if err != nil {
 		return errors.Wrap(err, "could not save contract")
 	}
-	fmt.Println("Wrote contract to", filename)
+	fmt.Println("Wrote contract to", allPath)
+
+	// create symlink in active contracts
+	err = os.Symlink(allPath, activePath)
+	if err != nil {
+		fmt.Println("WARNING: could not enable contract:", err)
+		fmt.Printf("To enable this contract, you must run 'user contracts enable %v'\nor create a symlink in %v manually.\n", hostKey.ShortKey(), config.ContractsEnabled)
+	} else {
+		fmt.Println("Enabled contract by creating", activePath)
+		fmt.Printf("To disable this contract, run 'user contracts disable %v'\nor delete the symlink in %v manually.\n", hostKey.ShortKey(), config.ContractsEnabled)
+	}
+
 	return nil
 }
 
@@ -158,16 +172,44 @@ func renew(contractPath string, funds types.Currency, end string, filename strin
 	}
 
 	if filename == "" {
-		filename = filepath.Join(config.Contracts, contractName(newContract))
+		filename = filepath.Join(config.ContractsAvailable, contractName(newContract))
 	}
+	allPath := filepath.Join(config.ContractsAvailable, filename)
+	activePath := filepath.Join(config.ContractsEnabled, filename)
 	err = renter.SaveRenewedContract(uc, newContract, filename)
 	if err != nil {
-		return errors.Wrap(err, "could not renew contract")
+		return errors.Wrap(err, "could not save renewed contract")
 	}
-	fmt.Println("Wrote contract to", filename)
+	fmt.Println("Wrote contract to", allPath)
 
-	// archive old contract
+	// if old contract is in active contract set, remove it
 	uc.Close()
+	oldActivePath := filepath.Join(config.ContractsEnabled, filepath.Base(contractPath))
+	stat, err := os.Stat(oldActivePath)
+	if err != nil && !os.IsNotExist(err) {
+		fmt.Println("WARNING: could not stat", oldActivePath)
+	} else if err == nil {
+		if stat.Mode()&os.ModeSymlink == 0 {
+			fmt.Printf("WARNING: can't disable old contract (%v) because it is not a symlink.\n", oldActivePath)
+			fmt.Println("To disable the old contract, move it to a different folder.")
+		} else if err := os.Remove(oldActivePath); err != nil {
+			fmt.Printf("WARNING: could not remove %v: %v\n", oldActivePath, err)
+		} else {
+			fmt.Printf("Removed old contract (%v) from active contracts set.\n", filepath.Base(contractPath))
+		}
+	}
+
+	// create symlink in active contracts
+	err = os.Symlink(allPath, activePath)
+	if err != nil {
+		fmt.Println("WARNING: could not enable contract:", err)
+		fmt.Printf("To enable this contract, you must run 'user contracts enable %v'\nor create a symlink in %v manually.\n", host.PublicKey.ShortKey(), config.ContractsEnabled)
+	} else {
+		fmt.Println("Enabled contract by creating", activePath)
+		fmt.Printf("To disable this contract, run 'user contracts disable %v'\nor delete the symlink in %v manually.\n", host.PublicKey.ShortKey(), config.ContractsEnabled)
+	}
+
+	// archive the old contract
 	oldContractPath := contractPath + "_old"
 	err = os.Rename(contractPath, oldContractPath)
 	if err != nil {
@@ -200,8 +242,9 @@ func checkupContract(contractPath string) error {
 
 func checkCreate(filename string) error {
 	if filename == "" {
-		os.MkdirAll(config.Contracts, 0700)
-		filename = filepath.Join(config.Contracts, "_test.contract")
+		os.MkdirAll(config.ContractsAvailable, 0700)
+		os.MkdirAll(config.ContractsEnabled, 0700)
+		filename = filepath.Join(config.ContractsAvailable, "_test.contract")
 	}
 	f, err := os.Create(filename)
 	if err != nil {
@@ -238,38 +281,90 @@ If the host does not submit a valid storage proof, the host will receive %v,
 	return nil
 }
 
-func loadContracts(dir string) (renter.ContractSet, error) {
-	contracts, err := renter.LoadContracts(dir)
+func enableContract(hostKey string) error {
+	os.MkdirAll(config.ContractsAvailable, 0700)
+	os.MkdirAll(config.ContractsEnabled, 0700)
+	d, err := os.Open(config.ContractsAvailable)
 	if err != nil {
-		return nil, err
-	} else if len(contracts) == 0 {
-		return nil, errors.New("contract set is empty")
-	} else if len(config.Hosts) == 0 {
-		return contracts, nil
+		return errors.Wrap(err, "could not open available contract dir")
+	}
+	defer d.Close()
+	filenames, err := d.Readdirnames(-1)
+	if err != nil {
+		return errors.Wrap(err, "could not read available contract dir")
+	}
+	var contractName string
+	for _, name := range filenames {
+		if filepath.Ext(name) != ".contract" {
+			// skip archived contracts and other files
+			continue
+		}
+		rev, err := renter.ReadContractRevision(filepath.Join(config.ContractsAvailable, name))
+		if err != nil {
+			return errors.Wrap(err, "could not read contract")
+		}
+		if string(rev.HostKey()) == hostKey || strings.HasPrefix(rev.HostKey().Key(), hostKey) {
+			if contractName != "" {
+				return errors.New("ambiguous pubkey")
+			}
+			contractName = name
+		}
+	}
+	if contractName == "" {
+		return errors.New("no contract with that host found")
+	}
+	err = os.Symlink(
+		filepath.Join(config.ContractsAvailable, contractName),
+		filepath.Join(config.ContractsEnabled, contractName),
+	)
+	if err != nil {
+		return err
+	}
+	fmt.Println("Enabled contract by creating", filepath.Join(config.ContractsEnabled, contractName))
+	return nil
+}
+
+func disableContract(hostKey string) error {
+	os.MkdirAll(config.ContractsAvailable, 0700)
+	os.MkdirAll(config.ContractsEnabled, 0700)
+	d, err := os.Open(config.ContractsEnabled)
+	if err != nil {
+		return errors.Wrap(err, "could not open enabled contract dir")
+	}
+	defer d.Close()
+	filenames, err := d.Readdirnames(-1)
+	if err != nil {
+		return errors.Wrap(err, "could not read enabled contract dir")
+	}
+	var contractPath string
+	for _, name := range filenames {
+		rev, err := renter.ReadContractRevision(filepath.Join(config.ContractsEnabled, name))
+		if err != nil {
+			return errors.Wrap(err, "could not read contract")
+		}
+		if string(rev.HostKey()) == hostKey || strings.HasPrefix(rev.HostKey().Key(), hostKey) {
+			if contractPath != "" {
+				return errors.New("ambiguous pubkey")
+			}
+			contractPath = filepath.Join(config.ContractsEnabled, name)
+		}
+	}
+	if contractPath == "" {
+		return errors.New("no contract with that host found")
 	}
 
-	added := make([]bool, len(config.Hosts))
-outer:
-	for host, c := range contracts {
-		for i, h := range config.Hosts {
-			if strings.HasPrefix(host.Key(), h) {
-				if added[i] {
-					contracts.Close()
-					return nil, errors.Errorf("ambiguous pubkey %q", h)
-				}
-				added[i] = true
-				continue outer
-			}
-		}
-		c.Close()
-		delete(contracts, host)
+	stat, err := os.Lstat(contractPath)
+	if err != nil {
+		return errors.Wrap(err, "could not stat contract file")
+	} else if stat.Mode()&os.ModeSymlink == 0 {
+		return errors.New("refusing to delete non-symlink contract file")
 	}
-	for i, h := range config.Hosts {
-		if !added[i] {
-			return nil, errors.Errorf("pubkey %q not found in contract set", h)
-		}
+	err = os.Remove(contractPath)
+	if err != nil {
+		return err
 	}
-	return contracts, nil
+	fmt.Println("Disabled contract by removing", contractPath)
+	return nil
 }
 
 func loadMetaContracts(m *renter.MetaFile, dir string) (renter.ContractSet, error) {
@@ -282,18 +377,34 @@ func loadMetaContracts(m *renter.MetaFile, dir string) (renter.ContractSet, erro
 	if err != nil {
 		return nil, errors.Wrap(err, "could not read contract dir")
 	}
+	hostContractMapping := make(map[hostdb.HostPublicKey]string)
+	for _, name := range filenames {
+		if filepath.Ext(name) != ".contract" {
+			// skip archived contracts and other files
+			continue
+		}
+		contractPath := filepath.Join(dir, name)
+		rev, err := renter.ReadContractRevision(contractPath)
+		if err != nil {
+			return nil, errors.Wrap(err, "could not read contract")
+		}
+		if _, ok := hostContractMapping[rev.HostKey()]; ok {
+			return nil, errors.Errorf("multiple contracts for host %v", rev.HostKey())
+		}
+		hostContractMapping[rev.HostKey()] = contractPath
+	}
 
 	contracts := make(renter.ContractSet)
 	for _, h := range m.Hosts {
-		for _, name := range filenames {
-			if strings.HasPrefix(name, h.ShortKey()) {
-				c, err := renter.LoadContract(filepath.Join(dir, name))
-				if err != nil {
-					return nil, errors.Wrap(err, "could not read contract")
-				}
-				contracts[h] = c
-			}
+		contractPath, ok := hostContractMapping[h]
+		if !ok {
+			return nil, errors.Errorf("no contract for host %v", h)
 		}
+		c, err := renter.LoadContract(contractPath)
+		if err != nil {
+			return nil, errors.Wrap(err, "could not read contract")
+		}
+		contracts[h] = c
 	}
 	return contracts, nil
 }

@@ -9,13 +9,13 @@ import (
 )
 
 var config struct {
-	SiadAddr     string   `toml:"siad_addr"`
-	SiadPassword string   `toml:"siad_password"`
-	SHARDAddr    string   `toml:"shard_addr"`
-	Contracts    string   `toml:"contracts"`
-	MinShards    int      `toml:"min_shards"`
-	Hosts        []string `toml:"hosts"`
-	LogFile      string   `toml:"log_file"`
+	SiadAddr           string `toml:"siad_addr"`
+	SiadPassword       string `toml:"siad_password"`
+	SHARDAddr          string `toml:"shard_addr"`
+	ContractsAvailable string `toml:"contracts_available"`
+	ContractsEnabled   string `toml:"contracts_enabled"`
+	MinShards          int    `toml:"min_shards"`
+	LogFile            string `toml:"log_file"`
 }
 
 func loadConfig() error {
@@ -24,7 +24,8 @@ func loadConfig() error {
 	if err != nil {
 		return err
 	}
-	_, err = toml.DecodeFile(filepath.Join(user.HomeDir, ".config", "us", "user.toml"), &config)
+	defaultDir := filepath.Join(user.HomeDir, ".config", "us")
+	_, err = toml.DecodeFile(filepath.Join(defaultDir, "user.toml"), &config)
 	if os.IsNotExist(err) {
 		// if no config file found, proceed with empty config
 		err = nil
@@ -36,8 +37,11 @@ func loadConfig() error {
 	if config.SiadAddr == "" {
 		config.SiadAddr = "localhost:9980"
 	}
-	if config.Contracts == "" {
-		config.Contracts = filepath.Join(user.HomeDir, ".us", "contracts")
+	if config.ContractsAvailable == "" {
+		config.ContractsAvailable = filepath.Join(defaultDir, "contracts-available")
+	}
+	if config.ContractsEnabled == "" {
+		config.ContractsEnabled = filepath.Join(defaultDir, "contracts-enabled")
 	}
 	return nil
 }

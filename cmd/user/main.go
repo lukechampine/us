@@ -136,6 +136,29 @@ Verifies that a randomly-selected sector of the specified metafile or contract
 is retrievable, and reports the resulting metrics for each host. Note that
 this operation is not free.
 `
+
+	contractsUsage = `Usage:
+    user contracts action
+
+Actions:
+    enable          enable a contract
+    disable         disable a contract
+`
+
+	contractsEnableUsage = `Usage:
+    user contracts enable hostkey
+
+Enables the contract with the specified host. The contract must be present in
+the available contracts directory.
+`
+
+	contractsDisableUsage = `Usage:
+    user contracts disable hostkey
+
+Enables the contract with the specified host. The contract must be present in
+the available contracts directory.
+`
+
 	migrateUsage = `Usage:
     user migrate metafile
     user migrate metafolder
@@ -264,7 +287,7 @@ func main() {
 	rootCmd := flagg.Root
 	rootCmd.StringVar(&config.SiadAddr, "a", config.SiadAddr, "host:port that the siad API is running on")
 	rootCmd.StringVar(&config.SiadPassword, "p", config.SiadPassword, "password required by siad API")
-	rootCmd.StringVar(&config.Contracts, "c", config.Contracts, "directory where contracts are stored")
+	rootCmd.StringVar(&config.ContractsEnabled, "c", config.ContractsEnabled, "directory containing active contract set")
 	rootCmd.Usage = flagg.SimpleUsage(rootCmd, rootUsage)
 
 	versionCmd := flagg.New("version", versionUsage)
@@ -275,6 +298,9 @@ func main() {
 	uploadCmd.IntVar(&config.MinShards, "m", config.MinShards, "minimum number of shards required to download file")
 	downloadCmd := flagg.New("download", downloadUsage)
 	checkupCmd := flagg.New("checkup", checkupUsage)
+	contractsCmd := flagg.New("contracts", contractsUsage)
+	contractsEnableCmd := flagg.New("enable", contractsEnableUsage)
+	contractsDisableCmd := flagg.New("disable", contractsDisableUsage)
 	migrateCmd := flagg.New("migrate", migrateUsage)
 	mFile := migrateCmd.String("file", "", mFileUsage)
 	mDirect := migrateCmd.Bool("direct", false, mDirectUsage)
@@ -296,6 +322,10 @@ func main() {
 			{Cmd: uploadCmd},
 			{Cmd: downloadCmd},
 			{Cmd: checkupCmd},
+			{Cmd: contractsCmd, Sub: []flagg.Tree{
+				{Cmd: contractsEnableCmd},
+				{Cmd: contractsDisableCmd},
+			}},
 			{Cmd: migrateCmd},
 			{Cmd: tattleCmd},
 			{Cmd: infoCmd},
@@ -340,11 +370,11 @@ Define min_shards in your config file or supply the -m flag.`)
 		f, meta := parseUpload(args, uploadCmd)
 		var err error
 		if stat, statErr := f.Stat(); statErr == nil && stat.IsDir() {
-			err = uploadmetadir(f.Name(), meta, config.Contracts, config.MinShards)
+			err = uploadmetadir(f.Name(), meta, config.ContractsEnabled, config.MinShards)
 		} else if _, statErr := os.Stat(meta); !os.IsNotExist(statErr) {
-			err = resumeuploadmetafile(f, config.Contracts, meta)
+			err = resumeuploadmetafile(f, config.ContractsEnabled, meta)
 		} else {
-			err = uploadmetafile(f, config.MinShards, config.Contracts, meta)
+			err = uploadmetafile(f, config.MinShards, config.ContractsEnabled, meta)
 		}
 		f.Close()
 		check("Upload failed:", err)
@@ -353,9 +383,9 @@ Define min_shards in your config file or supply the -m flag.`)
 		f, meta := parseDownload(args, downloadCmd)
 		var err error
 		if stat, statErr := f.Stat(); statErr == nil && stat.IsDir() {
-			err = downloadmetadir(f.Name(), config.Contracts, meta)
+			err = downloadmetadir(f.Name(), config.ContractsEnabled, meta)
 		} else if f == os.Stdout {
-			err = downloadmetastream(f, config.Contracts, meta)
+			err = downloadmetastream(f, config.ContractsEnabled, meta)
 			// if the pipe we're writing to breaks, it was probably
 			// intentional (e.g. 'head' exiting after reading 10 lines), so
 			// suppress the error.
@@ -365,7 +395,7 @@ Define min_shards in your config file or supply the -m flag.`)
 				}
 			}
 		} else {
-			err = downloadmetafile(f, config.Contracts, meta)
+			err = downloadmetafile(f, config.ContractsEnabled, meta)
 			f.Close()
 		}
 		check("Download failed:", err)
@@ -374,13 +404,32 @@ Define min_shards in your config file or supply the -m flag.`)
 		path := parseCheckup(args, checkupCmd)
 		var err error
 		if _, readErr := renter.ReadMetaIndex(path); readErr == nil {
-			err = checkupMeta(config.Contracts, path)
+			err = checkupMeta(config.ContractsEnabled, path)
 		} else if _, readErr := renter.ReadContractRevision(path); readErr == nil {
 			err = checkupContract(path)
 		} else {
 			log.Fatalln("Not a valid contract or metafile")
 		}
 		check("Checkup failed:", err)
+
+	case contractsCmd:
+		contractsCmd.Usage()
+
+	case contractsEnableCmd:
+		if len(args) != 1 {
+			contractsEnableCmd.Usage()
+			return
+		}
+		err := enableContract(args[0])
+		check("Could not enable contract:", err)
+
+	case contractsDisableCmd:
+		if len(args) != 1 {
+			contractsDisableCmd.Usage()
+			return
+		}
+		err := disableContract(args[0])
+		check("Could not disable contract:", err)
 
 	case migrateCmd:
 		if len(args) == 0 {
@@ -397,18 +446,18 @@ Define min_shards in your config file or supply the -m flag.`)
 		case *mFile != "" && !isDir:
 			f, ferr := os.Open(*mFile)
 			check("Could not open file:", ferr)
-			err = migrateFile(f, config.Contracts, meta)
+			err = migrateFile(f, config.ContractsEnabled, meta)
 			f.Close()
 		case *mFile != "" && isDir:
-			err = migrateDirFile(*mFile, config.Contracts, meta)
+			err = migrateDirFile(*mFile, config.ContractsEnabled, meta)
 		case *mDirect && !isDir:
-			err = migrateDirect(config.Contracts, meta)
+			err = migrateDirect(config.ContractsAvailable, config.ContractsEnabled, meta)
 		case *mDirect && isDir:
-			err = migrateDirDirect(config.Contracts, meta)
+			err = migrateDirDirect(config.ContractsAvailable, config.ContractsEnabled, meta)
 		case *mRemote && !isDir:
-			err = migrateRemote(config.Contracts, meta)
+			err = migrateRemote(config.ContractsEnabled, meta)
 		case *mRemote && isDir:
-			err = migrateDirRemote(config.Contracts, meta)
+			err = migrateDirRemote(config.ContractsEnabled, meta)
 		default:
 			log.Fatalln("Multiple migration strategies specified (see user migrate --help).")
 		}
@@ -449,7 +498,7 @@ Define min_shards in your config file or supply the -m flag.`)
 			serveCmd.Usage()
 			return
 		}
-		err := serve(config.Contracts, args[0], *sAddr)
+		err := serve(config.ContractsEnabled, args[0], *sAddr)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -459,7 +508,7 @@ Define min_shards in your config file or supply the -m flag.`)
 			mountCmd.Usage()
 			return
 		}
-		err := mount(config.Contracts, args[0], args[1])
+		err := mount(config.ContractsEnabled, args[0], args[1])
 		if err != nil {
 			log.Fatal(err)
 		}

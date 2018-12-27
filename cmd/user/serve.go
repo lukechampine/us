@@ -21,7 +21,7 @@ import (
 )
 
 func serve(contractDir, metaDir, addr string) error {
-	contracts, err := loadContracts(contractDir)
+	contracts, err := renter.LoadContracts(contractDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
