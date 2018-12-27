@@ -108,12 +108,11 @@ func downloadStream(op *Operation, w io.Writer, chunkIndex int64, contracts rent
 	for _, h := range hosts {
 		if h != nil {
 			defer h.Close()
+			op.sendUpdate(DialStatsUpdate{
+				Host:  h.HostKey(),
+				Stats: h.Downloader.DialStats(),
+			})
 		}
-		// send dial stats
-		op.sendUpdate(DialStatsUpdate{
-			Host:  h.HostKey(),
-			Stats: h.Downloader.DialStats(),
-		})
 	}
 
 	// calculate download offset
