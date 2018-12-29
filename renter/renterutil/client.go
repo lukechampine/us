@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"lukechampine.com/us/hostdb"
@@ -19,6 +20,8 @@ import (
 	"gitlab.com/NebulousLabs/Sia/node/api/client"
 	"gitlab.com/NebulousLabs/Sia/types"
 )
+
+var errNoHostAnnouncement = errors.New("host announcement not found")
 
 // SiadClient wraps the siad API client. It satisfies the proto.Wallet,
 // proto.TransactionPool, and renter.HostKeyResolver interfaces. The
@@ -103,6 +106,9 @@ func (c *SiadClient) Hosts() ([]hostdb.HostPublicKey, error) {
 // announced network address.
 func (c *SiadClient) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAddress, error) {
 	hhg, err := c.siad.HostDbHostsGet(pubkey.SiaPublicKey())
+	if err != nil && strings.Contains(err.Error(), "requested host does not exist") {
+		return "", errNoHostAnnouncement
+	}
 	return hhg.Entry.NetAddress, err
 }
 
@@ -131,7 +137,7 @@ type SHARDClient struct {
 	addr string
 }
 
-func (c *SHARDClient) req(route string, fn func(io.Reader) error) error {
+func (c *SHARDClient) req(route string, fn func(*http.Response) error) error {
 	resp, err := http.Get(fmt.Sprintf("http://%v%v", c.addr, route))
 	if err != nil {
 		return err
@@ -143,7 +149,7 @@ func (c *SHARDClient) req(route string, fn func(io.Reader) error) error {
 		errString, _ := ioutil.ReadAll(resp.Body)
 		return errors.New(string(errString))
 	}
-	err = fn(resp.Body)
+	err = fn(resp)
 	return err
 
 }
@@ -151,8 +157,8 @@ func (c *SHARDClient) req(route string, fn func(io.Reader) error) error {
 // ChainHeight returns the current block height.
 func (c *SHARDClient) ChainHeight() (types.BlockHeight, error) {
 	var height types.BlockHeight
-	err := c.req("/height", func(body io.Reader) error {
-		return json.NewDecoder(body).Decode(&height)
+	err := c.req("/height", func(resp *http.Response) error {
+		return json.NewDecoder(resp.Body).Decode(&height)
 	})
 	return height, err
 }
@@ -160,12 +166,12 @@ func (c *SHARDClient) ChainHeight() (types.BlockHeight, error) {
 // Synced returns whether the blockchain is synced.
 func (c *SHARDClient) Synced() (bool, error) {
 	var synced bool
-	err := c.req("/synced", func(body io.Reader) error {
-		resp, err := ioutil.ReadAll(io.LimitReader(body, 8))
+	err := c.req("/synced", func(resp *http.Response) error {
+		data, err := ioutil.ReadAll(io.LimitReader(resp.Body, 8))
 		if err != nil {
 			return err
 		}
-		synced, err = strconv.ParseBool(string(resp))
+		synced, err = strconv.ParseBool(string(data))
 		return err
 	})
 	return synced, err
@@ -176,8 +182,11 @@ func (c *SHARDClient) Synced() (bool, error) {
 func (c *SHARDClient) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAddress, error) {
 	var ha modules.HostAnnouncement
 	var sig crypto.Signature
-	err := c.req("/host/"+string(pubkey), func(body io.Reader) error {
-		return encoding.NewDecoder(body).DecodeAll(&ha, &sig)
+	err := c.req("/host/"+string(pubkey), func(resp *http.Response) error {
+		if resp.ContentLength == 0 {
+			return errNoHostAnnouncement
+		}
+		return encoding.NewDecoder(resp.Body).DecodeAll(&ha, &sig)
 	})
 	if err != nil {
 		return "", err
