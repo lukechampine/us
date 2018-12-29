@@ -31,7 +31,7 @@ func (s *server) handlerHeight(w http.ResponseWriter, req *http.Request, _ httpr
 func (s *server) handlerHost(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	ann, ok := s.shard.HostAnnouncement(ps.ByName("pubkey"))
 	if !ok {
-		http.Error(w, "No record of that host", http.StatusNotFound)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	w.Write(ann)
