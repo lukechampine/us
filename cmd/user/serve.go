@@ -114,11 +114,47 @@ func newDownloaderSet(contracts renter.ContractSet, hkr renter.HostKeyResolver) 
 	return ds, nil
 }
 
+// metaInfo implements the os.FileInfo for a metafile.
+type metaInfo struct {
+	m    renter.MetaIndex
+	name string
+}
+
+func (i metaInfo) Name() string       { return i.name }
+func (i metaInfo) Size() int64        { return i.m.Filesize }
+func (i metaInfo) Mode() os.FileMode  { return i.m.Mode }
+func (i metaInfo) ModTime() time.Time { return i.m.ModTime }
+func (i metaInfo) IsDir() bool        { return false }
+func (i metaInfo) Sys() interface{}   { return nil }
+
+// metaDir implements http.File for a directory of metafiles.
+type metaDir struct {
+	*os.File
+	dir string
+}
+
+func (d metaDir) Readdir(n int) ([]os.FileInfo, error) {
+	files, err := d.File.Readdir(n)
+	for i := range files {
+		if files[i].IsDir() {
+			continue
+		}
+		index, err := renter.ReadMetaIndex(filepath.Join(d.dir, files[i].Name()))
+		if err != nil {
+			return nil, err
+		}
+		files[i] = metaInfo{
+			m:    index,
+			name: strings.TrimSuffix(files[i].Name(), metafileExt),
+		}
+	}
+	return files, err
+}
+
 // A httpFile implements the http.File interface by downloading data from
 // Sia hosts.
 type httpFile struct {
-	m    renter.MetaIndex
-	path string
+	metaInfo
 
 	mu sync.Mutex
 	dr *downloadReader
@@ -126,13 +162,7 @@ type httpFile struct {
 
 func (f *httpFile) Close() error                       { return nil }
 func (f *httpFile) Readdir(int) ([]os.FileInfo, error) { return nil, nil }
-func (f *httpFile) Stat() (os.FileInfo, error)         { return f, nil }
-func (f *httpFile) Name() string                       { return strings.TrimSuffix(f.path, metafileExt) }
-func (f *httpFile) Size() int64                        { return f.m.Filesize }
-func (f *httpFile) Mode() os.FileMode                  { return f.m.Mode }
-func (f *httpFile) ModTime() time.Time                 { return f.m.ModTime }
-func (f *httpFile) IsDir() bool                        { return false }
-func (f *httpFile) Sys() interface{}                   { return nil }
+func (f *httpFile) Stat() (os.FileInfo, error)         { return f.metaInfo, nil }
 
 // Read implements io.Reader.
 func (f *httpFile) Read(p []byte) (int, error) {
@@ -164,9 +194,11 @@ func HTTPFile(name string, downloaders *downloaderSet) (http.File, error) {
 	}
 
 	return &httpFile{
-		m:    index,
-		path: name,
-		dr:   dr,
+		metaInfo: metaInfo{
+			m:    index,
+			name: strings.TrimSuffix(name, metafileExt),
+		},
+		dr: dr,
 	}, nil
 }
 
@@ -175,15 +207,24 @@ type httpFS struct {
 	downloaders *downloaderSet
 }
 
-func (fs *httpFS) Open(name string) (http.File, error) {
+func (fs *httpFS) tryOpen(name string) (http.File, error) {
 	name = filepath.Join(fs.root, name)
-	stat, err := os.Stat(name)
-	if err != nil {
+	if stat, err := os.Stat(name); err != nil {
 		return nil, errors.Wrap(err, "could not stat file")
 	} else if stat.IsDir() {
-		return os.Open(name)
+		d, err := os.Open(name)
+		return metaDir{d, name}, err
 	}
 	return HTTPFile(name, fs.downloaders)
+}
+
+func (fs *httpFS) Open(name string) (http.File, error) {
+	// name is probably a metafile, so first try to append with .usa appended.
+	// If that file doesn't exist, fall back to the unmodified name.
+	if f, err := fs.tryOpen(name + metafileExt); !os.IsNotExist(errors.Cause(err)) {
+		return f, err
+	}
+	return fs.tryOpen(name)
 }
 
 // httpDir returns an object that implements http.FileSystem for the given
