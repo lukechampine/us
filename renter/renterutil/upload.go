@@ -480,7 +480,7 @@ func dialUploaders(m *renter.MetaFile, contracts renter.ContractSet, hkr renter.
 			if !ok {
 				res.err = errors.Errorf("%v: no contract for host", hostKey.ShortKey())
 			} else {
-				res.host, res.err = renter.NewShardUploader(m, i, contract, hkr, currentHeight)
+				res.host, res.err = renter.NewShardUploader(m, m.EncryptionKey(i), contract, hkr, currentHeight)
 			}
 			resChan <- res
 		}(i)

@@ -138,7 +138,8 @@ func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, mig
 		if !ok {
 			panic("missing contract for host being migrated")
 		}
-		hu, err := renter.NewShardUploader(m, m.HostIndex(hostKey), contract, hkr, currentHeight)
+		encryptionKey := m.EncryptionKey(m.HostIndex(hostKey))
+		hu, err := renter.NewShardUploader(m, encryptionKey, contract, hkr, currentHeight)
 		if err != nil {
 			op.die(err)
 			return
@@ -260,7 +261,8 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 		if !ok {
 			panic("newcontracts does not contain one of the hosts being migrated to")
 		}
-		hu, err := renter.NewShardUploader(m, m.HostIndex(oldHostKey), newContract, hkr, currentHeight)
+		encryptionKey := m.EncryptionKey(m.HostIndex(oldHostKey))
+		hu, err := renter.NewShardUploader(m, encryptionKey, newContract, hkr, currentHeight)
 		if err != nil {
 			op.sendUpdate(MigrateSkipUpdate{Host: oldHostKey, Err: err})
 			continue
@@ -373,7 +375,8 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 		if !ok {
 			panic("newcontracts does not contain one of the hosts being migrated to")
 		}
-		hu, err := renter.NewShardUploader(m, m.HostIndex(oldHostKey), newContract, hkr, currentHeight)
+		encryptionKey := m.EncryptionKey(m.HostIndex(oldHostKey))
+		hu, err := renter.NewShardUploader(m, encryptionKey, newContract, hkr, currentHeight)
 		if err != nil {
 			op.die(err)
 			return

@@ -176,7 +176,7 @@ func (u *ShardUploader) Close() error {
 
 // NewShardUploader connects to a host and returns a ShardUploader capable of
 // uploading m's data and writing to one of m's Shard files.
-func NewShardUploader(m *MetaFile, hostIndex int, contract *Contract, hkr HostKeyResolver, currentHeight types.BlockHeight) (*ShardUploader, error) {
+func NewShardUploader(m *MetaFile, key EncryptionKey, contract *Contract, hkr HostKeyResolver, currentHeight types.BlockHeight) (*ShardUploader, error) {
 	hostKey := contract.HostKey()
 	// open shard
 	sf, err := OpenShard(m.ShardPath(hostKey))
@@ -198,6 +198,6 @@ func NewShardUploader(m *MetaFile, hostIndex int, contract *Contract, hkr HostKe
 	return &ShardUploader{
 		Uploader: u,
 		Shard:    sf,
-		Key:      m.EncryptionKey(hostIndex),
+		Key:      key,
 	}, nil
 }
