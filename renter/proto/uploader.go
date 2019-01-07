@@ -162,6 +162,9 @@ func (u *Uploader) upload(data *[renterhost.SectorSize]byte) (crypto.Hash, error
 // NewUploader initiates the contract revision process with a host, and returns
 // an Uploader.
 func NewUploader(hostIP modules.NetAddress, contract ContractEditor, currentHeight types.BlockHeight) (*Uploader, error) {
+	if currentHeight >= contract.Revision().Revision.NewWindowEnd {
+		return nil, errors.New("contract has expired")
+	}
 	conn, stats, err := initiateRPC(hostIP, modules.RPCReviseContract, contract)
 	if err != nil {
 		return nil, err
