@@ -7,12 +7,12 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
-	"gitlab.com/NebulousLabs/Sia/crypto"
 )
 
 // Download downloads m to f, updating the specified contracts. Download may
@@ -43,32 +43,42 @@ func download(op *Operation, f *os.File, contracts renter.ContractSet, m *renter
 			}
 		}
 
-		shards := make([][]renter.SectorSlice, m.MinShards)
-		for i := range shards {
+		slices := make([][]renter.SectorSlice, m.MinShards)
+		for i := range slices {
 			shard, err := renter.ReadShard(m.ShardPath(m.Hosts[i]))
 			if err != nil {
 				return 0, 0, errors.Wrap(err, "could not read shard")
 			}
-			shards[i] = shard
+			slices[i] = shard
 		}
 
-		buf := make([]byte, 0, renterhost.SectorSize)
+		// Before verifying the checksums, we have to recreate the erasure-
+		// encoding of the file. Since we're only looking at the data pieces,
+		// we can use an m-of-m code; all we care about is the ordering of
+		// segments within each chunk of the file.
+		rs := renter.NewRSCode(m.MinShards, m.MinShards)
+		chunk := make([]byte, 0, renterhost.SectorSize*m.MinShards)
+		dataShards := make([][]byte, m.MinShards)
+		for i := range dataShards {
+			dataShards[i] = make([]byte, 0, renterhost.SectorSize)
+		}
 		var bytesVerified int64
-		for chunkIndex := range shards[0] {
-			for i := range shards {
-				s := shards[i][chunkIndex]
-				buf = buf[:s.NumSegments*merkle.SegmentSize]
-				_, err := io.ReadFull(f, buf)
-				if err == io.EOF || err == io.ErrUnexpectedEOF {
-					return chunkIndex, bytesVerified, nil
-				} else if err != nil {
-					return 0, 0, errors.Wrap(err, "could not verify file contents")
-				}
-				if crypto.HashBytes(buf) != s.Checksum {
-					return chunkIndex, bytesVerified, nil
-				}
-				bytesVerified += int64(len(buf))
+		for chunkIndex := range slices[0] {
+			chunkSize := int64(slices[0][chunkIndex].NumSegments) * merkle.SegmentSize * int64(m.MinShards)
+			buf := chunk[:chunkSize]
+			n, err := io.ReadFull(f, buf)
+			if err == io.EOF {
+				return chunkIndex, bytesVerified, nil
+			} else if err != nil && err != io.ErrUnexpectedEOF {
+				return 0, 0, errors.Wrap(err, "could not verify file contents")
 			}
+			rs.Encode(buf[:n], dataShards)
+			for i, shard := range dataShards {
+				if blake2b.Sum256(shard) != slices[i][chunkIndex].Checksum {
+					return chunkIndex, bytesVerified, nil
+				}
+			}
+			bytesVerified += chunkSize
 		}
 		// fully verified
 		return -1, 0, nil
