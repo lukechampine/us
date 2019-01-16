@@ -111,7 +111,7 @@ func verifySettings(conn net.Conn, host hostdb.ScannedHost) (hostdb.ScannedHost,
 	return host, nil
 }
 
-// verifyRecentRevision confirms that the host and contractor agree upon the current
+// verifyRecentRevision confirms that the host and renter agree upon the current
 // state of the contract being revised.
 func verifyRecentRevision(conn net.Conn, contract ContractRevision) (types.FileContractRevision, []types.TransactionSignature, error) {
 	// send contract ID
