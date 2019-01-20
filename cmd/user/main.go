@@ -238,6 +238,12 @@ Serve the files in metafolder over HTTP.
 
 Mount metafolder as a read-only FUSE filesystem, rooted at folder.
 `
+	convertUsage = `Usage:
+    user convert contract
+
+Converts a v1 contract to v2. If conversion fails, the v1 contract is not
+affected.
+`
 )
 
 var usage = flagg.SimpleUsage(flagg.Root, rootUsage) // point-free style!
@@ -319,6 +325,7 @@ func main() {
 	serveCmd := flagg.New("serve", serveUsage)
 	sAddr := serveCmd.String("addr", ":8080", "HTTP service address")
 	mountCmd := flagg.New("mount", mountUsage)
+	convertCmd := flagg.New("convert", convertUsage)
 
 	cmd := flagg.Parse(flagg.Tree{
 		Cmd: rootCmd,
@@ -341,6 +348,7 @@ func main() {
 			{Cmd: recoverCmd},
 			{Cmd: serveCmd},
 			{Cmd: mountCmd},
+			{Cmd: convertCmd},
 		},
 	})
 	args := cmd.Args()
@@ -529,5 +537,12 @@ Define min_shards in your config file or supply the -m flag.`)
 		if err != nil {
 			log.Fatal(err)
 		}
+
+	case convertCmd:
+		if len(args) != 1 {
+			convertCmd.Usage()
+			return
+		}
+		check("Conversion failed:", renter.ConvertContractV1V2(args[0]))
 	}
 }
