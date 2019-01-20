@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"golang.org/x/crypto/ed25519"
 
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
@@ -22,7 +23,7 @@ const (
 
 	// ContractHeaderSize is the size in bytes of the contract file header.
 	// It is also the offset at which the contract revision data begins.
-	ContractHeaderSize = 11 + 1 + 32 + 32 + 64
+	ContractHeaderSize = 11 + 1 + 32 + 32 + 32
 
 	// ContractRootOffset is the offset at which the sector Merkle
 	// roots of the contract are stored.
@@ -197,7 +198,7 @@ func marshalHeader(contract proto.ContractRevision) []byte {
 	hpk := contract.HostKey().Ed25519()
 	buf.Write(hpk[:])
 	buf.Write(contract.Revision.ParentID[:])
-	buf.Write(contract.RenterKey[:])
+	buf.Write(contract.RenterKey[:32])
 	return buf.Bytes()
 }
 
@@ -209,7 +210,7 @@ func unmarshalHeader(b []byte) (h ContractHeader) {
 	copy(hpk[:], buf.Next(32))
 	h.hostKey = hostdb.HostPublicKey(types.Ed25519PublicKey(hpk).String())
 	copy(h.id[:], buf.Next(32))
-	copy(h.key[:], buf.Next(64))
+	copy(h.key[:], ed25519.NewKeyFromSeed(buf.Next(32)))
 	return h
 }
 
