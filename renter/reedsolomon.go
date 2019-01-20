@@ -146,9 +146,9 @@ func NewRSCode(m, n int) ErasureCoder {
 		panic(err)
 	}
 	return rsCode{
-		enc:       rsc,
-		m:         m,
-		n:         n,
+		enc: rsc,
+		m:   m,
+		n:   n,
 	}
 }
 

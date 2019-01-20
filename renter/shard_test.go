@@ -89,7 +89,7 @@ func BenchmarkShardWriteSliceP(b *testing.B) {
 		go func(sf *Shard) {
 			for i := 0; i < b.N; i++ {
 				if err := sf.WriteSlice(SectorSlice{}, int64(i)); err != nil {
-					b.Fatal(err)
+					panic(err)
 				}
 			}
 			wg.Done()

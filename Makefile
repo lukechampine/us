@@ -21,10 +21,11 @@ lint:
 		--enable=gofmt \
 		--enable=golint \
 		--enable=maligned \
-		--enable=megacheck \
+		--enable=staticcheck \
 		--enable=misspell \
 		--enable=structcheck \
 		--enable=unconvert \
 		--enable=varcheck \
 		--enable=vet \
+		--skip=internal \
 		./...

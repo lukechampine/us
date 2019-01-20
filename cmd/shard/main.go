@@ -49,7 +49,6 @@ func newServer(shard *SHARD) http.Handler {
 var (
 	// to be supplied at build time
 	githash   = "?"
-	goversion = "?"
 	builddate = "?"
 )
 
