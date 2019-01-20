@@ -54,7 +54,7 @@ func (h *ContractHeader) Validate() error {
 		return errors.Errorf("wrong magic bytes (%q)", h.magic)
 	}
 	if h.version != ContractVersion {
-		return errors.Errorf("wrong version (%d)", h.version)
+		return errors.Errorf("incompatible version (v%d): convert to v%d", h.version, ContractVersion)
 	}
 	return nil
 }
