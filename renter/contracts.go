@@ -22,7 +22,7 @@ const (
 
 	// ContractHeaderSize is the size in bytes of the contract file header.
 	// It is also the offset at which the contract revision data begins.
-	ContractHeaderSize = 11 + 1 + 32 + 64
+	ContractHeaderSize = 11 + 1 + 32 + 32 + 64
 
 	// ContractRootOffset is the offset at which the sector Merkle
 	// roots of the contract are stored.
@@ -34,7 +34,7 @@ const (
 
 	// ContractVersion is the current version of the contract file format. It is
 	// incremented after each change to the format.
-	ContractVersion uint8 = 1
+	ContractVersion uint8 = 2
 )
 
 // ContractHeader contains the data encoded within the first
@@ -42,6 +42,7 @@ const (
 type ContractHeader struct {
 	magic   string
 	version uint8
+	hostKey hostdb.HostPublicKey
 	id      types.FileContractID
 	key     crypto.SecretKey
 }
@@ -72,6 +73,11 @@ func (c *Contract) Close() error {
 	// can ignore error here; nothing we can do about it, and it's not fatal
 	_, _ = c.f.WriteAt(marshalStack(&c.sectorRoots), ContractStackOffset)
 	return c.f.Close()
+}
+
+// HostKey returns the public key of the contract's host.
+func (c *Contract) HostKey() hostdb.HostPublicKey {
+	return c.header.hostKey
 }
 
 // Revision returns the latest revision of the file contract.
@@ -188,6 +194,8 @@ func marshalHeader(contract proto.ContractRevision) []byte {
 	buf := bytes.NewBuffer(make([]byte, 0, ContractHeaderSize))
 	buf.WriteString(ContractMagic)
 	buf.WriteByte(ContractVersion)
+	hpk := contract.HostKey().Ed25519()
+	buf.Write(hpk[:])
 	buf.Write(contract.Revision.ParentID[:])
 	buf.Write(contract.RenterKey[:])
 	return buf.Bytes()
@@ -197,6 +205,9 @@ func unmarshalHeader(b []byte) (h ContractHeader) {
 	buf := bytes.NewBuffer(b)
 	h.magic = string(buf.Next(len(ContractMagic)))
 	h.version, _ = buf.ReadByte()
+	var hpk crypto.PublicKey
+	copy(hpk[:], buf.Next(32))
+	h.hostKey = hostdb.HostPublicKey(types.Ed25519PublicKey(hpk).String())
 	copy(h.id[:], buf.Next(32))
 	copy(h.key[:], buf.Next(64))
 	return h
@@ -323,6 +334,8 @@ func LoadContract(filename string) (*Contract, error) {
 		return nil, err
 	} else if !rev.IsValid() {
 		return nil, errors.New("contract revision is invalid")
+	} else if rev.HostKey() != header.hostKey {
+		return nil, errors.New("contract revision has wrong host public key")
 	} else if rev.ID() != header.id {
 		return nil, errors.New("contract revision has wrong ID")
 	}
