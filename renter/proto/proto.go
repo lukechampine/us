@@ -32,12 +32,35 @@ type (
 	}
 )
 
+// A ContractKey is a keypair that can sign revisions.
+type ContractKey interface {
+	SignHash(hash crypto.Hash) []byte
+	PublicKey() types.SiaPublicKey
+}
+
+// Ed25519ContractKey implements ContractKey with an ed25519 keypair.
+type Ed25519ContractKey crypto.SecretKey
+
+// SignHash implements ContractKey.
+func (e Ed25519ContractKey) SignHash(hash crypto.Hash) []byte {
+	sig := crypto.SignHash(hash, crypto.SecretKey(e))
+	return sig[:]
+}
+
+// PublicKey implements ContractKey.
+func (e Ed25519ContractKey) PublicKey() types.SiaPublicKey {
+	return types.Ed25519PublicKey(crypto.SecretKey(e).PublicKey())
+}
+
 // A ContractEditor provides an interface for viewing and updating a file
 // contract transaction and the Merkle roots of each sector covered by the
 // contract.
 type ContractEditor interface {
 	// Revision returns the latest revision of the file contract.
 	Revision() ContractRevision
+
+	// Key returns the renter's signing key.
+	Key() ContractKey
 
 	// AppendRoot appends a sector root to the contract, returning the new
 	// top-level Merkle root. The root should be written to durable storage.
@@ -54,12 +77,11 @@ type ContractEditor interface {
 	SyncWithHost(rev types.FileContractRevision, hostSignatures []types.TransactionSignature) error
 }
 
-// A ContractRevision contains a file contract transaction and the secret
-// key used to sign it.
+// A ContractRevision contains the most recent revision to a file contract and
+// the secret key used to sign it.
 type ContractRevision struct {
 	Revision   types.FileContractRevision
 	Signatures [2]types.TransactionSignature
-	RenterKey  crypto.SecretKey
 }
 
 // EndHeight returns the height at which the host is no longer obligated to

@@ -43,7 +43,6 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 	// Calculate additional basePrice and baseCollateral. If the contract
 	// height did not increase, basePrice and baseCollateral are zero.
 	currentRevision := contract.Revision().Revision
-	renterKey := contract.Revision().RenterKey
 	var basePrice, baseCollateral types.Currency
 	if endHeight+host.WindowSize > currentRevision.NewWindowEnd {
 		timeExtension := uint64((endHeight + host.WindowSize) - currentRevision.NewWindowEnd)
@@ -126,7 +125,8 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 	if err = encoding.WriteObject(conn, []types.Transaction{txn}); err != nil {
 		return ContractRevision{}, errors.Wrap(err, "could not send the contract signed by us")
 	}
-	if err = encoding.WriteObject(conn, renterKey.PublicKey()); err != nil {
+	ourPK := contract.Key().PublicKey().Key
+	if err = encoding.WritePrefixedBytes(conn, ourPK); err != nil {
 		return ContractRevision{}, errors.Wrap(err, "could not send our public key")
 	}
 
@@ -193,7 +193,7 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 		NewMissedProofOutputs: fc.MissedProofOutputs,
 		NewUnlockHash:         fc.UnlockHash,
 	}
-	renterRevisionSig := revisionSignature(initRevision, renterKey)
+	renterRevisionSig := revisionSignature(initRevision, contract.Key())
 
 	// Send acceptance and signatures
 	if err = modules.WriteNegotiationAcceptance(conn); err != nil {
@@ -231,6 +231,5 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 	return ContractRevision{
 		Revision:   initRevision,
 		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostRevisionSig},
-		RenterKey:  renterKey,
 	}, nil
 }

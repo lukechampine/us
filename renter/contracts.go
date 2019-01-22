@@ -86,6 +86,11 @@ func (c *Contract) Revision() proto.ContractRevision {
 	return c.ContractRevision
 }
 
+// Key returns the renter's signing key.
+func (c *Contract) Key() proto.ContractKey {
+	return proto.Ed25519ContractKey(c.header.key)
+}
+
 // AppendRoot appends a sector root to the contract, returning the new
 // top-level Merkle root. The root should be written to durable storage.
 func (c *Contract) AppendRoot(root crypto.Hash) (crypto.Hash, error) {
@@ -191,14 +196,14 @@ func (c *Contract) SyncWithHost(hostRevision types.FileContractRevision, hostSig
 	return nil
 }
 
-func marshalHeader(contract proto.ContractRevision) []byte {
+func marshalHeader(rev proto.ContractRevision, key crypto.SecretKey) []byte {
 	buf := bytes.NewBuffer(make([]byte, 0, ContractHeaderSize))
 	buf.WriteString(ContractMagic)
 	buf.WriteByte(ContractVersion)
-	hpk := contract.HostKey().Ed25519()
+	hpk := rev.HostKey().Ed25519()
 	buf.Write(hpk[:])
-	buf.Write(contract.Revision.ParentID[:])
-	buf.Write(contract.RenterKey[:32])
+	buf.Write(rev.Revision.ParentID[:])
+	buf.Write(key[:32])
 	return buf.Bytes()
 }
 
@@ -247,14 +252,14 @@ func unmarshalStack(b []byte, stack *merkle.Stack) error {
 
 // SaveContract creates a new contract file using the provided contract. The
 // contract file will not contain any sector Merkle roots.
-func SaveContract(contract proto.ContractRevision, filename string) error {
+func SaveContract(contract proto.ContractRevision, key crypto.SecretKey, filename string) error {
 	f, err := os.Create(filename)
 	if err != nil {
 		return errors.Wrap(err, "could not create contract file")
 	}
 	defer f.Close()
 	buf := make([]byte, ContractRootOffset)
-	copy(buf, marshalHeader(contract))
+	copy(buf, marshalHeader(contract, key))
 	copy(buf[ContractHeaderSize:], marshalRevision(contract))
 	if _, err := f.Write(buf); err != nil {
 		return errors.Wrap(err, "could not write contract header and revision")
@@ -274,7 +279,7 @@ func SaveRenewedContract(oldContract *Contract, newContract proto.ContractRevisi
 	defer f.Close()
 
 	// write header+revision+stack
-	if _, err := f.Write(marshalHeader(newContract)); err != nil {
+	if _, err := f.Write(marshalHeader(newContract, oldContract.header.key)); err != nil {
 		return errors.Wrap(err, "could not write contract header")
 	} else if _, err := f.WriteAt(marshalRevision(newContract), ContractHeaderSize); err != nil {
 		return errors.Wrap(err, "could not write contract revision")
@@ -340,7 +345,6 @@ func LoadContract(filename string) (*Contract, error) {
 	} else if rev.ID() != header.id {
 		return nil, errors.New("contract revision has wrong ID")
 	}
-	rev.RenterKey = header.key
 	// decode stack
 	var stack merkle.Stack
 	err = unmarshalStack(b[ContractStackOffset:], &stack)

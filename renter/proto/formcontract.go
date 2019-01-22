@@ -22,7 +22,7 @@ const (
 
 // FormContract forms a contract with a host. The resulting contract will have
 // renterPayout coins in the renter output.
-func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
+func FormContract(w Wallet, tpool TransactionPool, key ContractKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
 	if endHeight < startHeight {
 		return ContractRevision{}, errors.New("end height must be greater than start height")
 	}
@@ -37,13 +37,12 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 		return ContractRevision{}, errors.Wrap(err, "could not get an address to use")
 	}
 
-	// create our key
-	ourSK, ourPK := crypto.GenerateKeyPair()
-	ourPublicKey := types.Ed25519PublicKey(ourPK)
-
 	// create unlock conditions
 	uc := types.UnlockConditions{
-		PublicKeys:         []types.SiaPublicKey{ourPublicKey, host.PublicKey.SiaPublicKey()},
+		PublicKeys: []types.SiaPublicKey{
+			key.PublicKey(),
+			host.PublicKey.SiaPublicKey(),
+		},
 		SignaturesRequired: 2,
 	}
 
@@ -145,7 +144,7 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 	if err = encoding.WriteObject(conn, []types.Transaction{txn}); err != nil {
 		return ContractRevision{}, errors.Wrap(err, "could not send the contract signed by us")
 	}
-	if err = encoding.WriteObject(conn, ourPK); err != nil {
+	if err = encoding.WritePrefixedBytes(conn, key.PublicKey().Key); err != nil {
 		return ContractRevision{}, errors.Wrap(err, "could not send our public key")
 	}
 
@@ -215,7 +214,7 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 		NewMissedProofOutputs: fc.MissedProofOutputs,
 		NewUnlockHash:         fc.UnlockHash,
 	}
-	renterRevisionSig := revisionSignature(initRevision, ourSK)
+	renterRevisionSig := revisionSignature(initRevision, key)
 
 	// Send acceptance and signatures
 	if err = modules.WriteNegotiationAcceptance(conn); err != nil {
@@ -253,7 +252,6 @@ func FormContract(w Wallet, tpool TransactionPool, host hostdb.ScannedHost, rent
 	return ContractRevision{
 		Revision:   initRevision,
 		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostRevisionSig},
-		RenterKey:  ourSK,
 	}, nil
 }
 
