@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 
 	"lukechampine.com/us/hostdb"
@@ -171,7 +172,10 @@ func form(hostKeyPrefix string, funds types.Currency, end string, filename strin
 		endHeight = currentHeight + types.BlockHeight(intDuration)
 	}
 
-	contract, err := proto.FormContract(c, c, host, funds, currentHeight, endHeight)
+	// generate our contract key and execute the protocol
+	ourSK, _ := crypto.GenerateKeyPair()
+	key := proto.Ed25519ContractKey(ourSK)
+	contract, err := proto.FormContract(c, c, key, host, funds, currentHeight, endHeight)
 	if err != nil {
 		return err
 	}
@@ -181,7 +185,7 @@ func form(hostKeyPrefix string, funds types.Currency, end string, filename strin
 	}
 	allPath := filepath.Join(config.ContractsAvailable, filename)
 	activePath := filepath.Join(config.ContractsEnabled, filename)
-	err = renter.SaveContract(contract, allPath)
+	err = renter.SaveContract(contract, ourSK, allPath)
 	if err != nil {
 		return errors.Wrap(err, "could not save contract")
 	}

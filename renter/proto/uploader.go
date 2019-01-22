@@ -76,20 +76,20 @@ func (u *Uploader) upload(data *[renterhost.SectorSize]byte) (crypto.Hash, error
 
 	// calculate price
 	// TODO: height is never updated, so we'll wind up overpaying on long-running uploads
-	contract := u.contract.Revision()
-	storageDuration := contract.Revision.NewWindowEnd - u.height
+	currentRev := u.contract.Revision()
+	storageDuration := currentRev.Revision.NewWindowEnd - u.height
 	storageDuration += 12 // hosts may not be fully synced; allow 2 hours of leeway
 	blockBytes := types.NewCurrency64(renterhost.SectorSize * uint64(storageDuration))
 	sectorStoragePrice := u.host.StoragePrice.Mul(blockBytes)
 	sectorBandwidthPrice := u.host.UploadBandwidthPrice.Mul64(renterhost.SectorSize)
 	sectorPrice := sectorStoragePrice.Add(sectorBandwidthPrice)
-	if contract.RenterFunds().Cmp(sectorPrice) < 0 {
-		return crypto.Hash{}, errors.Errorf("contract has insufficient funds to support upload: needed %v, have %v", sectorPrice, contract.RenterFunds())
+	if currentRev.RenterFunds().Cmp(sectorPrice) < 0 {
+		return crypto.Hash{}, errors.Errorf("contract has insufficient funds to support upload: needed %v, have %v", sectorPrice, currentRev.RenterFunds())
 	}
 	sectorCollateral := u.host.Collateral.Mul(blockBytes)
 	// hosts tend to be picky about collateral, so shave off 15%
 	sectorCollateral = sectorCollateral.MulFloat(0.85)
-	if contract.Revision.NewMissedProofOutputs[1].Value.Cmp(sectorCollateral) < 0 {
+	if currentRev.Revision.NewMissedProofOutputs[1].Value.Cmp(sectorCollateral) < 0 {
 		return crypto.Hash{}, errors.New("contract has insufficient collateral to support upload")
 	}
 
@@ -120,11 +120,13 @@ func (u *Uploader) upload(data *[renterhost.SectorSize]byte) (crypto.Hash, error
 	if err := <-errChan; err != nil {
 		return crypto.Hash{}, errors.Wrap(err, "could not calculate new Merkle root")
 	}
-	rev := newUploadRevision(contract.Revision, merkleRoot, sectorPrice, sectorCollateral)
+	// create the upload revision and sign it
+	rev := newUploadRevision(currentRev, merkleRoot, sectorPrice, sectorCollateral)
+	renterSig := revisionSignature(rev, u.contract.Key())
 
 	// send revision to host and exchange signatures
 	protoStart := time.Now()
-	txnSignatures, err := negotiateRevision(u.conn, rev, contract.RenterKey)
+	txnSignatures, err := negotiateRevision(u.conn, rev, renterSig)
 	protoEnd := time.Now()
 	if err == modules.ErrStopResponse {
 		// if host gracefully closed, close our side too and suppress the
