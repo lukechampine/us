@@ -102,11 +102,11 @@ func StandardAddress(pk types.SiaPublicKey) types.UnlockHash {
 	// precompute these hashes, bringing the total to 3 blake2b hashes.
 
 	// calculate the leaf hash for the pubkey.
-	buf := make([]byte, 1+16+8+64)
+	buf := make([]byte, 65)
 	buf[0] = 0x00 // Merkle tree leaf prefix
 	copy(buf[1:], pk.Algorithm[:])
 	binary.LittleEndian.PutUint64(buf[17:], uint64(len(pk.Key)))
-	buf = append(buf[:25], pk.Key...) // won't realloc buf unless len(pk.Key) > 64
+	buf = append(buf[:25], pk.Key...) // won't realloc for ed25519 keys
 	pubkeyHash := blake2b.Sum256(buf)
 
 	// blake2b(0x00 | uint64(0))

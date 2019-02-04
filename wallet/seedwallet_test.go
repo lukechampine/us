@@ -1,29 +1,17 @@
 package wallet
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
-	"io"
 	"io/ioutil"
-	"net/http"
-	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
-	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
 )
-
-type stubTpool struct{}
-
-func (stubTpool) AcceptTransactionSet([]types.Transaction) (err error)   { return }
-func (stubTpool) FeeEstimation() (min, max types.Currency)               { return }
-func (stubTpool) TransactionSet(id crypto.Hash) (ts []types.Transaction) { return }
 
 type mockCS struct {
 	subscriber modules.ConsensusSetSubscriber
@@ -67,8 +55,7 @@ func sendSiacoins(amount types.Currency, dest types.UnlockHash, feePerByte types
 		SiacoinInputs: make([]types.SiacoinInput, len(inputs)),
 		SiacoinOutputs: []types.SiacoinOutput{
 			{Value: amount, UnlockHash: dest},
-			{},
-		}[:1], // prevent extra allocation for change output
+		},
 		MinerFees:             []types.Currency{fee},
 		TransactionSignatures: make([]types.TransactionSignature, 0, len(inputs)),
 	}
@@ -84,48 +71,7 @@ func sendSiacoins(amount types.Currency, dest types.UnlockHash, feePerByte types
 	return txn, true
 }
 
-func httpGet(h http.Handler, route string, resp interface{}) error {
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", route, nil))
-	r := rec.Result()
-	if r.StatusCode != 200 {
-		err, _ := ioutil.ReadAll(r.Body)
-		return errors.New(string(err))
-	}
-	return json.NewDecoder(r.Body).Decode(resp)
-}
-
-func httpPost(h http.Handler, route string, data, resp interface{}) error {
-	var body io.Reader
-	if data != nil {
-		js, _ := json.Marshal(data)
-		body = bytes.NewReader(js)
-	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", route, body))
-	r := rec.Result()
-	if r.StatusCode != 200 {
-		err, _ := ioutil.ReadAll(r.Body)
-		return errors.New(string(err))
-	}
-	if resp == nil {
-		return nil
-	}
-	return json.NewDecoder(r.Body).Decode(resp)
-}
-
-func httpDelete(h http.Handler, route string) error {
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("DELETE", route, nil))
-	r := rec.Result()
-	if r.StatusCode != 200 {
-		err, _ := ioutil.ReadAll(r.Body)
-		return errors.New(string(err))
-	}
-	return nil
-}
-
-func TestSeedServer(t *testing.T) {
+func TestSeedWallet(t *testing.T) {
 	dir, err := ioutil.TempDir("", t.Name())
 	if err != nil {
 		t.Fatal(err)
@@ -135,73 +81,56 @@ func TestSeedServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	defer os.RemoveAll(dir)
 
 	sm := NewSeedManager(Seed{}, store.SeedIndex())
 	w := NewSeedWallet(sm, store)
 	cs := new(mockCS)
 	cs.ConsensusSetSubscribe(w, store.ConsensusChangeID(), nil)
-	ss := NewSeedServer(w, stubTpool{})
 
 	// simulate genesis block
 	cs.sendTxn(types.GenesisBlock.Transactions[0])
 
 	// initial balance should be zero
-	var balance types.Currency
-	if err := httpGet(ss, "/balance", &balance); err != nil {
-		t.Fatal(err)
-	} else if !balance.IsZero() {
+	if !w.Balance().IsZero() {
 		t.Fatal("balance should be zero")
 	}
 
 	// shouldn't have any transactions yet
-	var txnHistory ResponseTransactions
-	if err := httpGet(ss, "/transactions", &txnHistory); err != nil {
-		t.Fatal(err)
-	} else if len(txnHistory) != 0 {
+	txnHistory := w.Transactions(-1)
+	if len(txnHistory) != 0 {
 		t.Fatal("transaction history should be empty")
 	}
 
 	// shouldn't have any addresses yet
-	var addresses ResponseAddresses
-	if err := httpGet(ss, "/addresses", &addresses); err != nil {
-		t.Fatal(err)
-	} else if len(addresses) != 0 {
+	addresses := w.Addresses()
+	if len(addresses) != 0 {
 		t.Fatal("address list should be empty")
 	}
 
 	// get an address
-	var addr types.UnlockHash
-	if err := httpPost(ss, "/nextaddress", nil, &addr); err != nil {
-		t.Fatal(err)
-	}
+	addr := w.NextAddress()
 
 	// seed index should be incremented to 1
-	var seedIndex ResponseSeedIndex
-	if err := httpGet(ss, "/seedindex", &seedIndex); err != nil {
-		t.Fatal(err)
-	} else if seedIndex != 1 {
+	seedIndex := w.SeedIndex()
+	if seedIndex != 1 {
 		t.Fatal("seed index should be 1")
 	}
 
 	// should have an address now
-	if err := httpGet(ss, "/addresses", &addresses); err != nil {
-		t.Fatal(err)
-	} else if len(addresses) != 1 || addresses[0] != addr {
+	addresses = w.Addresses()
+	if len(addresses) != 1 || addresses[0] != addr {
 		t.Fatal("bad address list", addresses)
 	}
 
 	// address info should be present
-	var addrInfo SeedAddressInfo
-	if err := httpGet(ss, "/addresses/"+addr.String(), &addrInfo); err != nil {
-		t.Fatal(err)
-	} else if addrInfo.KeyIndex != 0 || addrInfo.UnlockConditions.UnlockHash() != addr {
+	addrInfo, ok := w.AddressInfo(addr)
+	if !ok || addrInfo.KeyIndex != 0 || addrInfo.UnlockConditions.UnlockHash() != addr {
 		t.Fatal("address info is inaccurate")
 	}
 
-	var oldConsensus ResponseConsensus
-	if err := httpGet(ss, "/consensus", &oldConsensus); err != nil {
-		t.Fatal(err)
-	}
+	oldCCID := w.ConsensusChangeID()
+	oldHeight := w.ChainHeight()
 
 	// simulate a transaction
 	cs.sendTxn(types.Transaction{
@@ -212,53 +141,33 @@ func TestSeedServer(t *testing.T) {
 	})
 
 	// CCID should have changed
-	var newConsensus ResponseConsensus
-	if err := httpGet(ss, "/consensus", &newConsensus); err != nil {
-		t.Fatal(err)
-	}
-	if newConsensus.CCID == oldConsensus.CCID {
+	if w.ConsensusChangeID() == oldCCID {
 		t.Fatal("ConsensusChangeID did not change")
-	} else if newConsensus.Height != oldConsensus.Height+1 {
+	} else if w.ChainHeight() != oldHeight+1 {
 		t.Fatal("block height did not increment")
 	}
 
 	// get new balance
-	if err := httpGet(ss, "/balance", &balance); err != nil {
-		t.Fatal(err)
-	} else if balance.Cmp(types.SiacoinPrecision) != 0 {
+	if !w.Balance().Equals(types.SiacoinPrecision) {
 		t.Fatal("balance should be 1 SC")
 	}
 
 	// transaction should appear in history
-	if err := httpGet(ss, "/transactions?max=2&addr="+addr.String(), &txnHistory); err != nil {
-		t.Fatal(err)
-	} else if len(txnHistory) != 1 {
+	txnHistory = w.TransactionsByAddress(addr, 2)
+	if len(txnHistory) != 1 {
 		t.Fatal("transaction should appear in history")
 	}
-	var htx types.Transaction
-	if err := httpGet(ss, "/transactions/"+txnHistory[0].String(), &htx); err != nil {
-		t.Fatal(err)
+	htx, ok := w.Transaction(txnHistory[0])
+	if !ok {
+		t.Fatal("transaction should be present")
 	} else if len(htx.SiacoinOutputs) != 2 {
 		t.Fatal("transaction should have two outputs")
 	}
 
 	// create an unsigned transaction using available outputs
-	var outputs ResponseUTXOs
-	if err := httpGet(ss, "/utxos", &outputs); err != nil {
-		t.Fatal(err)
-	} else if len(outputs) != 2 {
+	inputs := w.ValuedInputs()
+	if len(inputs) != 2 {
 		t.Fatal("should have two UTXOs")
-	}
-
-	inputs := make([]ValuedInput, len(outputs))
-	for i, o := range outputs {
-		inputs[i] = ValuedInput{
-			SiacoinInput: types.SiacoinInput{
-				ParentID:         o.ID,
-				UnlockConditions: o.UnlockConditions,
-			},
-			Value: o.Value,
-		}
 	}
 	amount := types.SiacoinPrecision.Div64(2)
 	dest := types.UnlockHash{}
@@ -268,69 +177,65 @@ func TestSeedServer(t *testing.T) {
 		t.Fatal("insufficient funds")
 	}
 
-	// sign and broadcast the transaction
-	signReq := RequestSign{Transaction: txn}
-	if err := httpPost(ss, "/sign", signReq, &txn); err != nil {
+	// sign the transaction
+	if err := w.SignTransaction(&txn, nil); err != nil {
 		t.Fatal(err)
 	} else if err := txn.StandaloneValid(types.ASICHardforkHeight + 1); err != nil {
 		t.Fatal(err)
-	} else if err := httpPost(ss, "/broadcast", []types.Transaction{txn}, nil); err != nil {
-		t.Fatal(err)
+	}
+	// simulate broadcasting by marking the outputs as spent
+	for _, o := range txn.SiacoinInputs {
+		if w.OwnsAddress(o.UnlockConditions.UnlockHash()) {
+			w.MarkSpent(o.ParentID, true)
+		}
 	}
 
 	// outputs should no longer be reported as spendable
-	if err := httpGet(ss, "/utxos", &outputs); err != nil {
-		t.Fatal(err)
-	} else if len(outputs) != 0 {
+	inputs = w.ValuedInputs()
+	if len(inputs) != 0 {
 		t.Fatal("should have zero UTXOs")
 	}
 
 	// instead, they should appear in limbo
-	if err := httpGet(ss, "/utxos?limbo=true", &outputs); err != nil {
-		t.Fatal(err)
-	} else if len(outputs) != 2 {
+	inputs = w.LimboInputs()
+	if len(inputs) != 2 {
 		t.Fatal("should have two UTXOs in limbo")
 	}
 
 	// bring back an output from limbo
-	if err := httpDelete(ss, "/limbo/"+outputs[0].ID.String()); err != nil {
-		t.Fatal(err)
-	}
-	if err := httpGet(ss, "/utxos", &outputs); err != nil {
-		t.Fatal(err)
-	} else if len(outputs) != 1 {
+	w.MarkSpent(inputs[0].ParentID, false)
+	inputs = w.ValuedInputs()
+	if len(inputs) != 1 {
 		t.Fatal("should have one UTXO")
 	}
-	if err := httpGet(ss, "/utxos?limbo=true", &outputs); err != nil {
-		t.Fatal(err)
-	} else if len(outputs) != 1 {
+	inputs = w.LimboInputs()
+	if len(inputs) != 1 {
 		t.Fatal("should have one UTXO in limbo")
 	}
 }
 
-func TestSeedServerThreadSafety(t *testing.T) {
+func TestSeedWalletThreadSafety(t *testing.T) {
 	store := NewEphemeralSeedStore()
 	sm := NewSeedManager(Seed{}, store.SeedIndex())
 	w := NewSeedWallet(sm, store)
 	cs := new(mockCS)
 	cs.ConsensusSetSubscribe(w, store.ConsensusChangeID(), nil)
-	ss := NewSeedServer(w, stubTpool{})
 
-	addr := sm.NextAddress()
+	addr := w.NextAddress()
 	txn := types.Transaction{
 		SiacoinOutputs: []types.SiacoinOutput{
 			{UnlockHash: addr, Value: types.SiacoinPrecision.Div64(2)},
 		},
 	}
 
-	// create a bunch of goroutines that call routes and add transactions
+	// create a bunch of goroutines that call methods and add transactions
 	// concurrently
 	funcs := []func(){
 		func() { cs.sendTxn(txn) },
-		func() { httpGet(ss, "/balance", new(ResponseBalance)) },
-		func() { httpPost(ss, "/nextaddress", nil, new(ResponseNextAddress)) },
-		func() { httpGet(ss, "/addresses", new(ResponseAddresses)) },
-		func() { httpGet(ss, "/transactions?max=2&addr="+addr.String(), new(ResponseTransactions)) },
+		func() { _ = w.Balance() },
+		func() { _ = w.NextAddress() },
+		func() { _ = w.Addresses() },
+		func() { _ = w.TransactionsByAddress(addr, -1) },
 	}
 	var wg sync.WaitGroup
 	wg.Add(len(funcs))

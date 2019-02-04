@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,24 +10,8 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 
 	"github.com/pkg/errors"
-	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/wallet"
 )
-
-type encodedPubKey struct {
-	Algorithm types.Specifier
-	Key       []byte
-}
-
-func (pk encodedPubKey) MarshalJSON() ([]byte, error) {
-	return []byte(strconv.Quote(pk.Algorithm.String() + ":" + hex.EncodeToString(pk.Key))), nil
-}
-
-type encodedUnlockConditions struct {
-	Timelock           types.BlockHeight `json:"timelock,omitempty"`
-	PublicKeys         []encodedPubKey   `json:"publicKeys"`
-	SignaturesRequired uint64            `json:"signaturesRequired"`
-}
 
 func gen(indexStr string) error {
 	index, err := strconv.ParseUint(indexStr, 10, 64)

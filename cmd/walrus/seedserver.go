@@ -1,4 +1,4 @@
-package wallet
+package main
 
 import (
 	"encoding/hex"
@@ -12,6 +12,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/us/wallet"
 )
 
 func writeJSON(w io.Writer, v interface{}) {
@@ -21,8 +22,8 @@ func writeJSON(w io.Writer, v interface{}) {
 }
 
 type seedServer struct {
-	w  *SeedWallet
-	tp TransactionPool
+	w  *wallet.SeedWallet
+	tp wallet.TransactionPool
 }
 
 // ResponseAddresses is the response type for the /addresses endpoint.
@@ -74,7 +75,7 @@ func (s *seedServer) broadcastHandler(w http.ResponseWriter, req *http.Request, 
 	}
 
 	// add any unconfirmed parents of the first transaction in the set
-	parents := UnconfirmedParents(txnSet[0], s.tp)
+	parents := wallet.UnconfirmedParents(txnSet[0], s.tp)
 
 	// submit the transaction set (ignoring duplicate error -- if the set is
 	// already in the tpool, great)
@@ -138,7 +139,7 @@ func (s *seedServer) nextaddressHandler(w http.ResponseWriter, req *http.Request
 type ResponseSeedIndex uint64
 
 func (s *seedServer) seedindexHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	writeJSON(w, s.w.CurrentIndex())
+	writeJSON(w, s.w.SeedIndex())
 }
 
 // RequestSign is the request type for the /sign endpoint.
@@ -148,7 +149,7 @@ type RequestSign struct {
 }
 
 // ResponseSign is the response type for the /sign endpoint.
-type ResponseSign types.Transaction
+type ResponseSign encodedTransaction
 
 func (s *seedServer) signHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var rs RequestSign
@@ -159,7 +160,7 @@ func (s *seedServer) signHandler(w http.ResponseWriter, req *http.Request, _ htt
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, (*encodedTransaction)(unsafe.Pointer(&rs.Transaction)))
+	writeJSON(w, (*ResponseSign)(unsafe.Pointer(&rs.Transaction)))
 }
 
 // ResponseTransactions is the response type for the /transactions endpoint.
@@ -195,7 +196,7 @@ func (s *seedServer) transactionsHandler(w http.ResponseWriter, req *http.Reques
 
 // ResponseTransactionsID is the response type for the /transactions/:id
 // endpoint.
-type ResponseTransactionsID types.Transaction
+type ResponseTransactionsID encodedTransaction
 
 // override transaction marshalling to use camelCase and stringified pubkeys and
 // omit empty fields
@@ -293,7 +294,7 @@ func (s *seedServer) transactionsidHandler(w http.ResponseWriter, req *http.Requ
 		http.Error(w, "Transaction not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, (*encodedTransaction)(unsafe.Pointer(&txn)))
+	writeJSON(w, (*ResponseTransactionsID)(unsafe.Pointer(&txn)))
 }
 
 // A UTXO is an unspent transaction output, ready to be used as a SiacoinInput.
@@ -315,7 +316,7 @@ type encodedUTXOs []struct {
 }
 
 func (s *seedServer) utxosHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var inputs []ValuedInput
+	var inputs []wallet.ValuedInput
 	if req.FormValue("limbo") == "true" {
 		inputs = s.w.LimboInputs()
 	} else {
@@ -335,7 +336,7 @@ func (s *seedServer) utxosHandler(w http.ResponseWriter, req *http.Request, _ ht
 }
 
 // NewSeedServer returns an HTTP handler that serves the seed wallet API.
-func NewSeedServer(w *SeedWallet, tp TransactionPool) http.Handler {
+func NewSeedServer(w *wallet.SeedWallet, tp wallet.TransactionPool) http.Handler {
 	s := &seedServer{
 		w:  w,
 		tp: tp,

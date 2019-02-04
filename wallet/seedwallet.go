@@ -1,11 +1,36 @@
 package wallet
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 )
+
+// A SeedAddressInfo contains the unlock conditions and key index for an
+// address derived from a seed.
+type SeedAddressInfo struct {
+	UnlockConditions types.UnlockConditions `json:"unlockConditions"`
+	KeyIndex         uint64                 `json:"keyIndex"`
+}
+
+// MarshalJSON implements json.Marshaler.
+func (info SeedAddressInfo) MarshalJSON() ([]byte, error) {
+	uc := info.UnlockConditions
+	pks := make([]string, len(uc.PublicKeys))
+	for i := range pks {
+		pks[i] = strconv.Quote(uc.PublicKeys[i].String())
+	}
+	timeLock := ""
+	if uc.Timelock != 0 {
+		timeLock = fmt.Sprintf(`"timelock":%v,`, uc.Timelock)
+	}
+	return []byte(fmt.Sprintf(`{"unlockConditions": {%s"publicKeys":[%s],"signaturesRequired":%v}, "keyIndex":%v}`,
+		timeLock, strings.Join(pks, ","), uc.SignaturesRequired, info.KeyIndex)), nil
+}
 
 // A SeedWallet is a seed-based wallet that can track spendable outputs and sign
 // transactions. It is safe for concurrent use.
@@ -98,9 +123,9 @@ func (w *SeedWallet) NextAddress() types.UnlockHash {
 	return addr
 }
 
-// CurrentIndex returns the index that will be used to derive the next
+// SeedIndex returns the index that will be used to derive the next
 // address.
-func (w *SeedWallet) CurrentIndex() uint64 {
+func (w *SeedWallet) SeedIndex() uint64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.sm.CurrentIndex()

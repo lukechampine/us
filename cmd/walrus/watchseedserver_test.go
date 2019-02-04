@@ -1,7 +1,8 @@
-package wallet
+package main
 
 import (
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/us/wallet"
 )
 
 func TestWatchSeedServer(t *testing.T) {
@@ -17,12 +19,14 @@ func TestWatchSeedServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := NewBoltDBStore(filepath.Join(dir, "wallet.db"))
+	store, err := wallet.NewBoltDBStore(filepath.Join(dir, "wallet.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	w := NewWatchOnlyWallet(store)
+	defer os.RemoveAll(dir)
+
+	w := wallet.NewWatchOnlyWallet(store)
 	cs := new(mockCS)
 	cs.ConsensusSetSubscribe(w, store.ConsensusChangeID(), nil)
 	ss := NewWatchSeedServer(w, stubTpool{})
@@ -52,9 +56,9 @@ func TestWatchSeedServer(t *testing.T) {
 	}
 
 	// create and add an address
-	seed := NewSeed()
+	seed := wallet.NewSeed()
 	addrInfo := SeedAddressInfo{
-		UnlockConditions: StandardUnlockConditions(seed.PublicKey(0)),
+		UnlockConditions: wallet.StandardUnlockConditions(seed.PublicKey(0)),
 		KeyIndex:         0,
 	}
 	var addr types.UnlockHash
@@ -105,9 +109,9 @@ func TestWatchSeedServer(t *testing.T) {
 		t.Fatal("should have two UTXOs")
 	}
 
-	inputs := make([]ValuedInput, len(outputs))
+	inputs := make([]wallet.ValuedInput, len(outputs))
 	for i, o := range outputs {
-		inputs[i] = ValuedInput{
+		inputs[i] = wallet.ValuedInput{
 			SiacoinInput: types.SiacoinInput{
 				ParentID:         o.ID,
 				UnlockConditions: o.UnlockConditions,
@@ -125,8 +129,8 @@ func TestWatchSeedServer(t *testing.T) {
 
 	// sign and broadcast the transaction
 	for _, sci := range txn.SiacoinInputs {
-		txnSig := StandardTransactionSignature(crypto.Hash(sci.ParentID))
-		AppendTransactionSignature(&txn, txnSig, seed.SecretKey(0))
+		txnSig := wallet.StandardTransactionSignature(crypto.Hash(sci.ParentID))
+		wallet.AppendTransactionSignature(&txn, txnSig, seed.SecretKey(0))
 	}
 	if err := txn.StandaloneValid(types.ASICHardforkHeight + 1); err != nil {
 		t.Fatal(err)
@@ -165,14 +169,14 @@ func TestWatchSeedServer(t *testing.T) {
 }
 
 func TestWatchServerThreadSafety(t *testing.T) {
-	store := NewEphemeralWatchOnlyStore()
-	w := NewWatchOnlyWallet(store)
+	store := wallet.NewEphemeralWatchOnlyStore()
+	w := wallet.NewWatchOnlyWallet(store)
 	cs := new(mockCS)
 	cs.ConsensusSetSubscribe(w, store.ConsensusChangeID(), nil)
 	ss := NewWatchSeedServer(w, stubTpool{})
 
 	randomAddr := func() (info SeedAddressInfo) {
-		info.UnlockConditions = StandardUnlockConditions(NewSeed().PublicKey(0))
+		info.UnlockConditions = wallet.StandardUnlockConditions(wallet.NewSeed().PublicKey(0))
 		return
 	}
 	addr := randomAddr().UnlockConditions.UnlockHash()

@@ -1,4 +1,4 @@
-package wallet
+package main
 
 import (
 	"encoding/json"
@@ -11,6 +11,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/us/wallet"
 )
 
 // A SeedAddressInfo contains the unlock conditions and key index for an
@@ -21,8 +22,8 @@ type SeedAddressInfo struct {
 }
 
 type watchSeedServer struct {
-	w  *WatchOnlyWallet
-	tp TransactionPool
+	w  *wallet.WatchOnlyWallet
+	tp wallet.TransactionPool
 }
 
 func (s *watchSeedServer) getInfo(addr types.UnlockHash) (SeedAddressInfo, bool) {
@@ -94,7 +95,7 @@ func (s *watchSeedServer) broadcastHandler(w http.ResponseWriter, req *http.Requ
 	}
 
 	// add any unconfirmed parents of the first transaction in the set
-	parents := UnconfirmedParents(txnSet[0], s.tp)
+	parents := wallet.UnconfirmedParents(txnSet[0], s.tp)
 
 	// submit the transaction set (ignoring duplicate error -- if the set is
 	// already in the tpool, great)
@@ -202,7 +203,7 @@ type encodedSeedUTXOs []struct {
 }
 
 func (s *watchSeedServer) utxosHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var outputs []UnspentOutput
+	var outputs []wallet.UnspentOutput
 	if req.FormValue("limbo") == "true" {
 		outputs = s.w.LimboOutputs()
 	} else {
@@ -228,7 +229,7 @@ func (s *watchSeedServer) utxosHandler(w http.ResponseWriter, req *http.Request,
 
 // NewWatchSeedServer returns an HTTP handler that serves the watch-only
 // seed-based wallet API.
-func NewWatchSeedServer(w *WatchOnlyWallet, tp TransactionPool) http.Handler {
+func NewWatchSeedServer(w *wallet.WatchOnlyWallet, tp wallet.TransactionPool) http.Handler {
 	s := &watchSeedServer{
 		w:  w,
 		tp: tp,

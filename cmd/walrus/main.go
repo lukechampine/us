@@ -143,7 +143,7 @@ func start(seed wallet.Seed, dir string, APIaddr string) error {
 	if err != nil {
 		return err
 	}
-	ss := wallet.NewSeedServer(w, tp)
+	ss := NewSeedServer(w, tp)
 
 	log.Printf("Listening on %v...", APIaddr)
 	return http.ListenAndServe(APIaddr, ss)
@@ -172,7 +172,7 @@ func startWatchOnly(dir string, APIaddr string) error {
 	if err != nil {
 		return err
 	}
-	ss := wallet.NewWatchSeedServer(w, tp)
+	ss := NewWatchSeedServer(w, tp)
 
 	log.Printf("Listening on %v...", APIaddr)
 	return http.ListenAndServe(APIaddr, ss)
