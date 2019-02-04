@@ -11,13 +11,11 @@ import (
 )
 
 const (
-	v1ContractHeaderSize  = 11 + 1 + 32 + 64
-	v1ContractRootOffset  = 4096
-	v1ContractStackOffset = v1ContractRootOffset - (2048 + 8)
+	v1ContractHeaderSize = 11 + 1 + 32 + 64
+	v1ContractRootOffset = 4096
 
-	v2ContractHeaderSize  = 11 + 1 + 32 + 32 + 32
-	v2ContractRootOffset  = 4096
-	v2ContractStackOffset = v2ContractRootOffset - (2048 + 8)
+	v2ContractHeaderSize = 11 + 1 + 32 + 32 + 32
+	v2ContractRootOffset = 4096
 )
 
 // ConvertContract converts a contract file to the latest version of the

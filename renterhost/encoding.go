@@ -217,16 +217,16 @@ func (resp *rpcResponse) unmarshalBuffer(b *objBuffer) error {
 
 func (r *RPCFormContractRequest) marshalledSize() int {
 	txnsSize := 8
-	for _, txn := range r.Transactions {
-		txnsSize += (*objTransaction)(&txn).marshalledSize()
+	for i := range r.Transactions {
+		txnsSize += (*objTransaction)(&r.Transactions[i]).marshalledSize()
 	}
 	return txnsSize + (*objSiaPublicKey)(&r.RenterKey).marshalledSize()
 }
 
 func (r *RPCFormContractRequest) marshalBuffer(b *objBuffer) {
 	b.writePrefix(len(r.Transactions))
-	for _, txn := range r.Transactions {
-		(*objTransaction)(&txn).marshalBuffer(b)
+	for i := range r.Transactions {
+		(*objTransaction)(&r.Transactions[i]).marshalBuffer(b)
 	}
 	(*objSiaPublicKey)(&r.RenterKey).marshalBuffer(b)
 }
@@ -290,16 +290,16 @@ func (r *RPCFormContractAdditions) unmarshalBuffer(b *objBuffer) error {
 
 func (r *RPCFormContractSignatures) marshalledSize() int {
 	sigsSize := 8
-	for _, sig := range r.ContractSignatures {
-		sigsSize += (*objTransactionSignature)(&sig).marshalledSize()
+	for i := range r.ContractSignatures {
+		sigsSize += (*objTransactionSignature)(&r.ContractSignatures[i]).marshalledSize()
 	}
 	return sigsSize + (*objTransactionSignature)(&r.RevisionSignature).marshalledSize()
 }
 
 func (r *RPCFormContractSignatures) marshalBuffer(b *objBuffer) {
 	b.writePrefix(len(r.ContractSignatures))
-	for _, sig := range r.ContractSignatures {
-		(*objTransactionSignature)(&sig).marshalBuffer(b)
+	for i := range r.ContractSignatures {
+		(*objTransactionSignature)(&r.ContractSignatures[i]).marshalBuffer(b)
 	}
 	(*objTransactionSignature)(&r.RevisionSignature).marshalBuffer(b)
 }
@@ -334,8 +334,8 @@ func (r *RPCLockRequest) unmarshalBuffer(b *objBuffer) error {
 
 func (r *RPCLockResponse) marshalledSize() int {
 	sigsSize := 8
-	for _, sig := range r.Signatures {
-		sigsSize += (*objTransactionSignature)(&sig).marshalledSize()
+	for i := range r.Signatures {
+		sigsSize += (*objTransactionSignature)(&r.Signatures[i]).marshalledSize()
 	}
 	return 1 + len(r.NewChallenge) + (*objFileContractRevision)(&r.Revision).marshalledSize() + sigsSize
 }
@@ -345,8 +345,8 @@ func (r *RPCLockResponse) marshalBuffer(b *objBuffer) {
 	b.write(r.NewChallenge[:])
 	(*objFileContractRevision)(&r.Revision).marshalBuffer(b)
 	b.writePrefix(len(r.Signatures))
-	for _, sig := range r.Signatures {
-		(*objTransactionSignature)(&sig).marshalBuffer(b)
+	for i := range r.Signatures {
+		(*objTransactionSignature)(&r.Signatures[i]).marshalBuffer(b)
 	}
 }
 
@@ -784,8 +784,8 @@ type objUnlockConditions types.UnlockConditions
 
 func (uc *objUnlockConditions) marshalledSize() int {
 	keysSize := 8
-	for _, spk := range uc.PublicKeys {
-		keysSize += (*objSiaPublicKey)(&spk).marshalledSize()
+	for i := range uc.PublicKeys {
+		keysSize += (*objSiaPublicKey)(&uc.PublicKeys[i]).marshalledSize()
 	}
 	return 8 + 8 + keysSize
 }

@@ -14,9 +14,9 @@ import (
 func TestCopySection(t *testing.T) {
 	// construct "encrypted" sectors
 	sectors := map[crypto.Hash][]byte{
-		crypto.Hash{0}: fastrand.Bytes(1024),
-		crypto.Hash{1}: fastrand.Bytes(1024),
-		crypto.Hash{2}: fastrand.Bytes(1024),
+		{0}: fastrand.Bytes(1024),
+		{1}: fastrand.Bytes(1024),
+		{2}: fastrand.Bytes(1024),
 	}
 	// construct shard from sector data
 	slices := []SectorSlice{

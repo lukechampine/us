@@ -22,6 +22,8 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
+const contractExt = ".contract"
+
 func contractinfo(contract proto.ContractRevision) {
 	c := makeClient()
 	var remaining string
@@ -59,7 +61,7 @@ func listcontracts() error {
 	}
 	enabled := make(map[string]struct{})
 	for _, name := range filenames {
-		if filepath.Ext(name) != ".contract" {
+		if filepath.Ext(name) != contractExt {
 			continue
 		}
 		enabled[name] = struct{}{}
@@ -85,7 +87,7 @@ func listcontracts() error {
 	}
 	var entries []entry
 	for _, name := range filenames {
-		if filepath.Ext(name) != ".contract" {
+		if filepath.Ext(name) != contractExt {
 			// skip archived contracts and other files
 			continue
 		}
@@ -381,7 +383,7 @@ func enableContract(hostKey string) error {
 	}
 	var contractName string
 	for _, name := range filenames {
-		if filepath.Ext(name) != ".contract" {
+		if filepath.Ext(name) != contractExt {
 			// skip archived contracts and other files
 			continue
 		}
@@ -465,7 +467,7 @@ func loadMetaContracts(m *renter.MetaFile, dir string) (renter.ContractSet, erro
 	}
 	hostContractMapping := make(map[hostdb.HostPublicKey]string)
 	for _, name := range filenames {
-		if filepath.Ext(name) != ".contract" {
+		if filepath.Ext(name) != contractExt {
 			// skip archived contracts and other files
 			continue
 		}

@@ -240,7 +240,7 @@ func sectorsChanged(actions []renterhost.RPCWriteAction, numSectors int) []int {
 	var sectorIndices []int
 	for index := range sectorsChanged {
 		if index < numSectors {
-			sectorIndices = append(sectorIndices, int(index))
+			sectorIndices = append(sectorIndices, index)
 		}
 	}
 	sort.Ints(sectorIndices)

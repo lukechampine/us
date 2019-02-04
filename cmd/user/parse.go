@@ -122,7 +122,7 @@ func parseDownload(args []string, cmd *flag.FlagSet) (file *os.File, metaPath st
 		file, err = os.OpenFile(args[1], os.O_CREATE|os.O_RDWR, 0666)
 		check("Could not create file:", err)
 	}
-	return
+	return file, metaPath
 }
 
 // checkup [metafile]

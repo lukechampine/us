@@ -52,7 +52,7 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	// create unlock conditions
 	uc := types.UnlockConditions{
 		PublicKeys: []types.SiaPublicKey{
-			types.SiaPublicKey{
+			{
 				Algorithm: types.SignatureEd25519,
 				Key:       []byte(key.PublicKey()),
 			},
