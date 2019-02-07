@@ -41,6 +41,8 @@ type Store interface {
 	ChainHeight() types.BlockHeight
 	LimboOutputs() []UnspentOutput
 	MarkSpent(id types.SiacoinOutputID, spent bool)
+	Memo(txid types.TransactionID) []byte
+	SetMemo(txid types.TransactionID, memo []byte)
 	Transaction(id types.TransactionID) (types.Transaction, bool)
 	Transactions(n int) []types.TransactionID
 	TransactionsByAddress(addr types.UnlockHash, n int) []types.TransactionID

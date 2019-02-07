@@ -34,6 +34,9 @@ var (
 	// bucketLimboOutputs maps SiacoinOutputIDs to UnspentOutputs.
 	bucketLimboOutputs = []byte("bucketLimboOutputs")
 
+	// bucketMemos maps TransactionIDs to memos.
+	bucketMemos = []byte("bucketMemos")
+
 	// bucketTxns maps TransactionIDs to Transactions.
 	bucketTxns = []byte("bucketTxns")
 
@@ -48,6 +51,7 @@ var (
 		bucketAddrs,
 		bucketOutputs,
 		bucketLimboOutputs,
+		bucketMemos,
 		bucketTxns,
 		bucketTxnsAddrIndex,
 		bucketTxnsRecentIndex,
@@ -195,6 +199,24 @@ func (s *BoltDBStore) Transaction(id types.TransactionID) (txn types.Transaction
 			encoding.Unmarshal(v, &txn)
 			exists = true
 		}
+		return nil
+	})
+	return
+}
+
+// SetMemo implements Store.
+func (s *BoltDBStore) SetMemo(txid types.TransactionID, memo []byte) {
+	s.db.Update(func(tx *bolt.Tx) error {
+		tx.Bucket(bucketMemos).Put(txid[:], append([]byte(nil), memo...))
+		return nil
+	})
+	return
+}
+
+// Memo implements Store.
+func (s *BoltDBStore) Memo(txid types.TransactionID) (memo []byte) {
+	s.db.View(func(tx *bolt.Tx) error {
+		memo = append([]byte(nil), tx.Bucket(bucketMemos).Get(txid[:])...)
 		return nil
 	})
 	return

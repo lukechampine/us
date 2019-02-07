@@ -189,6 +189,11 @@ func TestSeedWallet(t *testing.T) {
 			w.MarkSpent(o.ParentID, true)
 		}
 	}
+	// set and retrieve a memo for the transaction
+	w.SetMemo(txn.ID(), []byte("test txn"))
+	if string(w.Memo(txn.ID())) != "test txn" {
+		t.Fatal("wrong memo for transaction")
+	}
 
 	// outputs should no longer be reported as spendable
 	inputs = w.ValuedInputs()

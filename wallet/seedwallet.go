@@ -157,6 +157,20 @@ func (w *SeedWallet) LimboInputs() []ValuedInput {
 	return w.fillUnlockConditions(w.store.LimboOutputs())
 }
 
+// SetMemo sets the memo associated with the specified transaction.
+func (w *SeedWallet) SetMemo(txid types.TransactionID, memo []byte) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.store.SetMemo(txid, memo)
+}
+
+// Memo returns the memo associated with the specified transaction.
+func (w *SeedWallet) Memo(txid types.TransactionID) []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.store.Memo(txid)
+}
+
 // Transactions returns the IDs of the n most recent transactions in the
 // blockchain that are relevant to the SeedWallet, or fewer if less than n such
 // transactions exist. If n < 0, all such transactions are returned. The IDs are

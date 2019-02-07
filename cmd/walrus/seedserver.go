@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"strconv"
 	"unsafe"
@@ -51,7 +52,7 @@ func (s *seedServer) addressesaddrHandlerGET(w http.ResponseWriter, req *http.Re
 		http.Error(w, "No such entry", http.StatusNoContent)
 		return
 	}
-	writeJSON(w, info)
+	writeJSON(w, ResponseAddressesAddr(info))
 }
 
 // ResponseBalance is the response type for the /balance endpoint.
@@ -125,6 +126,29 @@ func (s *seedServer) limboHandlerDELETE(w http.ResponseWriter, req *http.Request
 		return
 	}
 	s.w.MarkSpent(types.SiacoinOutputID(id), false)
+}
+
+func (s *seedServer) memosHandlerPUT(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+	var txid crypto.Hash
+	if err := txid.LoadString(ps.ByName("txid")); err != nil {
+		http.Error(w, "Invalid transaction ID: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		http.Error(w, "Couldn't read memo: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.w.SetMemo(types.TransactionID(txid), body)
+}
+
+func (s *seedServer) memosHandlerGET(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+	var txid crypto.Hash
+	if err := txid.LoadString(ps.ByName("txid")); err != nil {
+		http.Error(w, "Invalid transaction ID: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Write(s.w.Memo(types.TransactionID(txid)))
 }
 
 // ResponseNextAddress is the response type for the /nextaddress endpoint.
@@ -349,6 +373,8 @@ func NewSeedServer(w *wallet.SeedWallet, tp wallet.TransactionPool) http.Handler
 	mux.GET("/consensus", s.consensusHandler)
 	mux.PUT("/limbo/:id", s.limboHandlerPUT)
 	mux.DELETE("/limbo/:id", s.limboHandlerDELETE)
+	mux.PUT("/memos/:txid", s.memosHandlerPUT)
+	mux.GET("/memos/:txid", s.memosHandlerGET)
 	mux.POST("/nextaddress", s.nextaddressHandler)
 	mux.GET("/seedindex", s.seedindexHandler)
 	mux.POST("/sign", s.signHandler)

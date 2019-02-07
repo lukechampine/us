@@ -13,6 +13,7 @@ type EphemeralStore struct {
 	txns            map[types.TransactionID]types.Transaction
 	txnsAddrIndex   map[types.UnlockHash][]types.TransactionID
 	txnsRecentIndex []types.TransactionID
+	memos           map[types.TransactionID][]byte
 
 	height int
 	ccid   modules.ConsensusChangeID
@@ -119,6 +120,16 @@ func (s *EphemeralStore) LimboOutputs() []UnspentOutput {
 		outputs = append(outputs, o)
 	}
 	return outputs
+}
+
+// SetMemo implements Store.
+func (s *EphemeralStore) SetMemo(txid types.TransactionID, memo []byte) {
+	s.memos[txid] = append([]byte(nil), memo...)
+}
+
+// Memo implements Store.
+func (s *EphemeralStore) Memo(txid types.TransactionID) []byte {
+	return append([]byte(nil), s.memos[txid]...)
 }
 
 // ChainHeight implements Store.

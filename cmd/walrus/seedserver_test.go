@@ -116,6 +116,22 @@ func httpPost(h http.Handler, route string, data, resp interface{}) error {
 	return json.NewDecoder(r.Body).Decode(resp)
 }
 
+func httpPut(h http.Handler, route string, data interface{}) error {
+	var body io.Reader
+	if data != nil {
+		js, _ := json.Marshal(data)
+		body = bytes.NewReader(js)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("PUT", route, body))
+	r := rec.Result()
+	if r.StatusCode != 200 {
+		err, _ := ioutil.ReadAll(r.Body)
+		return errors.New(string(err))
+	}
+	return nil
+}
+
 func httpDelete(h http.Handler, route string) error {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("DELETE", route, nil))
@@ -279,6 +295,15 @@ func TestSeedServer(t *testing.T) {
 		t.Fatal(err)
 	} else if err := httpPost(ss, "/broadcast", []types.Transaction{txn}, nil); err != nil {
 		t.Fatal(err)
+	}
+	// set and retrieve a memo for the transaction
+	memo := json.RawMessage(`"test txn"`)
+	if err := httpPut(ss, "/memos/"+txn.ID().String(), memo); err != nil {
+		t.Fatal(err)
+	} else if err := httpGet(ss, "/memos/"+txn.ID().String(), &memo); err != nil {
+		t.Fatal(err)
+	} else if string(memo) != `"test txn"` {
+		t.Fatal("wrong memo for transaction")
 	}
 
 	// outputs should no longer be reported as spendable
