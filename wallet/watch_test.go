@@ -139,19 +139,19 @@ func TestWatchOnlyWallet(t *testing.T) {
 	}
 
 	// instead, they should appear in limbo
-	outputs = w.LimboOutputs()
-	if len(outputs) != 2 {
+	limbo := w.LimboOutputs()
+	if len(limbo) != 2 {
 		t.Fatal("should have two UTXOs in limbo")
 	}
 
 	// bring back an output from limbo
-	w.MarkSpent(outputs[0].ID, false)
+	w.MarkSpent(limbo[0].ID, false)
 	outputs = w.UnspentOutputs()
 	if len(outputs) != 1 {
 		t.Fatal("should have one UTXO")
 	}
-	outputs = w.LimboOutputs()
-	if len(outputs) != 1 {
+	limbo = w.LimboOutputs()
+	if len(limbo) != 1 {
 		t.Fatal("should have one UTXO in limbo")
 	}
 }

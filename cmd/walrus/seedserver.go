@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strconv"
+	"time"
 	"unsafe"
 
 	"github.com/julienschmidt/httprouter"
@@ -339,24 +340,42 @@ type encodedUTXOs []struct {
 	UnlockHash       types.UnlockHash        `json:"unlockHash"`
 }
 
-func (s *seedServer) utxosHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var inputs []wallet.ValuedInput
-	if req.FormValue("limbo") == "true" {
-		inputs = s.w.LimboInputs()
-	} else {
-		inputs = s.w.ValuedInputs()
-	}
+type LimboUTXO struct {
+	ID         types.SiacoinOutputID `json:"ID"`
+	Value      types.Currency        `json:"value"`
+	UnlockHash types.UnlockHash      `json:"unlockHash"`
+	LimboSince time.Time             `json:"limboSince"`
+}
 
-	utxos := make(ResponseUTXOs, len(inputs))
-	for i, vi := range inputs {
-		utxos[i] = UTXO{
-			ID:               vi.ParentID,
-			Value:            vi.Value,
-			UnlockConditions: vi.UnlockConditions,
-			UnlockHash:       vi.UnlockConditions.UnlockHash(),
+// ResponseLimboUTXOs is the response type for the /utxos?limbo=true endpoint.
+type ResponseLimboUTXOs []LimboUTXO
+
+func (s *seedServer) utxosHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	if req.FormValue("limbo") == "true" {
+		outputs := s.w.LimboOutputs()
+		utxos := make(ResponseLimboUTXOs, len(outputs))
+		for i, o := range outputs {
+			utxos[i] = LimboUTXO{
+				ID:         o.ID,
+				Value:      o.Value,
+				UnlockHash: o.UnlockHash,
+				LimboSince: o.LimboSince,
+			}
 		}
+		writeJSON(w, outputs)
+	} else {
+		inputs := s.w.ValuedInputs()
+		utxos := make(ResponseUTXOs, len(inputs))
+		for i, vi := range inputs {
+			utxos[i] = UTXO{
+				ID:               vi.ParentID,
+				Value:            vi.Value,
+				UnlockConditions: vi.UnlockConditions,
+				UnlockHash:       vi.UnlockConditions.UnlockHash(),
+			}
+		}
+		writeJSON(w, *(*encodedUTXOs)(unsafe.Pointer(&utxos)))
 	}
-	writeJSON(w, *(*encodedUTXOs)(unsafe.Pointer(&utxos)))
 }
 
 // NewSeedServer returns an HTTP handler that serves the seed wallet API.

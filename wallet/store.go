@@ -1,14 +1,15 @@
 package wallet
 
 import (
+	"time"
+
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 )
 
 // EphemeralStore implements Store in-memory.
 type EphemeralStore struct {
-	outputs      map[types.SiacoinOutputID]UnspentOutput
-	limboOutputs map[types.SiacoinOutputID]UnspentOutput
+	outputs map[types.SiacoinOutputID]LimboOutput
 
 	txns            map[types.TransactionID]types.Transaction
 	txnsAddrIndex   map[types.UnlockHash][]types.TransactionID
@@ -23,7 +24,6 @@ type EphemeralStore struct {
 func (s *EphemeralStore) ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) error {
 	for _, o := range reverted.Outputs {
 		delete(s.outputs, o.ID)
-		delete(s.limboOutputs, o.ID)
 	}
 	for _, txn := range reverted.Transactions {
 		txid := txn.ID()
@@ -49,8 +49,10 @@ func (s *EphemeralStore) ApplyConsensusChange(reverted, applied ProcessedConsens
 	}
 
 	for _, o := range applied.Outputs {
-		s.outputs[o.ID] = o
-		delete(s.limboOutputs, o.ID)
+		s.outputs[o.ID] = LimboOutput{
+			UnspentOutput: o,
+			LimboSince:    notLimboTime,
+		}
 	}
 	for _, txn := range applied.Transactions {
 		txid := txn.ID()
@@ -69,12 +71,11 @@ func (s *EphemeralStore) ApplyConsensusChange(reverted, applied ProcessedConsens
 // UnspentOutputs implements Store.
 func (s *EphemeralStore) UnspentOutputs() []UnspentOutput {
 	outputs := make([]UnspentOutput, 0, len(s.outputs))
-	// filter out outputs that are in limbo
 	for _, o := range s.outputs {
-		if _, ok := s.limboOutputs[o.ID]; ok {
-			continue
+		// filter out outputs that are in limbo
+		if !o.LimboSince.Equal(notLimboTime) {
+			outputs = append(outputs, o.UnspentOutput)
 		}
-		outputs = append(outputs, o)
 	}
 	return outputs
 }
@@ -104,20 +105,26 @@ func (s *EphemeralStore) Transaction(id types.TransactionID) (types.Transaction,
 
 // MarkSpent implements Store.
 func (s *EphemeralStore) MarkSpent(id types.SiacoinOutputID, spent bool) {
-	if spent {
-		if o, ok := s.outputs[id]; ok {
-			s.limboOutputs[id] = o
-		}
-	} else {
-		delete(s.limboOutputs, id)
+	o, ok := s.outputs[id]
+	if !ok {
+		return
 	}
+	if spent {
+		o.LimboSince = time.Now()
+	} else {
+		o.LimboSince = notLimboTime
+	}
+	s.outputs[id] = o
 }
 
 // LimboOutputs implements Store.
-func (s *EphemeralStore) LimboOutputs() []UnspentOutput {
-	outputs := make([]UnspentOutput, 0, len(s.limboOutputs))
-	for _, o := range s.limboOutputs {
-		outputs = append(outputs, o)
+func (s *EphemeralStore) LimboOutputs() []LimboOutput {
+	outputs := make([]LimboOutput, 0, len(s.outputs))
+	for _, o := range s.outputs {
+		// filter out outputs that are not in limbo
+		if o.LimboSince.Equal(notLimboTime) {
+			outputs = append(outputs, o)
+		}
 	}
 	return outputs
 }
@@ -149,8 +156,7 @@ func (s *EphemeralStore) ConsensusChangeID() modules.ConsensusChangeID {
 // NewEphemeralStore returns a new EphemeralStore.
 func NewEphemeralStore() *EphemeralStore {
 	return &EphemeralStore{
-		outputs:       make(map[types.SiacoinOutputID]UnspentOutput),
-		limboOutputs:  make(map[types.SiacoinOutputID]UnspentOutput),
+		outputs:       make(map[types.SiacoinOutputID]LimboOutput),
 		txns:          make(map[types.TransactionID]types.Transaction),
 		txnsAddrIndex: make(map[types.UnlockHash][]types.TransactionID),
 	}

@@ -3,6 +3,7 @@ package wallet
 import (
 	"encoding/binary"
 	"io"
+	"time"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/encoding"
@@ -39,7 +40,7 @@ type Store interface {
 	ChainStore
 	ConsensusChangeID() modules.ConsensusChangeID
 	ChainHeight() types.BlockHeight
-	LimboOutputs() []UnspentOutput
+	LimboOutputs() []LimboOutput
 	MarkSpent(id types.SiacoinOutputID, spent bool)
 	Memo(txid types.TransactionID) []byte
 	SetMemo(txid types.TransactionID, memo []byte)
@@ -164,8 +165,7 @@ func (o *UnspentOutput) UnmarshalSia(r io.Reader) error {
 }
 
 // A ValuedInput is a SiacoinInput along with its value. Seen another way, it is
-// a SiacoinOutput along with its ID, and with the UnlockConditions instead of
-// the UnlockHash.
+// an UnspentOutput that knows its UnlockConditions.
 type ValuedInput struct {
 	types.SiacoinInput
 	Value types.Currency
@@ -179,4 +179,24 @@ func (i ValuedInput) MarshalSia(w io.Writer) error {
 // UnmarshalSia implements encoding.SiaUnmarshaler.
 func (i *ValuedInput) UnmarshalSia(r io.Reader) error {
 	return encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&i.SiacoinInput, &i.Value)
+}
+
+// A LimboOutput is an output that may or may not be spendable.
+type LimboOutput struct {
+	UnspentOutput
+	LimboSince time.Time
+}
+
+// MarshalSia implements encoding.SiaMarshaler.
+func (o LimboOutput) MarshalSia(w io.Writer) error {
+	since := o.LimboSince.Unix()
+	return encoding.NewEncoder(w).EncodeAll(o.UnspentOutput, since)
+}
+
+// UnmarshalSia implements encoding.SiaUnmarshaler.
+func (o *LimboOutput) UnmarshalSia(r io.Reader) error {
+	var since int64
+	err := encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&o.UnspentOutput, &since)
+	o.LimboSince = time.Unix(since, 0)
+	return err
 }

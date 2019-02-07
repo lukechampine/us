@@ -149,7 +149,7 @@ func TestSeedWallet(t *testing.T) {
 
 	// get new balance
 	if !w.Balance().Equals(types.SiacoinPrecision) {
-		t.Fatal("balance should be 1 SC")
+		t.Fatal("balance should be 1 SC, got", w.Balance().HumanString())
 	}
 
 	// transaction should appear in history
@@ -202,19 +202,19 @@ func TestSeedWallet(t *testing.T) {
 	}
 
 	// instead, they should appear in limbo
-	inputs = w.LimboInputs()
-	if len(inputs) != 2 {
+	limbo := w.LimboOutputs()
+	if len(limbo) != 2 {
 		t.Fatal("should have two UTXOs in limbo")
 	}
 
 	// bring back an output from limbo
-	w.MarkSpent(inputs[0].ParentID, false)
+	w.MarkSpent(limbo[0].ID, false)
 	inputs = w.ValuedInputs()
 	if len(inputs) != 1 {
 		t.Fatal("should have one UTXO")
 	}
-	inputs = w.LimboInputs()
-	if len(inputs) != 1 {
+	limbo = w.LimboOutputs()
+	if len(limbo) != 1 {
 		t.Fatal("should have one UTXO in limbo")
 	}
 }

@@ -97,7 +97,7 @@ func (w *WatchOnlyWallet) UnspentOutputs() []UnspentOutput {
 
 // LimboOutputs returns the outputs that have been marked as spent, but have
 // not been confirmed spent in the blockchain.
-func (w *WatchOnlyWallet) LimboOutputs() []UnspentOutput {
+func (w *WatchOnlyWallet) LimboOutputs() []LimboOutput {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.store.LimboOutputs()

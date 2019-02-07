@@ -28,7 +28,7 @@ func (info SeedAddressInfo) MarshalJSON() ([]byte, error) {
 	if uc.Timelock != 0 {
 		timeLock = fmt.Sprintf(`"timelock":%v,`, uc.Timelock)
 	}
-	return []byte(fmt.Sprintf(`{"unlockConditions": {%s"publicKeys":[%s],"signaturesRequired":%v}, "keyIndex":%v}`,
+	return []byte(fmt.Sprintf(`{"unlockConditions":{%s"publicKeys":[%s],"signaturesRequired":%v},"keyIndex":%v}`,
 		timeLock, strings.Join(pks, ","), uc.SignaturesRequired, info.KeyIndex)), nil
 }
 
@@ -149,12 +149,12 @@ func (w *SeedWallet) ValuedInputs() []ValuedInput {
 	return w.fillUnlockConditions(w.store.UnspentOutputs())
 }
 
-// LimboInputs returns the spendable outputs that have been marked as spent, but
-// have not been confirmed spent in the blockchain.
-func (w *SeedWallet) LimboInputs() []ValuedInput {
+// LimboOutputs returns the outputs that have been marked as spent, but have not
+// been confirmed spent in the blockchain.
+func (w *SeedWallet) LimboOutputs() []LimboOutput {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.fillUnlockConditions(w.store.LimboOutputs())
+	return w.store.LimboOutputs()
 }
 
 // SetMemo sets the memo associated with the specified transaction.

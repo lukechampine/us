@@ -203,28 +203,36 @@ type encodedSeedUTXOs []struct {
 }
 
 func (s *watchSeedServer) utxosHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var outputs []wallet.UnspentOutput
 	if req.FormValue("limbo") == "true" {
-		outputs = s.w.LimboOutputs()
+		outputs := s.w.LimboOutputs()
+		utxos := make(ResponseLimboUTXOs, len(outputs))
+		for i, o := range outputs {
+			utxos[i] = LimboUTXO{
+				ID:         o.ID,
+				Value:      o.Value,
+				UnlockHash: o.UnlockHash,
+				LimboSince: o.LimboSince,
+			}
+		}
+		writeJSON(w, outputs)
 	} else {
-		outputs = s.w.UnspentOutputs()
-	}
-
-	utxos := make(ResponseSeedUTXOs, len(outputs))
-	for i, o := range outputs {
-		info, ok := s.getInfo(o.UnlockHash)
-		if !ok {
-			panic("missing info for " + o.UnlockHash.String())
+		outputs := s.w.UnspentOutputs()
+		utxos := make(ResponseSeedUTXOs, len(outputs))
+		for i, o := range outputs {
+			info, ok := s.getInfo(o.UnlockHash)
+			if !ok {
+				panic("missing info for " + o.UnlockHash.String())
+			}
+			utxos[i] = SeedUTXO{
+				ID:               o.ID,
+				Value:            o.Value,
+				UnlockConditions: info.UnlockConditions,
+				UnlockHash:       o.UnlockHash,
+				KeyIndex:         info.KeyIndex,
+			}
 		}
-		utxos[i] = SeedUTXO{
-			ID:               o.ID,
-			Value:            o.Value,
-			UnlockConditions: info.UnlockConditions,
-			UnlockHash:       o.UnlockHash,
-			KeyIndex:         info.KeyIndex,
-		}
+		writeJSON(w, *(*encodedSeedUTXOs)(unsafe.Pointer(&utxos)))
 	}
-	writeJSON(w, *(*encodedSeedUTXOs)(unsafe.Pointer(&utxos)))
 }
 
 // NewWatchSeedServer returns an HTTP handler that serves the watch-only
