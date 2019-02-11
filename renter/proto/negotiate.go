@@ -126,7 +126,7 @@ func verifyRecentRevision(conn net.Conn, ourRevision ContractRevision, key Contr
 	crypto.SecureWipe(challenge[:16])
 	// sign and return
 	sig := key.SignHash(challenge)
-	if err := encoding.WriteObject(conn, sig); err != nil {
+	if err := encoding.WritePrefixedBytes(conn, sig); err != nil {
 		return types.FileContractRevision{}, nil, errors.Wrap(err, "could not send challenge response")
 	}
 	// read acceptance
