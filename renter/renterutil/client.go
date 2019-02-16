@@ -186,7 +186,7 @@ func (c *SHARDClient) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAd
 		if resp.ContentLength == 0 {
 			return errNoHostAnnouncement
 		}
-		return encoding.NewDecoder(resp.Body).DecodeAll(&ha, &sig)
+		return encoding.NewDecoder(resp.Body, encoding.DefaultAllocLimit).DecodeAll(&ha, &sig)
 	})
 	if err != nil {
 		return "", err
