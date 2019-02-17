@@ -24,81 +24,319 @@ func Download(f *os.File, contracts renter.ContractSet, m *renter.MetaFile, hkr 
 }
 
 func download(op *Operation, f *os.File, contracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver) {
-	if err := f.Chmod(m.Mode); err != nil {
-		op.die(errors.Wrap(err, "could not set file mode"))
-		return
-	}
-
-	// check if file is already partially or fully downloaded; if so, resume
-	// from last incomplete chunk
-	chunkIndex, bytesVerified, err := func() (int, int64, error) {
+	// check/set file mode and size
+	{
 		stat, err := f.Stat()
 		if err != nil {
-			return 0, 0, errors.Wrap(err, "could not stat file")
-		} else if stat.Size() == 0 {
-			return 0, 0, nil
-		} else if stat.Size() > m.Filesize {
-			if err := f.Truncate(m.Filesize); err != nil {
-				return 0, 0, errors.Wrap(err, "could not resize file")
+			op.die(errors.Wrap(err, "could not stat file"))
+			return
+		}
+		if stat.Mode() != m.Mode {
+			if err := f.Chmod(m.Mode); err != nil {
+				op.die(errors.Wrap(err, "could not set file mode"))
+				return
 			}
 		}
+		if m.Filesize == 0 {
+			// nothing to download
+			op.die(nil)
+			return
+		} else if stat.Size() != m.Filesize {
+			// we'll be writing to random offsets within the file in parallel, so
+			// truncate it to the full size up-front
+			if err := f.Truncate(m.Filesize); err != nil {
+				op.die(errors.Wrap(err, "could not resize file"))
+				return
+			}
+		}
+	}
 
+	// track metadata of each chunk in the file
+	type shardStatus byte
+	const (
+		shardMissing = iota
+		shardInProgress
+		shardFinished
+	)
+	type chunkEntry struct {
+		done       bool
+		shards     [][]byte
+		status     []shardStatus
+		errs       []string
+		fileOffset int64
+		chunkSize  int64
+	}
+	var chunks []chunkEntry
+
+	// Read through each chunk of the file and initialize chunks accordingly.
+	// This lets us avoid redownloading any chunks already present on disk.
+	{
+		// To determine the size of each chunk, we need the sector slices of the
+		// Shards. We can assume that the size of each slice is the same across
+		// each Shard.
 		slices := make([][]renter.SectorSlice, m.MinShards)
 		for i := range slices {
 			shard, err := renter.ReadShard(m.ShardPath(m.Hosts[i]))
 			if err != nil {
-				return 0, 0, errors.Wrap(err, "could not read shard")
+				op.die(errors.Wrap(err, "could not read shard"))
+				return
 			}
 			slices[i] = shard
 		}
+		chunks = make([]chunkEntry, len(slices[0]))
 
 		// Before verifying the checksums, we have to recreate the erasure-
 		// encoding of the file. Since we're only looking at the data pieces,
-		// we can use an m-of-m code; all we care about is the ordering of
-		// segments within each chunk of the file.
-		rs := renter.NewRSCode(m.MinShards, m.MinShards)
+		// we can use an m-of-m code.
+		rsc := renter.NewRSCode(m.MinShards, m.MinShards)
 		chunk := make([]byte, 0, renterhost.SectorSize*m.MinShards)
 		dataShards := make([][]byte, m.MinShards)
 		for i := range dataShards {
 			dataShards[i] = make([]byte, 0, renterhost.SectorSize)
 		}
-		var bytesVerified int64
-		for chunkIndex := range slices[0] {
-			chunkSize := int64(slices[0][chunkIndex].NumSegments) * merkle.SegmentSize * int64(m.MinShards)
-			buf := chunk[:chunkSize]
-			n, err := io.ReadFull(f, buf)
-			if err == io.EOF {
-				return chunkIndex, bytesVerified, nil
-			} else if err != nil && err != io.ErrUnexpectedEOF {
-				return 0, 0, errors.Wrap(err, "could not verify file contents")
+		var fileOffset int64
+		for chunkIndex := range chunks {
+			c := &chunks[chunkIndex]
+			c.fileOffset = fileOffset
+			c.chunkSize = int64(slices[0][chunkIndex].NumSegments) * merkle.SegmentSize * int64(m.MinShards)
+			if fileOffset+c.chunkSize > m.Filesize {
+				c.chunkSize = m.Filesize - fileOffset
 			}
-			rs.Encode(buf[:n], dataShards)
+			fileOffset += c.chunkSize
+			buf := chunk[:c.chunkSize]
+			_, err := io.ReadFull(f, buf)
+			if err != nil {
+				// technically we don't need to terminate here, but in practice
+				// if the read fails, later writes will fail too, so might as
+				// well fail early
+				op.die(errors.Wrap(err, "couldn't verify file contents"))
+				return
+			}
+			rsc.Encode(buf, dataShards)
+			c.done = true
 			for i, shard := range dataShards {
-				if blake2b.Sum256(shard) != slices[i][chunkIndex].Checksum {
-					return chunkIndex, bytesVerified, nil
-				}
+				c.done = c.done && (blake2b.Sum256(shard) == slices[i][chunkIndex].Checksum)
 			}
-			bytesVerified += chunkSize
+			if !c.done {
+				c.status = make([]shardStatus, len(m.Hosts))
+			}
 		}
-		// fully verified
-		return -1, 0, nil
-	}()
-	if err != nil {
-		op.die(err)
-		return
-	} else if chunkIndex == -1 {
-		// nothing to do
+	}
+	// calculate how many bytes are left to download
+	remaining := m.Filesize
+	for _, c := range chunks {
+		if c.done {
+			remaining -= c.chunkSize
+		}
+	}
+	if remaining == 0 {
 		op.die(nil)
 		return
 	}
 
-	// set seek position to end of last good chunk
-	if _, err := f.Seek(bytesVerified, io.SeekStart); err != nil {
-		op.die(errors.Wrap(err, "could not seek to end of verified content"))
+	// connect to hosts in parallel
+	hosts, err := dialDownloaders(m, contracts, hkr, op.cancel)
+	if err != nil {
+		op.die(err)
 		return
 	}
+	for _, h := range hosts {
+		if h != nil {
+			defer h.Close()
+			op.sendUpdate(DialStatsUpdate{
+				Host:  h.HostKey(),
+				Stats: h.Downloader.DialStats(),
+			})
+		}
+	}
 
-	downloadStream(op, f, int64(chunkIndex), contracts, m, hkr)
+	// send initial progress
+	initialBytes := m.Filesize - remaining
+	transferred := int64(0)
+	op.sendUpdate(TransferProgressUpdate{
+		Total:       m.Filesize,
+		Start:       initialBytes,
+		Transferred: transferred,
+	})
+
+	// Begin downloading in parallel. The basic algorithm is as follows:
+	//
+	// Each host has a worker goroutine that searches for unfinished chunks that
+	// are missing its shard, downloads that shard, and sends it down a shared
+	// channel. The main goroutine receives the shards, assembles them into
+	// finished chunks, writes them to disk, and marks the chunk as done. This
+	// process continues until all chunks have been downloaded.
+
+	// First, define a helper function that searches for work, returning an
+	// unfinished chunk that does not have the specified shard (or false if
+	// there are no such chunks).
+	var workMu sync.Mutex
+	chunkCond := sync.NewCond(&workMu)
+	getWork := func(shardIndex int) (chunkIndex int64, ok bool) {
+		if op.Canceled() {
+			return -1, false
+		}
+		workMu.Lock()
+		for chunkIndex := range chunks {
+			c := &chunks[chunkIndex]
+			if c.done || c.status[shardIndex] != shardMissing {
+				continue
+			}
+			shardsNeeded := m.MinShards
+			for _, s := range c.status {
+				if s != shardMissing {
+					shardsNeeded--
+				}
+			}
+			if shardsNeeded > 0 {
+				c.status[shardIndex] = shardInProgress
+				// Wait for the main goroutine to give us a buffer to download
+				// into. This bounds the total number of shards we hold in
+				// memory at any given time.
+				for c.shards == nil {
+					chunkCond.Wait()
+				}
+				workMu.Unlock()
+				return int64(chunkIndex), true
+			}
+		}
+		workMu.Unlock()
+		return -1, false
+	}
+
+	// allocate memory for the first four chunks
+	{
+		allocated := 0
+		for i := range chunks {
+			c := &chunks[i]
+			if c.done {
+				continue
+			}
+			c.shards = make([][]byte, len(m.Hosts))
+			for j := range c.shards {
+				c.shards[j] = make([]byte, 0, renterhost.SectorSize)
+			}
+			if allocated++; allocated >= 4 {
+				break
+			}
+		}
+	}
+
+	// create consumer channel
+	type shardRes struct {
+		chunk int64
+		shard int
+		stats DownloadStatsUpdate
+		err   error
+	}
+	shardChan := make(chan shardRes, len(hosts))
+
+	// spawn a goroutine for each host
+	for i := range hosts {
+		if hosts[i] == nil {
+			continue
+		}
+		go func(i int) {
+			host := hosts[i]
+			for {
+				chunkIndex, ok := getWork(i)
+				if !ok {
+					return
+				}
+				shard, err := host.DownloadAndDecrypt(chunkIndex)
+				chunks[chunkIndex].shards[i] = append(chunks[chunkIndex].shards[i][:0], shard...)
+				shardChan <- shardRes{
+					chunk: chunkIndex,
+					shard: i,
+					stats: DownloadStatsUpdate{
+						Host:  host.HostKey(),
+						Stats: host.Downloader.LastDownloadStats(),
+					},
+					err: err,
+				}
+			}
+		}(i)
+	}
+
+	// wait for shards to arrive on shardChan and assemble them into chunks
+	rsc := m.ErasureCode()
+	for remaining > 0 {
+		var r shardRes
+		select {
+		case r = <-shardChan:
+		case <-op.cancel:
+			op.die(ErrCanceled)
+		}
+		// update chunk
+		workMu.Lock()
+		c := &chunks[r.chunk]
+		if r.err != nil {
+			c.status[r.shard] = shardMissing
+			c.errs = append(c.errs, r.err.Error())
+		} else {
+			c.status[r.shard] = shardFinished
+			var n int
+			for _, s := range c.status {
+				if s == shardFinished {
+					n++
+				}
+			}
+			c.done = n >= m.MinShards
+		}
+		workMu.Unlock()
+
+		// if able, assemble chunk and write to file
+		if r.err == nil {
+			op.sendUpdate(r.stats)
+			transferred += c.chunkSize / int64(m.MinShards)
+			if transferred > m.Filesize {
+				transferred = m.Filesize
+			}
+			op.sendUpdate(TransferProgressUpdate{
+				Total:       m.Filesize,
+				Start:       initialBytes,
+				Transferred: transferred,
+			})
+			if c.done {
+				// reconstruct missing data shards and write to file
+				if _, err := f.Seek(c.fileOffset, io.SeekStart); err != nil {
+					op.die(errors.Wrap(err, "could not seek within file"))
+					return
+				}
+				err := rsc.Recover(f, c.shards, int(c.chunkSize))
+				if err != nil {
+					op.die(err)
+					return
+				}
+				remaining -= c.chunkSize
+
+				// give shard buffers to the next chunk and wake up any getWork
+				// calls waiting for memory
+				workMu.Lock()
+				for i := range chunks {
+					c2 := &chunks[i]
+					if !c2.done && c2.shards == nil {
+						c2.shards = c.shards
+						for j := range c2.shards {
+							c2.shards[j] = c2.shards[j][:0]
+						}
+						c.shards = nil
+						chunkCond.Broadcast()
+						break
+					}
+				}
+				workMu.Unlock()
+			}
+		} else {
+			// otherwise, check whether chunk is still recoverable
+			if len(c.shards)-len(c.errs) < m.MinShards {
+				err := errors.New("too many hosts did not supply their shard:\n" + strings.Join(c.errs, "\n"))
+				op.die(err)
+				return
+			}
+		}
+	}
+	op.die(nil)
 }
 
 // DownloadStream writes the contents of m to w.
