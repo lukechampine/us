@@ -240,13 +240,14 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 	// different sectors from a host if one would suffice. The downside of
 	// this optimization is that it results in wasted space. The theoretical
 	// worst-case scenario is a set of files with alternating sizes of 1 byte
-	// renterhost SectorSize bytes. If the optimization is applied naively, this
-	// results in about a 2x storage blowup. However, this scenario is
-	// unlikely to occur in a typical setting; the expected amount of space
-	// wasted is about the average size of the files being uploaded that are
-	// smaller than one sector. By tweaking the cutoff for applying this
-	// optimization (e.g. renterhost SectorSize renterhost SectorSize/4), we can reduce the
-	// amount of waste at the cost of requiring two sectors for more files.
+	// and renterhost.SectorSize bytes. If the optimization is applied
+	// naively, this results in about a 2x storage blowup. However, this
+	// scenario is unlikely to occur in a typical setting; the expected amount
+	// of space wasted is about the average size of the files being uploaded
+	// that are smaller than one sector. By tweaking the cutoff for applying
+	// this optimization (e.g. from SectorSize to SectorSize/4), we can reduce
+	// the amount of waste at the cost of requiring two sectors for more
+	// files.
 	//
 	// Once the chunk has been erasure-coded into sectors and each file in
 	// each sector has been separately encrypted, the data is ready for

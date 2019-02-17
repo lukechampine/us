@@ -32,10 +32,11 @@ func (sb *SectorBuilder) Reset() {
 
 // Append appends data to the sector being constructed, encrypting it with the
 // given key and chunkIndex. The data is also padded with random bytes to the
-// nearest multiple of merkle.SegmentSize. Each call to Append creates a
-// SectorSlice that is accessible via the Slices method. This SectorSlice
-// reflects the length and checksum of the original (unpadded, unencrypted)
-// data.
+// nearest multiple of merkle.SegmentSize.
+//
+// Each call to Append creates a SectorSlice that is accessible via the Slices
+// method. This SectorSlice reflects the length and checksum of the original
+// (unpadded, unencrypted) data.
 //
 // Append panics if len(data) > sb.Remaining().
 func (sb *SectorBuilder) Append(data []byte, key EncryptionKey, chunkIndex int64) {
@@ -78,7 +79,7 @@ func (sb *SectorBuilder) Append(data []byte, key EncryptionKey, chunkIndex int64
 }
 
 // Len returns the number of bytes appended to the sector. Note that, due to
-// padding, it is not generally true that Len equals the sum of slices passed
+// padding, it is not guaranteed that Len equals the sum of the slices passed
 // to Append.
 func (sb *SectorBuilder) Len() int {
 	return sb.sectorLen
@@ -91,11 +92,15 @@ func (sb *SectorBuilder) Remaining() int {
 }
 
 // Finish fills the remaining capacity of the sector with random bytes and
-// returns it. The MerkleRoot field of each SectorSlice tracked by sb is set
-// to Merkle root of the resulting sector.
+// returns it. The MerkleRoot fields of the SectorSlices tracked by sb are
+// also set to the Merkle root of the resulting sector.
 //
 // After calling Finish, Len returns renterhost.SectorSize and Remaining
 // returns 0; no more data can be appended until Reset is called.
+//
+// Finish returns a pointer to sb's internal buffer, so the standard warnings
+// regarding such pointers apply. In particular, the pointer should not be
+// retained after Reset is called.
 func (sb *SectorBuilder) Finish() *[renterhost.SectorSize]byte {
 	fastrand.Read(sb.sector[sb.sectorLen:])
 	sb.sectorLen = len(sb.sector)
@@ -151,8 +156,7 @@ func (u *ShardUploader) EncryptAndUpload(data []byte, chunkIndex int64) (SectorS
 	}
 	u.Sector.Reset()
 	u.Sector.Append(data, u.Key, chunkIndex)
-	err := u.Upload(chunkIndex)
-	if err != nil {
+	if err := u.Upload(chunkIndex); err != nil {
 		return SectorSlice{}, err
 	}
 	slices := u.Sector.Slices()
