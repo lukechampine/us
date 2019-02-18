@@ -8,8 +8,10 @@ import (
 	"sync"
 
 	"golang.org/x/crypto/blake2b"
+	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
@@ -547,6 +549,60 @@ func dialDownloaders(m *renter.MetaFile, contracts renter.ContractSet, hkr rente
 	}
 
 	return hosts, nil
+}
+
+type lockedDownloader struct {
+	d  *proto.Downloader
+	mu *sync.Mutex
+}
+
+// A DownloaderSet groups a set of proto.Downloaders.
+type DownloaderSet struct {
+	downloaders map[hostdb.HostPublicKey]lockedDownloader
+}
+
+// Close closes all of the Downloaders in the set.
+func (set *DownloaderSet) Close() error {
+	for _, ld := range set.downloaders {
+		ld.mu.Lock()
+		ld.d.Close()
+	}
+	return nil
+}
+
+func (set *DownloaderSet) acquire(host hostdb.HostPublicKey) (*proto.Downloader, bool) {
+	ld, ok := set.downloaders[host]
+	if !ok {
+		return nil, false
+	}
+	ld.mu.Lock()
+	return ld.d, true
+}
+
+func (set *DownloaderSet) release(host hostdb.HostPublicKey) {
+	set.downloaders[host].mu.Unlock()
+}
+
+// NewDownloaderSet creates a DownloaderSet composed of one proto.Downloader
+// per contract.
+func NewDownloaderSet(contracts renter.ContractSet, hkr renter.HostKeyResolver) (*DownloaderSet, error) {
+	ds := &DownloaderSet{
+		downloaders: make(map[hostdb.HostPublicKey]lockedDownloader),
+	}
+	for hostKey, contract := range contracts {
+		hostIP, err := hkr.ResolveHostKey(contract.HostKey())
+		if err != nil {
+			// TODO: skip instead?
+			return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
+		}
+		d, err := proto.NewDownloader(hostIP, contract)
+		if err != nil {
+			// TODO: skip instead?
+			return nil, err
+		}
+		ds.downloaders[hostKey] = lockedDownloader{d: d, mu: new(sync.Mutex)}
+	}
+	return ds, nil
 }
 
 // DownloadChunkShards downloads the shards of chunkIndex from hosts in

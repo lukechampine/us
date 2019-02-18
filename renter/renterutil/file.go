@@ -5,75 +5,10 @@ import (
 	"sync"
 
 	"github.com/pkg/errors"
-	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
-	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renterhost"
 )
-
-// A DownloaderSet groups a set of proto.Downloaders.
-type DownloaderSet struct {
-	downloaders map[hostdb.HostPublicKey]*proto.Downloader
-	mu          sync.Mutex
-}
-
-// Close closes all of the Downloaders in the set.
-func (set *DownloaderSet) Close() error {
-	for _, d := range set.downloaders {
-		d.Close()
-	}
-	return nil
-}
-
-func (set *DownloaderSet) downloadChunkShards(m renter.MetaIndex, shards [][]renter.SectorSlice, chunkIndex int64) ([][]byte, int, error) {
-	set.mu.Lock()
-	defer set.mu.Unlock()
-	hosts := make([]*renter.ShardDownloader, len(m.Hosts))
-	for i, hostKey := range m.Hosts {
-		d, ok := set.downloaders[hostKey]
-		if !ok {
-			continue
-		}
-		hosts[i] = &renter.ShardDownloader{
-			Downloader: d,
-			Key:        m.EncryptionKey(i),
-			Slices:     shards[i],
-		}
-	}
-	chunkShards, shardLen, _, err := DownloadChunkShards(hosts, chunkIndex, m.MinShards, nil)
-	if err != nil {
-		return nil, 0, err
-	}
-	// copy shard data to prevent a race
-	shardsCopy := make([][]byte, len(chunkShards))
-	for i := range shardsCopy {
-		shardsCopy[i] = append([]byte(nil), chunkShards[i]...)
-	}
-	return shardsCopy, shardLen, nil
-}
-
-// NewDownloaderSet creates a DownloaderSet composed of one proto.Downloader
-// per contract.
-func NewDownloaderSet(contracts renter.ContractSet, hkr renter.HostKeyResolver) (*DownloaderSet, error) {
-	ds := &DownloaderSet{
-		downloaders: make(map[hostdb.HostPublicKey]*proto.Downloader),
-	}
-	for hostKey, contract := range contracts {
-		hostIP, err := hkr.ResolveHostKey(contract.HostKey())
-		if err != nil {
-			// TODO: skip instead?
-			return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
-		}
-		d, err := proto.NewDownloader(hostIP, contract)
-		if err != nil {
-			// TODO: skip instead?
-			return nil, err
-		}
-		ds.downloaders[hostKey] = d
-	}
-	return ds, nil
-}
 
 // A PseudoFile presents a file-like interface for a metafile stored on Sia
 // hosts.
@@ -177,7 +112,20 @@ func (dr *downloadReader) downloadChunk(chunk int64) error {
 	if chunk >= int64(len(dr.shards[0])) {
 		return io.EOF
 	}
-	shards, shardLen, err := dr.ds.downloadChunkShards(dr.m, dr.shards, chunk)
+	hosts := make([]*renter.ShardDownloader, len(dr.m.Hosts))
+	for i, hostKey := range dr.m.Hosts {
+		d, ok := dr.ds.acquire(hostKey)
+		if !ok {
+			continue
+		}
+		defer dr.ds.release(hostKey)
+		hosts[i] = &renter.ShardDownloader{
+			Downloader: d,
+			Key:        dr.m.EncryptionKey(i),
+			Slices:     dr.shards[i],
+		}
+	}
+	shards, shardLen, _, err := DownloadChunkShards(hosts, chunk, dr.m.MinShards, nil)
 	if err != nil {
 		return err
 	}
