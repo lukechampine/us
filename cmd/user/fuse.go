@@ -11,6 +11,7 @@ import (
 
 	"github.com/pkg/errors"
 	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/renterutil"
 
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
@@ -25,7 +26,7 @@ func mount(contractDir, metaDir, mountDir string) error {
 	defer contracts.Close()
 
 	c := makeLimitedClient()
-	downloaders, err := newDownloaderSet(contracts, c)
+	downloaders, err := renterutil.NewDownloaderSet(contracts, c)
 	if err != nil {
 		return errors.Wrap(err, "could not connect to hosts")
 	}
@@ -49,7 +50,7 @@ type PseudoFS struct {
 	pathfs.FileSystem
 
 	root        string
-	downloaders *downloaderSet
+	downloaders *renterutil.DownloaderSet
 }
 
 // GetAttr implements the GetAttr method of pathfs.FileSystem.
@@ -121,7 +122,7 @@ func (fs *PseudoFS) Open(name string, flags uint32, context *fuse.Context) (file
 }
 
 // fileSystem returns a PseudoFS rooted at the specified root.
-func fileSystem(root string, downloaders *downloaderSet) *PseudoFS {
+func fileSystem(root string, downloaders *renterutil.DownloaderSet) *PseudoFS {
 	return &PseudoFS{
 		FileSystem:  pathfs.NewDefaultFileSystem(),
 		root:        root,
