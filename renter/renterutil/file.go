@@ -1,13 +1,13 @@
 package renterutil
 
 import (
+	"bytes"
 	"io"
 	"sync"
 
 	"github.com/pkg/errors"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
-	"lukechampine.com/us/renterhost"
 )
 
 // A PseudoFile presents a file-like interface for a metafile stored on Sia
@@ -51,14 +51,15 @@ func NewPseudoFile(m *renter.MetaFile, downloaders *DownloaderSet) (*PseudoFile,
 }
 
 type downloadReader struct {
-	m      renter.MetaIndex
-	shards [][]renter.SectorSlice
-	ds     *DownloaderSet
-
-	buf           chunkBuffer
-	chunk         int64 // current chunk index
-	offset        int64 // current offset within file
+	m             renter.MetaIndex
+	shards        [][]renter.SectorSlice
+	ds            *DownloaderSet
+	buf           bytes.Buffer
 	lastChunkSize int64
+
+	offset      int64 // current offset within file
+	chunk       int64 // current chunk index
+	chunkOffset int64 // current offset within chunk
 }
 
 func (dr *downloadReader) Seek(offset int64, whence int) (int64, error) {
@@ -71,41 +72,31 @@ func (dr *downloadReader) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekEnd:
 		newOffset = dr.m.Filesize - offset
 	}
-	if newOffset < 0 || newOffset > dr.m.Filesize {
-		return 0, errors.New("seek position is out of bounds")
-	}
-
-	newChunk, chunkOffset := dr.chunkOffset(offset)
-	if newChunk != dr.chunk {
-		err := dr.downloadChunk(newChunk)
-		if err != nil {
-			return 0, err
-		}
-		dr.chunk = newChunk
-	}
-	if _, err := dr.buf.Seek(chunkOffset, io.SeekStart); err != nil {
-		return 0, io.EOF
+	if newOffset < 0 {
+		return 0, errors.New("seek position cannot be negative")
 	}
 	dr.offset = newOffset
+	dr.chunk, dr.chunkOffset = dr.calculateChunkOffset(newOffset)
 	return dr.offset, nil
 }
 
 func (dr *downloadReader) Read(p []byte) (total int, err error) {
-	for total < len(p) {
-		var n int
-		n, err = dr.buf.Read(p[total:])
-		total += n
-		if err == io.EOF {
-			nextChunk := dr.chunk + 1
-			err = dr.downloadChunk(nextChunk)
-			if err != nil {
-				break
-			}
-			dr.chunk = nextChunk
-			dr.buf.Seek(0, io.SeekStart)
-		}
+	if dr.offset >= dr.m.Filesize {
+		return 0, io.EOF
 	}
-	return total, err
+	if dr.chunkOffset >= int64(dr.buf.Len()) {
+		err = dr.downloadChunk(dr.chunk)
+		if err != nil {
+			return 0, err
+		}
+		dr.chunk++
+		dr.chunkOffset = 0
+	}
+	buf := dr.buf.Bytes()
+	n := copy(p, buf[dr.chunkOffset:])
+	dr.chunkOffset += int64(n)
+	dr.offset += int64(n)
+	return n, nil
 }
 
 func (dr *downloadReader) downloadChunk(chunk int64) error {
@@ -144,7 +135,7 @@ func (dr *downloadReader) downloadChunk(chunk int64) error {
 	return nil
 }
 
-func (dr *downloadReader) chunkOffset(offset int64) (chunkIndex, chunkOffset int64) {
+func (dr *downloadReader) calculateChunkOffset(offset int64) (chunkIndex, chunkOffset int64) {
 	if len(dr.shards) == 0 {
 		return -1, -1
 	}
@@ -166,59 +157,10 @@ func newDownloadReader(m renter.MetaIndex, shards [][]renter.SectorSlice, ds *Do
 		lastChunkSize -= int64(s.NumSegments*merkle.SegmentSize) * int64(m.MinShards)
 	}
 	return &downloadReader{
-		m:      m,
-		shards: shards,
-		ds:     ds,
-		buf: chunkBuffer{
-			buf: make([]byte, 0, renterhost.SectorSize*m.MinShards),
-		},
-		chunk:         -1,
+		m:             m,
+		shards:        shards,
+		ds:            ds,
+		chunk:         0,
 		lastChunkSize: lastChunkSize,
 	}, nil
-}
-
-type chunkBuffer struct {
-	buf []byte
-	off int
-}
-
-func (b *chunkBuffer) Reset() {
-	b.off = 0
-	b.buf = b.buf[:0]
-}
-
-func (b *chunkBuffer) Read(p []byte) (n int, err error) {
-	if b.off >= len(b.buf) {
-		if len(p) == 0 {
-			return 0, nil
-		}
-		return 0, io.EOF
-	}
-	n = copy(p, b.buf[b.off:])
-	b.off += n
-	return
-}
-
-func (b *chunkBuffer) Write(p []byte) (n int, err error) {
-	b.buf = b.buf[:b.off+len(p)]
-	n = copy(b.buf[b.off:], p)
-	b.off += n
-	return
-}
-
-func (b *chunkBuffer) Seek(offset int64, whence int) (int64, error) {
-	var newOffset int
-	switch whence {
-	case io.SeekStart:
-		newOffset = int(offset)
-	case io.SeekCurrent:
-		newOffset = b.off + int(offset)
-	case io.SeekEnd:
-		newOffset = len(b.buf) - int(offset)
-	}
-	if newOffset < 0 || newOffset > len(b.buf) {
-		return 0, errors.New("invalid offset")
-	}
-	b.off = newOffset
-	return int64(b.off), nil
 }
