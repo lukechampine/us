@@ -359,7 +359,7 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 		oldhosts[i] = bd
 	}
 	if len(m.Hosts)-len(errStrings) < m.MinShards {
-		op.die(errors.New("couldn't connect to enough hosts:\n" + strings.Join(errStrings, "\n")))
+		op.die(errors.New("could not connect to enough hosts:\n" + strings.Join(errStrings, "\n")))
 		return
 	}
 

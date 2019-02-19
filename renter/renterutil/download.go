@@ -98,7 +98,7 @@ func download(op *Operation, f *os.File, contracts renter.ContractSet, m *renter
 
 	offset, err := verifyFileContents(m, f)
 	if err != nil {
-		op.die(errors.Wrap(err, "couldn't verify file contents"))
+		op.die(errors.Wrap(err, "could not verify file contents"))
 		return
 	} else if offset == m.Filesize {
 		// file is already fully downloaded

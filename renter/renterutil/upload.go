@@ -512,7 +512,7 @@ func dialUploaders(m *renter.MetaFile, contracts renter.ContractSet, hkr renter.
 				h.Close()
 			}
 		}
-		return nil, errors.New("couldn't connect to enough hosts:\n" + strings.Join(errStrings, "\n"))
+		return nil, errors.New("could not connect to enough hosts:\n" + strings.Join(errStrings, "\n"))
 	}
 
 	return hosts, nil
