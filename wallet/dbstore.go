@@ -340,6 +340,28 @@ func (s *BoltDBStore) Addresses() []types.UnlockHash {
 	return addrs
 }
 
+// Reset wipes the store's knowledge of the blockchain, including transactions,
+// outputs, height, and consensus change ID. Addresses, memos, and the current
+// seed index are preserved.
+func (s *BoltDBStore) Reset() error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		buckets := [][]byte{
+			bucketOutputs,
+			bucketTxns,
+			bucketTxnsAddrIndex,
+			bucketTxnsRecentIndex,
+		}
+		for _, b := range buckets {
+			tx.DeleteBucket(b)
+			tx.CreateBucket(b)
+		}
+
+		tx.Bucket(bucketMeta).Put(keyHeight, make([]byte, 8))
+		tx.Bucket(bucketMeta).Put(keyCCID, modules.ConsensusChangeBeginning[:])
+		return nil
+	})
+}
+
 // Close closes the bolt database.
 func (s *BoltDBStore) Close() error {
 	return s.db.Close()

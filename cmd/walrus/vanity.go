@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -13,6 +14,11 @@ import (
 )
 
 func vanity(seed wallet.Seed, substr string) {
+	for _, c := range substr {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			log.Fatal(`Invalid substring: addresses can only contain the characters "0123456789abcdef"`)
+		}
+	}
 	wantPrefix := true
 	var addrsReq50, addrsReq97 uint64
 	var matchLen func(addr types.UnlockHash, bestLen int) int
