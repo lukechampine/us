@@ -47,8 +47,19 @@ variable is set, that seed phrase will be used; otherwise, you will be
 prompted for your seed phrase.
 `
 
+	seedUsage = `Usage:
+    walrus seed
+
+Generate a random seed. For security, considering bypassing the terminal by
+immediately storing the seed in an environment variable, like so:
+
+	export WALRUS_SEED=$(walrus seed)
+
+Other commands will use this environment variable automatically.
+`
+
 	vanityUsage = `Usage:
-    walrus vanity substr
+walrus vanity substr
 
 Generate an address containing the desired substring.
 `
@@ -58,7 +69,9 @@ var usage = flagg.SimpleUsage(flagg.Root, rootUsage)
 
 func getSeed() wallet.Seed {
 	phrase := os.Getenv("WALRUS_SEED")
-	if phrase == "" {
+	if phrase != "" {
+		fmt.Println("Using WALRUS_SEED environment variable")
+	} else {
 		fmt.Print("Seed: ")
 		pw, err := terminal.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
@@ -85,6 +98,7 @@ func main() {
 	addr := startCmd.String("http", ":9380", "host:port to serve on")
 	dir := startCmd.String("dir", ".", "directory to store in")
 	genCmd := flagg.New("gen", genUsage)
+	seedCmd := flagg.New("seed", seedUsage)
 	vanityCmd := flagg.New("vanity", vanityUsage)
 
 	cmd := flagg.Parse(flagg.Tree{
@@ -93,6 +107,7 @@ func main() {
 			{Cmd: versionCmd},
 			{Cmd: startCmd},
 			{Cmd: genCmd},
+			{Cmd: seedCmd},
 			{Cmd: vanityCmd},
 		},
 	})
@@ -130,6 +145,12 @@ func main() {
 		if err := gen(getSeed(), args[0]); err != nil {
 			log.Fatalln("Could not generate address:", err)
 		}
+
+	case seedCmd:
+		if len(args) != 0 {
+			seedCmd.Usage()
+		}
+		fmt.Println(wallet.NewSeed())
 
 	case vanityCmd:
 		if len(args) != 1 {
