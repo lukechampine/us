@@ -19,7 +19,7 @@ func TestWatchOnlyWallet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := NewBoltDBStore(filepath.Join(dir, "wallet.db"))
+	store, err := NewBoltDBStore(filepath.Join(dir, "wallet.db"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

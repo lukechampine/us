@@ -133,7 +133,7 @@ func start(seed wallet.Seed, dir string, APIaddr string) error {
 		return err
 	}
 
-	store, err := wallet.NewBoltDBStore(filepath.Join(dir, "wallet.db"))
+	store, err := wallet.NewBoltDBStore(filepath.Join(dir, "wallet.db"), nil)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func startWatchOnly(dir string, APIaddr string) error {
 		return err
 	}
 
-	store, err := wallet.NewBoltDBStore(filepath.Join(dir, "wallet.db"))
+	store, err := wallet.NewBoltDBStore(filepath.Join(dir, "wallet.db"), nil)
 	if err != nil {
 		return err
 	}

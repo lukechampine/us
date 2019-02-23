@@ -3,6 +3,7 @@ package wallet
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
 	"time"
 
 	bolt "github.com/coreos/bbolt"
@@ -63,11 +64,26 @@ var notLimboTime = time.Time{}
 type BoltDBStore struct {
 	db    *bolt.DB
 	addrs map[types.UnlockHash]struct{}
+	onErr func(error)
+}
+
+func (s *BoltDBStore) view(fn func(*bolt.Tx) error) {
+	err := s.db.View(fn)
+	if err != nil {
+		s.onErr(err)
+	}
+}
+
+func (s *BoltDBStore) update(fn func(*bolt.Tx) error) {
+	err := s.db.Update(fn)
+	if err != nil {
+		s.onErr(err)
+	}
 }
 
 // ApplyConsensusChange implements Store.
-func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) {
+	s.update(func(tx *bolt.Tx) error {
 		for _, o := range reverted.Outputs {
 			tx.Bucket(bucketOutputs).Delete(o.ID[:])
 		}
@@ -133,7 +149,7 @@ func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusC
 
 // UnspentOutputs implements Store.
 func (s *BoltDBStore) UnspentOutputs() (outputs []UnspentOutput) {
-	s.db.View(func(tx *bolt.Tx) error {
+	s.view(func(tx *bolt.Tx) error {
 		c := tx.Bucket(bucketOutputs).Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			var o LimboOutput
@@ -149,7 +165,7 @@ func (s *BoltDBStore) UnspentOutputs() (outputs []UnspentOutput) {
 
 // LimboOutputs implements Store.
 func (s *BoltDBStore) LimboOutputs() (outputs []LimboOutput) {
-	s.db.View(func(tx *bolt.Tx) error {
+	s.view(func(tx *bolt.Tx) error {
 		c := tx.Bucket(bucketOutputs).Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			var o LimboOutput
@@ -165,7 +181,7 @@ func (s *BoltDBStore) LimboOutputs() (outputs []LimboOutput) {
 
 // Transactions implements Store.
 func (s *BoltDBStore) Transactions(n int) (txids []types.TransactionID) {
-	s.db.View(func(tx *bolt.Tx) error {
+	s.view(func(tx *bolt.Tx) error {
 		c := tx.Bucket(bucketTxnsRecentIndex).Cursor()
 		for k, v := c.Last(); k != nil && len(txids) != n; k, v = c.Prev() {
 			var txid types.TransactionID
@@ -179,7 +195,7 @@ func (s *BoltDBStore) Transactions(n int) (txids []types.TransactionID) {
 
 // TransactionsByAddress implements Store.
 func (s *BoltDBStore) TransactionsByAddress(addr types.UnlockHash, n int) (txids []types.TransactionID) {
-	s.db.View(func(tx *bolt.Tx) error {
+	s.view(func(tx *bolt.Tx) error {
 		addrTxnsBucket := tx.Bucket(bucketTxnsAddrIndex).Bucket(addr[:])
 		if addrTxnsBucket == nil {
 			return nil
@@ -197,7 +213,7 @@ func (s *BoltDBStore) TransactionsByAddress(addr types.UnlockHash, n int) (txids
 
 // Transaction implements Store.
 func (s *BoltDBStore) Transaction(id types.TransactionID) (txn types.Transaction, exists bool) {
-	s.db.View(func(tx *bolt.Tx) error {
+	s.view(func(tx *bolt.Tx) error {
 		if v := tx.Bucket(bucketTxns).Get(id[:]); v != nil {
 			encoding.Unmarshal(v, &txn)
 			exists = true
@@ -209,7 +225,7 @@ func (s *BoltDBStore) Transaction(id types.TransactionID) (txn types.Transaction
 
 // SetMemo implements Store.
 func (s *BoltDBStore) SetMemo(txid types.TransactionID, memo []byte) {
-	s.db.Update(func(tx *bolt.Tx) error {
+	s.update(func(tx *bolt.Tx) error {
 		tx.Bucket(bucketMemos).Put(txid[:], append([]byte(nil), memo...))
 		return nil
 	})
@@ -218,7 +234,7 @@ func (s *BoltDBStore) SetMemo(txid types.TransactionID, memo []byte) {
 
 // Memo implements Store.
 func (s *BoltDBStore) Memo(txid types.TransactionID) (memo []byte) {
-	s.db.View(func(tx *bolt.Tx) error {
+	s.view(func(tx *bolt.Tx) error {
 		memo = append([]byte(nil), tx.Bucket(bucketMemos).Get(txid[:])...)
 		return nil
 	})
@@ -227,7 +243,7 @@ func (s *BoltDBStore) Memo(txid types.TransactionID) (memo []byte) {
 
 // MarkSpent implements Store.
 func (s *BoltDBStore) MarkSpent(id types.SiacoinOutputID, spent bool) {
-	s.db.Update(func(tx *bolt.Tx) error {
+	s.update(func(tx *bolt.Tx) error {
 		v := append([]byte(nil), tx.Bucket(bucketOutputs).Get(id[:])...)
 		if len(v) == 0 {
 			return nil
@@ -246,7 +262,7 @@ func (s *BoltDBStore) MarkSpent(id types.SiacoinOutputID, spent bool) {
 
 // ChainHeight implements Store.
 func (s *BoltDBStore) ChainHeight() (height types.BlockHeight) {
-	s.db.View(func(tx *bolt.Tx) error {
+	s.view(func(tx *bolt.Tx) error {
 		height = types.BlockHeight(binary.LittleEndian.Uint64(tx.Bucket(bucketMeta).Get(keyHeight)))
 		if height > 0 {
 			height-- // adjust for genesis block
@@ -258,7 +274,7 @@ func (s *BoltDBStore) ChainHeight() (height types.BlockHeight) {
 
 // ConsensusChangeID implements Store.
 func (s *BoltDBStore) ConsensusChangeID() (ccid modules.ConsensusChangeID) {
-	s.db.View(func(tx *bolt.Tx) error {
+	s.view(func(tx *bolt.Tx) error {
 		copy(ccid[:], tx.Bucket(bucketMeta).Get(keyCCID))
 		return nil
 	})
@@ -267,7 +283,7 @@ func (s *BoltDBStore) ConsensusChangeID() (ccid modules.ConsensusChangeID) {
 
 // SeedIndex implements SeedStore.
 func (s *BoltDBStore) SeedIndex() (index uint64) {
-	s.db.View(func(tx *bolt.Tx) error {
+	s.view(func(tx *bolt.Tx) error {
 		index = binary.LittleEndian.Uint64(tx.Bucket(bucketMeta).Get(keySeedIndex))
 		return nil
 	})
@@ -276,7 +292,7 @@ func (s *BoltDBStore) SeedIndex() (index uint64) {
 
 // SetSeedIndex implements SeedStore.
 func (s *BoltDBStore) SetSeedIndex(index uint64) {
-	s.db.Update(func(tx *bolt.Tx) error {
+	s.update(func(tx *bolt.Tx) error {
 		indexBytes := make([]byte, 8)
 		binary.LittleEndian.PutUint64(indexBytes, index)
 		tx.Bucket(bucketMeta).Put(keySeedIndex, indexBytes)
@@ -292,7 +308,7 @@ func (s *BoltDBStore) OwnsAddress(addr types.UnlockHash) (owned bool) {
 
 // AddAddress implements WatchOnlyStore.
 func (s *BoltDBStore) AddAddress(addr types.UnlockHash, info []byte) {
-	s.db.Update(func(tx *bolt.Tx) error {
+	s.update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketAddrs).Put(addr[:], append([]byte(nil), info...))
 	})
 	s.addrs[addr] = struct{}{}
@@ -300,7 +316,7 @@ func (s *BoltDBStore) AddAddress(addr types.UnlockHash, info []byte) {
 
 // AddressInfo implements WatchOnlyStore.
 func (s *BoltDBStore) AddressInfo(addr types.UnlockHash) (info []byte) {
-	s.db.View(func(tx *bolt.Tx) error {
+	s.view(func(tx *bolt.Tx) error {
 		info = append(info, tx.Bucket(bucketAddrs).Get(addr[:])...)
 		return nil
 	})
@@ -309,7 +325,7 @@ func (s *BoltDBStore) AddressInfo(addr types.UnlockHash) (info []byte) {
 
 // RemoveAddress implements WatchOnlyStore.
 func (s *BoltDBStore) RemoveAddress(addr types.UnlockHash) {
-	s.db.Update(func(tx *bolt.Tx) error {
+	s.update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketAddrs).Delete(addr[:])
 	})
 	delete(s.addrs, addr)
@@ -329,8 +345,12 @@ func (s *BoltDBStore) Close() error {
 	return s.db.Close()
 }
 
-// NewBoltDBStore returns a new BoltDBStore.
-func NewBoltDBStore(filename string) (*BoltDBStore, error) {
+// NewBoltDBStore returns a new BoltDBStore. If onErr is nil, ExitOnError will
+// be used.
+func NewBoltDBStore(filename string, onErr func(error)) (*BoltDBStore, error) {
+	if onErr == nil {
+		onErr = ExitOnError
+	}
 	db, err := bolt.Open(filename, 0666, &bolt.Options{Timeout: 3 * time.Second})
 	if err != nil {
 		return nil, err
@@ -366,5 +386,12 @@ func NewBoltDBStore(filename string) (*BoltDBStore, error) {
 	return &BoltDBStore{
 		db:    db,
 		addrs: addrs,
+		onErr: onErr,
 	}, nil
+}
+
+// ExitOnError prints err to stderr and exits with code 1.
+func ExitOnError(err error) {
+	os.Stderr.WriteString(err.Error())
+	os.Exit(1)
 }

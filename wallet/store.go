@@ -21,7 +21,7 @@ type EphemeralStore struct {
 }
 
 // ApplyConsensusChange implements Store.
-func (s *EphemeralStore) ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) error {
+func (s *EphemeralStore) ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) {
 	for _, o := range reverted.Outputs {
 		delete(s.outputs, o.ID)
 	}
@@ -65,7 +65,6 @@ func (s *EphemeralStore) ApplyConsensusChange(reverted, applied ProcessedConsens
 
 	s.height += applied.BlockCount - reverted.BlockCount
 	s.ccid = ccid
-	return nil
 }
 
 // UnspentOutputs implements Store.

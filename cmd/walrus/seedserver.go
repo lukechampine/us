@@ -340,6 +340,8 @@ type encodedUTXOs []struct {
 	UnlockHash       types.UnlockHash        `json:"unlockHash"`
 }
 
+// A LimboUTXO is an unspent transaction output that may or may not be
+// spendable.
 type LimboUTXO struct {
 	ID         types.SiacoinOutputID `json:"ID"`
 	Value      types.Currency        `json:"value"`

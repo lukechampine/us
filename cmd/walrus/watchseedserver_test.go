@@ -19,7 +19,7 @@ func TestWatchSeedServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := wallet.NewBoltDBStore(filepath.Join(dir, "wallet.db"))
+	store, err := wallet.NewBoltDBStore(filepath.Join(dir, "wallet.db"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

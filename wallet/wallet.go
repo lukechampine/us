@@ -32,7 +32,7 @@ type AddressOwner interface {
 
 // A ChainStore stores ProcessedConsensusChanges.
 type ChainStore interface {
-	ApplyConsensusChange(reverted, applied ProcessedConsensusChange, id modules.ConsensusChangeID) error
+	ApplyConsensusChange(reverted, applied ProcessedConsensusChange, id modules.ConsensusChangeID)
 }
 
 // A Store stores information needed by a generic wallet.
