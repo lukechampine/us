@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 
@@ -10,6 +12,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/modules/consensus"
 	"gitlab.com/NebulousLabs/Sia/modules/gateway"
 	"gitlab.com/NebulousLabs/Sia/modules/transactionpool"
+	"golang.org/x/crypto/ssh/terminal"
 	"lukechampine.com/flagg"
 	"lukechampine.com/us/wallet"
 )
@@ -52,6 +55,24 @@ Generate an address containing the desired substring.
 )
 
 var usage = flagg.SimpleUsage(flagg.Root, rootUsage)
+
+func getSeed() wallet.Seed {
+	phrase := os.Getenv("WALRUS_SEED")
+	if phrase == "" {
+		fmt.Print("Seed: ")
+		pw, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+		if err != nil {
+			log.Fatal("Could not read seed phrase:", err)
+		}
+		fmt.Println()
+		phrase = string(pw)
+	}
+	seed, err := wallet.SeedFromPhrase(phrase)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return seed
+}
 
 func main() {
 	log.SetFlags(0)
@@ -96,7 +117,7 @@ func main() {
 				log.Fatal(err)
 			}
 		} else {
-			if err := start(wallet.Seed{}, *dir, *addr); err != nil {
+			if err := start(getSeed(), *dir, *addr); err != nil {
 				log.Fatal(err)
 			}
 		}
@@ -106,7 +127,7 @@ func main() {
 			genCmd.Usage()
 			return
 		}
-		if err := gen(args[0]); err != nil {
+		if err := gen(getSeed(), args[0]); err != nil {
 			log.Fatalln("Could not generate address:", err)
 		}
 
@@ -115,7 +136,7 @@ func main() {
 			vanityCmd.Usage()
 			return
 		}
-		vanity(args[0])
+		vanity(getSeed(), args[0])
 	}
 }
 

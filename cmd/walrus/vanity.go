@@ -12,7 +12,7 @@ import (
 	"lukechampine.com/us/wallet"
 )
 
-func vanity(substr string) {
+func vanity(seed wallet.Seed, substr string) {
 	wantPrefix := true
 	var addrsReq50, addrsReq97 uint64
 	var matchLen func(addr types.UnlockHash, bestLen int) int
@@ -45,9 +45,6 @@ func vanity(substr string) {
 			return n
 		}
 	}
-
-	seed := wallet.NewSeed()
-	fmt.Println("Using random seed:", seed)
 
 	var total uint64
 	numCPU := runtime.NumCPU()
