@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"reflect"
 	"strconv"
 	"time"
 	"unsafe"
@@ -18,6 +19,11 @@ import (
 )
 
 func writeJSON(w io.Writer, v interface{}) {
+	// encode nil slices as [] instead of null
+	if val := reflect.ValueOf(v); val.Kind() == reflect.Slice && val.Len() == 0 {
+		w.Write([]byte("[]\n"))
+		return
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "\t")
 	enc.Encode(v)
@@ -32,11 +38,7 @@ type seedServer struct {
 type ResponseAddresses []types.UnlockHash
 
 func (s *seedServer) addressesHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	resp := s.w.Addresses()
-	if resp == nil {
-		resp = ResponseAddresses{}
-	}
-	writeJSON(w, resp)
+	writeJSON(w, s.w.Addresses())
 }
 
 // ResponseAddressesAddr is the response type for the /addresses/:addr endpoint.
@@ -53,7 +55,7 @@ func (s *seedServer) addressesaddrHandlerGET(w http.ResponseWriter, req *http.Re
 		http.Error(w, "No such entry", http.StatusNoContent)
 		return
 	}
-	writeJSON(w, ResponseAddressesAddr(info))
+	writeJSON(w, (*encodedSeedAddressInfo)(unsafe.Pointer(&info)))
 }
 
 // ResponseBalance is the response type for the /balance endpoint.
@@ -69,7 +71,7 @@ type RequestBroadcast []types.Transaction
 func (s *seedServer) broadcastHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	var txnSet RequestBroadcast
 	if err := json.NewDecoder(req.Body).Decode(&txnSet); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Could not parse transaction: "+err.Error(), http.StatusBadRequest)
 		return
 	} else if len(txnSet) == 0 {
 		http.Error(w, "Transaction set is empty", http.StatusBadRequest)
@@ -156,8 +158,7 @@ func (s *seedServer) memosHandlerGET(w http.ResponseWriter, req *http.Request, p
 type ResponseNextAddress types.UnlockHash
 
 func (s *seedServer) nextaddressHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	addr := s.w.NextAddress()
-	writeJSON(w, addr)
+	writeJSON(w, s.w.NextAddress())
 }
 
 // ResponseSeedIndex is the response type for the /seedindex endpoint.
@@ -213,15 +214,17 @@ func (s *seedServer) transactionsHandler(w http.ResponseWriter, req *http.Reques
 	} else {
 		resp = s.w.Transactions(max)
 	}
-	if resp == nil {
-		resp = ResponseTransactions{}
-	}
 	writeJSON(w, resp)
 }
 
 // ResponseTransactionsID is the response type for the /transactions/:id
 // endpoint.
-type ResponseTransactionsID encodedTransaction
+type ResponseTransactionsID struct {
+	Transaction encodedTransaction `json:"transaction"`
+	Inflow      types.Currency     `json:"inflow"`
+	Outflow     types.Currency     `json:"outflow"`
+	FeePerByte  types.Currency     `json:"feePerByte"`
+}
 
 // override transaction marshalling to use camelCase and stringified pubkeys and
 // omit empty fields
@@ -319,7 +322,25 @@ func (s *seedServer) transactionsidHandler(w http.ResponseWriter, req *http.Requ
 		http.Error(w, "Transaction not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, (*ResponseTransactionsID)(unsafe.Pointer(&txn)))
+	// calculate inflow/outflow/fee
+	var inflow, outflow, fee types.Currency
+	for _, sco := range txn.SiacoinOutputs {
+		if s.w.OwnsAddress(sco.UnlockHash) {
+			inflow = inflow.Add(sco.Value)
+		} else {
+			outflow = outflow.Add(sco.Value)
+		}
+	}
+	for _, c := range txn.MinerFees {
+		fee = fee.Add(c)
+	}
+	outflow = outflow.Add(fee)
+	writeJSON(w, ResponseTransactionsID{
+		Transaction: *(*encodedTransaction)(unsafe.Pointer(&txn)),
+		Inflow:      inflow,
+		Outflow:     outflow,
+		FeePerByte:  fee.Div64(uint64(txn.MarshalSiaSize())),
+	})
 }
 
 // A UTXO is an unspent transaction output, ready to be used as a SiacoinInput.
@@ -364,7 +385,7 @@ func (s *seedServer) utxosHandler(w http.ResponseWriter, req *http.Request, _ ht
 				LimboSince: o.LimboSince,
 			}
 		}
-		writeJSON(w, outputs)
+		writeJSON(w, *(*ResponseLimboUTXOs)(unsafe.Pointer(&utxos)))
 	} else {
 		inputs := s.w.ValuedInputs()
 		utxos := make(ResponseUTXOs, len(inputs))

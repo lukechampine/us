@@ -17,8 +17,13 @@ import (
 // A SeedAddressInfo contains the unlock conditions and key index for an
 // address derived from a seed.
 type SeedAddressInfo struct {
-	UnlockConditions types.UnlockConditions `json:"unlockConditions"`
-	KeyIndex         uint64                 `json:"keyIndex"`
+	UnlockConditions types.UnlockConditions
+	KeyIndex         uint64
+}
+
+type encodedSeedAddressInfo struct {
+	UnlockConditions encodedUnlockConditions `json:"unlockConditions"`
+	KeyIndex         uint64                  `json:"keyIndex"`
 }
 
 type watchSeedServer struct {
@@ -39,11 +44,7 @@ func (s *watchSeedServer) getInfo(addr types.UnlockHash) (SeedAddressInfo, bool)
 }
 
 func (s *watchSeedServer) addressesHandlerGET(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	resp := s.w.Addresses()
-	if resp == nil {
-		resp = ResponseAddresses{} // json [] instead of null
-	}
-	writeJSON(w, resp)
+	writeJSON(w, s.w.Addresses())
 }
 
 func (s *watchSeedServer) addressesHandlerPOST(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
@@ -68,7 +69,7 @@ func (s *watchSeedServer) addressesaddrHandlerGET(w http.ResponseWriter, req *ht
 		http.Error(w, "No such entry", http.StatusNoContent)
 		return
 	}
-	writeJSON(w, info)
+	writeJSON(w, (*encodedSeedAddressInfo)(unsafe.Pointer(&info)))
 }
 
 func (s *watchSeedServer) addressesaddrHandlerDELETE(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
