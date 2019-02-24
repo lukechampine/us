@@ -52,7 +52,7 @@ func (s *seedServer) addressesaddrHandlerGET(w http.ResponseWriter, req *http.Re
 	}
 	info, ok := s.w.AddressInfo(addr)
 	if !ok {
-		http.Error(w, "No such entry", http.StatusNoContent)
+		http.Error(w, "No such entry", http.StatusNotFound)
 		return
 	}
 	writeJSON(w, (*encodedSeedAddressInfo)(unsafe.Pointer(&info)))
@@ -102,15 +102,41 @@ func (s *seedServer) broadcastHandler(w http.ResponseWriter, req *http.Request, 
 
 // ResponseConsensus is the response type for the /consensus endpoint.
 type ResponseConsensus struct {
-	Height types.BlockHeight         `json:"height"`
-	CCID   modules.ConsensusChangeID `json:"ccid"`
+	Height types.BlockHeight `json:"height"`
+	CCID   crypto.Hash       `json:"ccid"`
 }
 
 func (s *seedServer) consensusHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	writeJSON(w, ResponseConsensus{
 		Height: s.w.ChainHeight(),
-		CCID:   s.w.ConsensusChangeID(),
+		CCID:   crypto.Hash(s.w.ConsensusChangeID()),
 	})
+}
+
+// A LimboUTXO is an unspent transaction output that may or may not be
+// spendable.
+type LimboUTXO struct {
+	ID         types.SiacoinOutputID `json:"ID"`
+	Value      types.Currency        `json:"value"`
+	UnlockHash types.UnlockHash      `json:"unlockHash"`
+	LimboSince time.Time             `json:"limboSince"`
+}
+
+// ResponseLimboUTXOs is the response type for the /limbo endpoint.
+type ResponseLimboUTXOs []LimboUTXO
+
+func (s *seedServer) limboHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	outputs := s.w.LimboOutputs()
+	utxos := make(ResponseLimboUTXOs, len(outputs))
+	for i, o := range outputs {
+		utxos[i] = LimboUTXO{
+			ID:         o.ID,
+			Value:      o.Value,
+			UnlockHash: o.UnlockHash,
+			LimboSince: o.LimboSince,
+		}
+	}
+	writeJSON(w, *(*ResponseLimboUTXOs)(unsafe.Pointer(&utxos)))
 }
 
 func (s *seedServer) limboHandlerPUT(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
@@ -361,44 +387,18 @@ type encodedUTXOs []struct {
 	UnlockHash       types.UnlockHash        `json:"unlockHash"`
 }
 
-// A LimboUTXO is an unspent transaction output that may or may not be
-// spendable.
-type LimboUTXO struct {
-	ID         types.SiacoinOutputID `json:"ID"`
-	Value      types.Currency        `json:"value"`
-	UnlockHash types.UnlockHash      `json:"unlockHash"`
-	LimboSince time.Time             `json:"limboSince"`
-}
-
-// ResponseLimboUTXOs is the response type for the /utxos?limbo=true endpoint.
-type ResponseLimboUTXOs []LimboUTXO
-
 func (s *seedServer) utxosHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	if req.FormValue("limbo") == "true" {
-		outputs := s.w.LimboOutputs()
-		utxos := make(ResponseLimboUTXOs, len(outputs))
-		for i, o := range outputs {
-			utxos[i] = LimboUTXO{
-				ID:         o.ID,
-				Value:      o.Value,
-				UnlockHash: o.UnlockHash,
-				LimboSince: o.LimboSince,
-			}
+	inputs := s.w.ValuedInputs()
+	utxos := make(ResponseUTXOs, len(inputs))
+	for i, vi := range inputs {
+		utxos[i] = UTXO{
+			ID:               vi.ParentID,
+			Value:            vi.Value,
+			UnlockConditions: vi.UnlockConditions,
+			UnlockHash:       vi.UnlockConditions.UnlockHash(),
 		}
-		writeJSON(w, *(*ResponseLimboUTXOs)(unsafe.Pointer(&utxos)))
-	} else {
-		inputs := s.w.ValuedInputs()
-		utxos := make(ResponseUTXOs, len(inputs))
-		for i, vi := range inputs {
-			utxos[i] = UTXO{
-				ID:               vi.ParentID,
-				Value:            vi.Value,
-				UnlockConditions: vi.UnlockConditions,
-				UnlockHash:       vi.UnlockConditions.UnlockHash(),
-			}
-		}
-		writeJSON(w, *(*encodedUTXOs)(unsafe.Pointer(&utxos)))
 	}
+	writeJSON(w, *(*encodedUTXOs)(unsafe.Pointer(&utxos)))
 }
 
 // NewSeedServer returns an HTTP handler that serves the seed wallet API.
@@ -414,6 +414,7 @@ func NewSeedServer(w *wallet.SeedWallet, tp wallet.TransactionPool) http.Handler
 	mux.POST("/broadcast", s.broadcastHandler)
 	mux.GET("/consensus", s.consensusHandler)
 	mux.PUT("/limbo/:id", s.limboHandlerPUT)
+	mux.GET("/limbo", s.limboHandler)
 	mux.DELETE("/limbo/:id", s.limboHandlerDELETE)
 	mux.PUT("/memos/:txid", s.memosHandlerPUT)
 	mux.GET("/memos/:txid", s.memosHandlerGET)

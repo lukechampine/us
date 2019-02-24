@@ -254,10 +254,10 @@ func TestSeedServer(t *testing.T) {
 	} else if len(txnHistory) != 1 {
 		t.Fatal("transaction should appear in history")
 	}
-	var htx types.Transaction
+	var htx ResponseTransactionsID
 	if err := httpGet(ss, "/transactions/"+txnHistory[0].String(), &htx); err != nil {
 		t.Fatal(err)
-	} else if len(htx.SiacoinOutputs) != 2 {
+	} else if len(htx.Transaction.SiacoinOutputs) != 2 {
 		t.Fatal("transaction should have two outputs")
 	}
 
@@ -314,7 +314,7 @@ func TestSeedServer(t *testing.T) {
 	}
 
 	// instead, they should appear in limbo
-	if err := httpGet(ss, "/utxos?limbo=true", &outputs); err != nil {
+	if err := httpGet(ss, "/limbo", &outputs); err != nil {
 		t.Fatal(err)
 	} else if len(outputs) != 2 {
 		t.Fatal("should have two UTXOs in limbo")
@@ -329,7 +329,7 @@ func TestSeedServer(t *testing.T) {
 	} else if len(outputs) != 1 {
 		t.Fatal("should have one UTXO")
 	}
-	if err := httpGet(ss, "/utxos?limbo=true", &outputs); err != nil {
+	if err := httpGet(ss, "/limbo", &outputs); err != nil {
 		t.Fatal(err)
 	} else if len(outputs) != 1 {
 		t.Fatal("should have one UTXO in limbo")

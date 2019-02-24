@@ -146,7 +146,7 @@ func TestWatchSeedServer(t *testing.T) {
 	}
 
 	// instead, they should appear in limbo
-	if err := httpGet(ss, "/utxos?limbo=true", &outputs); err != nil {
+	if err := httpGet(ss, "/limbo", &outputs); err != nil {
 		t.Fatal(err)
 	} else if len(outputs) != 2 {
 		t.Fatal("should have two UTXOs in limbo, got", len(outputs))
@@ -161,7 +161,7 @@ func TestWatchSeedServer(t *testing.T) {
 	} else if len(outputs) != 1 {
 		t.Fatal("should have one UTXO, got", len(outputs))
 	}
-	if err := httpGet(ss, "/utxos?limbo=true", &outputs); err != nil {
+	if err := httpGet(ss, "/limbo", &outputs); err != nil {
 		t.Fatal(err)
 	} else if len(outputs) != 1 {
 		t.Fatal("should have one UTXO in limbo")
