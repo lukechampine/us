@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io/ioutil"
 	"net/http"
 	"strconv"
 	"unsafe"
@@ -140,6 +141,29 @@ func (s *watchSeedServer) limboHandlerDELETE(w http.ResponseWriter, req *http.Re
 	s.w.MarkSpent(types.SiacoinOutputID(id), false)
 }
 
+func (s *watchSeedServer) memosHandlerPUT(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+	var txid crypto.Hash
+	if err := txid.LoadString(ps.ByName("txid")); err != nil {
+		http.Error(w, "Invalid transaction ID: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		http.Error(w, "Couldn't read memo: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.w.SetMemo(types.TransactionID(txid), body)
+}
+
+func (s *watchSeedServer) memosHandlerGET(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
+	var txid crypto.Hash
+	if err := txid.LoadString(ps.ByName("txid")); err != nil {
+		http.Error(w, "Invalid transaction ID: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Write(s.w.Memo(types.TransactionID(txid)))
+}
+
 func (s *watchSeedServer) transactionsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	max := -1 // all txns
 	if req.FormValue("max") != "" {
@@ -253,6 +277,8 @@ func NewWatchSeedServer(w *wallet.WatchOnlyWallet, tp wallet.TransactionPool) ht
 	mux.GET("/consensus", s.consensusHandler)
 	mux.PUT("/limbo/:id", s.limboHandlerPUT)
 	mux.DELETE("/limbo/:id", s.limboHandlerDELETE)
+	mux.PUT("/memos/:txid", s.memosHandlerPUT)
+	mux.GET("/memos/:txid", s.memosHandlerGET)
 	mux.GET("/transactions", s.transactionsHandler)
 	mux.GET("/transactions/:txid", s.transactionsidHandler)
 	mux.GET("/utxos", s.utxosHandler)
