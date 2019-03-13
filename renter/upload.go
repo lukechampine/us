@@ -122,11 +122,11 @@ func (sb *SectorBuilder) Slices() []SectorSlice {
 	return sb.slices
 }
 
-// A ShardUploader wraps a proto.Uploader to provide SectorSlice-based data
+// A ShardUploader wraps a proto.Session to provide SectorSlice-based data
 // storage, transparently encrypting and checksumming all data before
 // transferring it to the host.
 type ShardUploader struct {
-	Uploader *proto.Uploader
+	Uploader *proto.Session
 	Shard    *Shard
 	Key      EncryptionKey
 	Sector   SectorBuilder
@@ -135,7 +135,10 @@ type ShardUploader struct {
 // Upload uploads u.Sector, writing the resulting SectorSlice(s) to u.Shard,
 // starting at offset chunkIndex. Upload does not call Reset on u.Sector.
 func (u *ShardUploader) Upload(chunkIndex int64) error {
-	_, err := u.Uploader.Upload(u.Sector.Finish())
+	err := u.Uploader.Write([]renterhost.RPCWriteAction{{
+		Type: renterhost.RPCWriteActionAppend,
+		Data: u.Sector.Finish()[:],
+	}})
 	if err != nil {
 		return err
 	}
@@ -194,7 +197,7 @@ func NewShardUploader(m *MetaFile, key EncryptionKey, contract *Contract, hkr Ho
 		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
 	}
 	// create uploader
-	u, err := proto.NewUploader(hostIP, contract, currentHeight)
+	u, err := proto.NewSession(hostIP, contract, currentHeight)
 	if err != nil {
 		sf.Close()
 		return nil, errors.Wrapf(err, "%v: could not initiate upload protocol with host", hostKey.ShortKey())

@@ -2,12 +2,10 @@ package renterutil
 
 import (
 	"context"
+	"io/ioutil"
 	"runtime"
 	"sync"
 	"time"
-
-	"gitlab.com/NebulousLabs/Sia/modules"
-	"gitlab.com/NebulousLabs/fastrand"
 
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
@@ -15,6 +13,8 @@ import (
 	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/modules"
+	"gitlab.com/NebulousLabs/fastrand"
 )
 
 // A CheckupResult contains the result of a host checkup.
@@ -71,7 +71,7 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 
 		// create downloader
 		start := time.Now()
-		d, err := proto.NewDownloader(hostIP, contract)
+		s, err := proto.NewSession(hostIP, contract, 0)
 		res.Latency = time.Since(start)
 		if err != nil {
 			res.Error = err
@@ -79,7 +79,7 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 			continue
 		}
 		h := renter.ShardDownloader{
-			Downloader: d,
+			Downloader: s,
 			Slices:     slices,
 			Key:        m.EncryptionKey(i),
 		}
@@ -89,7 +89,7 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 		start = time.Now()
 		data, err := h.DownloadAndDecrypt(chunk)
 		bandTime := time.Since(start)
-		d.Close()
+		h.Close()
 		if err != nil {
 			res.Error = errors.Wrap(err, "could not download slice")
 			results <- res
@@ -126,12 +126,13 @@ func CheckupContract(contract *renter.Contract, hkr renter.HostKeyResolver) Chec
 
 	// create downloader
 	start := time.Now()
-	d, err := proto.NewDownloader(hostIP, contract)
+	s, err := proto.NewSession(hostIP, contract, 0)
 	res.Latency = time.Since(start)
 	if err != nil {
 		res.Error = errors.Wrap(err, "could not initiate download protocol")
 		return res
 	}
+	defer s.Close()
 
 	// download a random sector
 	root, err := contract.SectorRoot(fastrand.Intn(contract.NumSectors()))
@@ -139,11 +140,13 @@ func CheckupContract(contract *renter.Contract, hkr renter.HostKeyResolver) Chec
 		res.Error = errors.Wrap(err, "could not get a sector to test")
 		return res
 	}
-	var sector [renterhost.SectorSize]byte
 	start = time.Now()
-	err = d.Sector(&sector, root)
+	err = s.Read(ioutil.Discard, []renterhost.RPCReadRequestSection{{
+		MerkleRoot: root,
+		Offset:     0,
+		Length:     renterhost.SectorSize,
+	}})
 	bandTime := time.Since(start)
-	d.Close()
 	if err != nil {
 		res.Error = errors.Wrap(err, "could not download sector")
 		return res

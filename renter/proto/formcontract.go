@@ -22,10 +22,11 @@ const (
 // FormContract forms a contract with a host. The resulting contract will have
 // renterPayout coins in the renter output.
 func FormContract(w Wallet, tpool TransactionPool, key ContractKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
-	s, err := NewUnlockedSession(host, 0)
+	s, err := NewUnlockedSession(host.NetAddress, host.PublicKey, 0)
 	if err != nil {
 		return ContractRevision{}, err
 	}
+	s.host = host
 	defer s.Close()
 	return s.FormContract(w, tpool, key, renterPayout, startHeight, endHeight)
 }
@@ -184,7 +185,12 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ContractKey,
 		NewMissedProofOutputs: fc.MissedProofOutputs,
 		NewUnlockHash:         fc.UnlockHash,
 	}
-	renterRevisionSig := revisionSignature(initRevision, key)
+	renterRevisionSig := types.TransactionSignature{
+		ParentID:       crypto.Hash(initRevision.ParentID),
+		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
+		PublicKeyIndex: 0,
+		Signature:      key.SignHash(crypto.HashObject(initRevision)),
+	}
 
 	// Send signatures.
 	renterSigs := &renterhost.RPCFormContractSignatures{

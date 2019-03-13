@@ -1,6 +1,7 @@
 package renterutil
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -288,7 +289,7 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 	})
 
 	// migrate each old-new pair
-	var sector [renterhost.SectorSize]byte
+	var sectorBuf bytes.Buffer
 	for i := range oldhosts {
 		oldHost := oldhosts[i]
 		newHost := newhosts[i]
@@ -298,7 +299,12 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 				return
 			}
 			// download a sector
-			err := oldHost.Downloader.Sector(&sector, s.MerkleRoot)
+			sectorBuf.Reset()
+			err := oldHost.Downloader.Read(&sectorBuf, []renterhost.RPCReadRequestSection{{
+				MerkleRoot: s.MerkleRoot,
+				Offset:     0,
+				Length:     renterhost.SectorSize,
+			}})
 			if err != nil {
 				op.sendUpdate(MigrateSkipUpdate{Host: oldHost.HostKey(), Err: err})
 				total -= int64(len(oldHost.Slices[chunkIndex:])) * renterhost.SectorSize
@@ -306,7 +312,11 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 			}
 
 			// upload the sector to the new host
-			if _, err := newHost.Uploader.Upload(&sector); err != nil {
+			err = newHost.Uploader.Write([]renterhost.RPCWriteAction{{
+				Type: renterhost.RPCWriteActionAppend,
+				Data: sectorBuf.Bytes(),
+			}})
+			if err != nil {
 				op.sendUpdate(MigrateSkipUpdate{Host: oldHost.HostKey(), Err: err})
 				total -= int64(len(oldHost.Slices[chunkIndex:])) * renterhost.SectorSize
 				break

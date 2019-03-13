@@ -399,7 +399,7 @@ type (
 
 	// RPCReadRequestSection is a section requested in RPCReadRequest.
 	RPCReadRequestSection struct {
-		MerkleRoot [32]byte
+		MerkleRoot crypto.Hash
 		Offset     uint32
 		Length     uint32
 	}

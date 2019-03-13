@@ -6,13 +6,14 @@ import (
 	"net"
 	"time"
 
+	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
+	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
+	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/hostdb"
-	"lukechampine.com/us/renterhost"
 )
 
 // ErrInvalidMerkleProof is returned by various RPCs when the host supplies an
@@ -33,6 +34,19 @@ type Session struct {
 	lastDStats DownloadStats
 	lastUStats UploadStats
 }
+
+// HostKey returns the public key of the host.
+func (s *Session) HostKey() hostdb.HostPublicKey { return s.host.PublicKey }
+
+// DialStats returns the metrics of the initial connection to the host.
+func (s *Session) DialStats() DialStats { return s.dialStats }
+
+// LastDownloadStats returns the metrics of the most recent successful
+// download.
+func (s *Session) LastDownloadStats() DownloadStats { return s.lastDStats }
+
+// LastUploadStats returns the metrics of the most recent successful upload.
+func (s *Session) LastUploadStats() UploadStats { return s.lastUStats }
 
 func (s *Session) extendDeadline(d time.Duration) {
 	_ = s.conn.SetDeadline(time.Now().Add(d))
@@ -121,7 +135,6 @@ func (s *Session) SectorRoots(offset, n int) ([]crypto.Hash, error) {
 	// construct new revision
 	rev.NewRevisionNumber++
 	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
-	renterSig := revisionSignature(rev, s.contract.Key())
 
 	s.extendDeadline(60*time.Second + time.Duration(bandwidth)/time.Microsecond)
 	req := &renterhost.RPCSectorRootsRequest{
@@ -131,14 +144,14 @@ func (s *Session) SectorRoots(offset, n int) ([]crypto.Hash, error) {
 		NewRevisionNumber:    rev.NewRevisionNumber,
 		NewValidProofValues:  newValid,
 		NewMissedProofValues: newMissed,
-		Signature:            renterSig.Signature,
+		Signature:            s.contract.Key().SignHash(crypto.HashObject(rev)),
 	}
 	var resp renterhost.RPCSectorRootsResponse
 	if err := s.call(renterhost.RPCSectorRootsID, req, &resp); err != nil {
 		return nil, err
 	}
 	sigs := s.contract.Revision().Signatures
-	sigs[0] = renterSig
+	sigs[0].Signature = req.Signature
 	sigs[1].Signature = resp.Signature
 	if err := s.contract.SyncWithHost(rev, sigs[:]); err != nil {
 		return nil, err
@@ -177,7 +190,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	// construct new revision
 	rev.NewRevisionNumber++
 	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
-	renterSig := revisionSignature(rev, s.contract.Key())
+	renterSig := s.contract.Key().SignHash(crypto.HashObject(rev))
 
 	// send request
 	s.extendDeadline(60*time.Second + time.Duration(bandwidth)/time.Microsecond)
@@ -188,7 +201,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 		NewRevisionNumber:    rev.NewRevisionNumber,
 		NewValidProofValues:  newValid,
 		NewMissedProofValues: newMissed,
-		Signature:            renterSig.Signature,
+		Signature:            renterSig,
 	}
 	if err := s.sess.WriteRequest(renterhost.RPCReadID, req); err != nil {
 		return err
@@ -237,7 +250,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	}
 
 	sigs := s.contract.Revision().Signatures
-	sigs[0] = renterSig
+	sigs[0].Signature = renterSig
 	sigs[1].Signature = hostSig
 	if err := s.contract.SyncWithHost(rev, sigs[:]); err != nil {
 		return err
@@ -333,7 +346,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) error {
 	rev.NewRevisionNumber++
 	rev.NewFileSize = newFileSize
 	renterSig := &renterhost.RPCWriteResponse{
-		Signature: revisionSignature(rev, s.contract.Key()).Signature,
+		Signature: s.contract.Key().SignHash(crypto.HashObject(rev)),
 	}
 	if err := s.sess.WriteResponse(renterSig, nil); err != nil {
 		return err
@@ -360,33 +373,39 @@ func (s *Session) Close() error {
 
 // NewSession initiates a new renter-host protocol session with the specified
 // host. The supplied contract will be locked and synchronized with the host.
-func NewSession(host hostdb.ScannedHost, contract ContractEditor, currentHeight types.BlockHeight) (*Session, error) {
-	s, err := NewUnlockedSession(host, currentHeight)
+// The host's settings will also be requested.
+func NewSession(hostIP modules.NetAddress, contract ContractEditor, currentHeight types.BlockHeight) (*Session, error) {
+	s, err := NewUnlockedSession(hostIP, contract.Revision().HostKey(), currentHeight)
 	if err != nil {
 		return nil, err
 	}
 	if err := s.Lock(contract); err != nil {
 		return nil, err
 	}
+	if _, err := s.Settings(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
 // NewUnlockedSession initiates a new renter-host protocol session with the specified
-// host, without locking an associated contract.
-func NewUnlockedSession(host hostdb.ScannedHost, currentHeight types.BlockHeight) (*Session, error) {
-	conn, err := net.Dial("tcp", string(host.NetAddress))
+// host, without locking an associated contract or requesting the host's settings.
+func NewUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (*Session, error) {
+	conn, err := net.Dial("tcp", string(hostIP))
 	if err != nil {
 		return nil, err
 	}
-	s, err := renterhost.NewRenterSession(conn, host.PublicKey)
+	s, err := renterhost.NewRenterSession(conn, hostKey)
 	if err != nil {
 		return nil, err
 	}
 	return &Session{
 		sess:   s,
 		conn:   conn,
-		host:   host,
 		height: currentHeight,
+		host: hostdb.ScannedHost{
+			PublicKey: hostKey,
+		},
 	}, nil
 }
 

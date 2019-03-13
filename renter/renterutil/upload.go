@@ -187,7 +187,7 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 	rsc := renter.NewRSCode(minShards, len(contracts))
 
 	// connect to hosts
-	var hosts []*proto.Uploader
+	var hosts []*proto.Session
 	for hostKey, contract := range contracts {
 		if op.Canceled() {
 			op.die(ErrCanceled)
@@ -198,7 +198,7 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 			op.die(errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey()))
 			return
 		}
-		u, err := proto.NewUploader(hostIP, contract, currentHeight)
+		u, err := proto.NewSession(hostIP, contract, currentHeight)
 		if err != nil {
 			op.die(errors.Wrapf(err, "could not initiate upload to %v", hostKey.ShortKey()))
 			return
@@ -410,7 +410,10 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 					// upload shard to host
 					host := hosts[shardIndex]
 					sb := sectors[shardIndex]
-					_, err := host.Upload(sb.Finish())
+					err := host.Write([]renterhost.RPCWriteAction{{
+						Type: renterhost.RPCWriteActionAppend,
+						Data: sb.Finish()[:],
+					}})
 					if err != nil {
 						return errors.Wrap(err, "could not upload sector")
 					}

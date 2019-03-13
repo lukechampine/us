@@ -6,10 +6,10 @@ import (
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/modules"
-	"golang.org/x/crypto/blake2b"
 )
 
 // ErrBadChecksum indicates that a piece of sector data failed checksum
@@ -22,10 +22,10 @@ type HostKeyResolver interface {
 	ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAddress, error)
 }
 
-// A ShardDownloader wraps a proto.Downloader to provide SectorSlice-based
+// A ShardDownloader wraps a proto.Session to provide SectorSlice-based
 // data retrieval, transparently decrypting and validating the received data.
 type ShardDownloader struct {
-	Downloader *proto.Downloader
+	Downloader *proto.Session
 	Slices     []SectorSlice
 	Key        EncryptionKey
 	buf        bytes.Buffer
@@ -44,11 +44,15 @@ func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 	// resize buffer and download
 	d.buf.Reset()
 	d.buf.Grow(int(length))
-	data := d.buf.Bytes()[:length]
-	err := d.Downloader.PartialSector(data, s.MerkleRoot, offset)
+	err := d.Downloader.Read(&d.buf, []renterhost.RPCReadRequestSection{{
+		MerkleRoot: s.MerkleRoot,
+		Offset:     offset,
+		Length:     length,
+	}})
 	if err != nil {
 		return nil, err
 	}
+	data := d.buf.Bytes()
 	// decrypt segments
 	//
 	// NOTE: to avoid reusing the same segment index for multiple encryptions,
@@ -56,10 +60,6 @@ func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 	// SectorBuilder.Append.
 	startIndex := uint64(chunkIndex * merkle.SegmentsPerSector)
 	d.Key.DecryptSegments(data, data, startIndex)
-	// validate checksum
-	if blake2b.Sum256(data) != s.Checksum {
-		return nil, ErrBadChecksum
-	}
 	return data, nil
 }
 
@@ -88,7 +88,7 @@ func NewShardDownloader(m *MetaFile, contract *Contract, hkr HostKeyResolver) (*
 		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
 	}
 	// create downloader
-	d, err := proto.NewDownloader(hostIP, contract)
+	d, err := proto.NewSession(hostIP, contract, 0)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%v: could not initiate download protocol with host", hostKey.ShortKey())
 	}

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
@@ -13,11 +14,15 @@ import (
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host.
 func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
-	s, err := NewSession(host, contract, 0)
+	s, err := NewUnlockedSession(host.NetAddress, host.PublicKey, 0)
 	if err != nil {
 		return ContractRevision{}, err
 	}
+	s.host = host
 	defer s.Close()
+	if err := s.Lock(contract); err != nil {
+		return ContractRevision{}, err
+	}
 	return s.RenewContract(w, tpool, contract, renterPayout, startHeight, endHeight)
 }
 
@@ -170,7 +175,12 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, contract Contra
 		NewMissedProofOutputs: fc.MissedProofOutputs,
 		NewUnlockHash:         fc.UnlockHash,
 	}
-	renterRevisionSig := revisionSignature(initRevision, contract.Key())
+	renterRevisionSig := types.TransactionSignature{
+		ParentID:       crypto.Hash(initRevision.ParentID),
+		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
+		PublicKeyIndex: 0,
+		Signature:      contract.Key().SignHash(crypto.HashObject(initRevision)),
+	}
 
 	// Send signatures.
 	renterSigs := &renterhost.RPCFormContractSignatures{

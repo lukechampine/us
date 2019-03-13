@@ -238,7 +238,7 @@ func downloadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet,
 }
 
 type lockedDownloader struct {
-	d  *proto.Downloader
+	d  *proto.Session
 	mu *sync.Mutex
 }
 
@@ -256,7 +256,7 @@ func (set *DownloaderSet) Close() error {
 	return nil
 }
 
-func (set *DownloaderSet) acquire(host hostdb.HostPublicKey) (*proto.Downloader, bool) {
+func (set *DownloaderSet) acquire(host hostdb.HostPublicKey) (*proto.Session, bool) {
 	ld, ok := set.downloaders[host]
 	if !ok {
 		return nil, false
@@ -281,7 +281,7 @@ func NewDownloaderSet(contracts renter.ContractSet, hkr renter.HostKeyResolver) 
 			// TODO: skip instead?
 			return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
 		}
-		d, err := proto.NewDownloader(hostIP, contract)
+		d, err := proto.NewSession(hostIP, contract, 0)
 		if err != nil {
 			// TODO: skip instead?
 			return nil, err
