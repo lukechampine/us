@@ -13,6 +13,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"golang.org/x/crypto/ed25519"
 )
 
 // A HostPublicKey is the public key announced on the blockchain by a host. A
@@ -57,6 +58,12 @@ func (hpk HostPublicKey) Ed25519() (cpk crypto.PublicKey) {
 func (hpk HostPublicKey) SiaPublicKey() (spk types.SiaPublicKey) {
 	spk.LoadString(string(hpk))
 	return
+}
+
+// VerifyHash verifies that hash was signed by the public key.
+func (hpk HostPublicKey) VerifyHash(hash crypto.Hash, sig []byte) bool {
+	pk, _ := hex.DecodeString(hpk.Key())
+	return ed25519.Verify(ed25519.PublicKey(pk), hash[:], sig)
 }
 
 // HostSettings are the settings reported by a host.

@@ -7,6 +7,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"golang.org/x/crypto/ed25519"
 	"lukechampine.com/us/hostdb"
 
 	"github.com/pkg/errors"
@@ -39,17 +40,18 @@ type ContractKey interface {
 }
 
 // Ed25519ContractKey implements ContractKey with an ed25519 keypair.
-type Ed25519ContractKey crypto.SecretKey
+type Ed25519ContractKey ed25519.PrivateKey
 
 // SignHash implements ContractKey.
 func (e Ed25519ContractKey) SignHash(hash crypto.Hash) []byte {
-	sig := crypto.SignHash(hash, crypto.SecretKey(e))
-	return sig[:]
+	return ed25519.Sign(ed25519.PrivateKey(e), hash[:])
 }
 
 // PublicKey implements ContractKey.
 func (e Ed25519ContractKey) PublicKey() types.SiaPublicKey {
-	return types.Ed25519PublicKey(crypto.SecretKey(e).PublicKey())
+	var pk crypto.PublicKey
+	copy(pk[:], e[32:])
+	return types.Ed25519PublicKey(pk)
 }
 
 // A ContractEditor provides an interface for viewing and updating a file
