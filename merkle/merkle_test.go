@@ -97,7 +97,7 @@ func TestSectorRoot(t *testing.T) {
 	}
 
 	// SectorRoot should not allocate
-	allocs := testing.AllocsPerRun(10, func() {
+	allocs := testing.AllocsPerRun(5, func() {
 		_ = SectorRoot(&sector)
 	})
 	if allocs > 0 {
@@ -260,6 +260,7 @@ func TestBuildVerifyProof(t *testing.T) {
 	// test some known proofs
 	var sector [renterhost.SectorSize]byte
 	fastrand.Read(sector[:])
+	sectorRoot := SectorRoot(&sector)
 	segmentRoots := make([]crypto.Hash, SegmentsPerSector)
 	for i := range segmentRoots {
 		segmentRoots[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
@@ -275,7 +276,7 @@ func TestBuildVerifyProof(t *testing.T) {
 	for i := range proof {
 		hash = nodeHash(hash, proof[i])
 	}
-	if hash != SectorRoot(&sector) {
+	if hash != sectorRoot {
 		t.Error("BuildProof constructed an incorrect proof for the first segment")
 	} else if !VerifyProof(proof, sector[:64], 0, 1, hash) {
 		t.Error("VerifyProof failed to verify a known correct proof")
@@ -286,7 +287,7 @@ func TestBuildVerifyProof(t *testing.T) {
 	for i := range proof {
 		hash = nodeHash(proof[len(proof)-i-1], hash)
 	}
-	if hash != SectorRoot(&sector) {
+	if hash != sectorRoot {
 		t.Error("BuildProof constructed an incorrect proof for the last segment")
 	} else if !VerifyProof(proof, sector[len(sector)-64:], SegmentsPerSector-1, SegmentsPerSector, hash) {
 		t.Error("VerifyProof failed to verify a known correct proof")
@@ -301,7 +302,7 @@ func TestBuildVerifyProof(t *testing.T) {
 	for i := 4; i < len(proof); i++ {
 		hash = nodeHash(hash, proof[i])
 	}
-	if hash != SectorRoot(&sector) {
+	if hash != sectorRoot {
 		t.Error("BuildProof constructed an incorrect proof for a middle segment")
 	} else if !VerifyProof(proof, sector[10*64:11*64], 10, 11, hash) {
 		t.Error("VerifyProof failed to verify a known correct proof")
@@ -318,7 +319,7 @@ func TestBuildVerifyProof(t *testing.T) {
 	for i := len(proof) / 2; i < len(proof); i++ {
 		right = nodeHash(right, proof[i])
 	}
-	if nodeHash(left, right) != SectorRoot(&sector) {
+	if nodeHash(left, right) != sectorRoot {
 		t.Error("BuildProof constructed an incorrect proof for worst-case inputs")
 	} else if !VerifyProof(proof, sector[midl*64:midr*64], midl, midr, hash) {
 		t.Error("VerifyProof failed to verify a known correct proof")
@@ -329,10 +330,10 @@ func TestBuildVerifyProof(t *testing.T) {
 		start := fastrand.Intn(SegmentsPerSector - 1)
 		end := start + fastrand.Intn(SegmentsPerSector-start)
 		proof := BuildProof(&sector, start, end, nil)
-		if !VerifyProof(proof, sector[start*SegmentSize:end*SegmentSize], start, end, SectorRoot(&sector)) {
+		if !VerifyProof(proof, sector[start*SegmentSize:end*SegmentSize], start, end, sectorRoot) {
 			t.Errorf("BuildProof constructed an incorrect proof for range %v-%v", start, end)
 		}
-		if !VerifyProofWithRoots(proof, segmentRoots[start:end], start, end, SectorRoot(&sector)) {
+		if !VerifyProofWithRoots(proof, segmentRoots[start:end], start, end, sectorRoot) {
 			t.Errorf("VerifyProofWithRoots failed to verify known correct proof")
 		}
 	}
@@ -363,15 +364,15 @@ func TestBuildVerifyProof(t *testing.T) {
 		t.Error("VerifyProof verified an incorrect proof")
 	}
 
-	allocs := testing.AllocsPerRun(10, func() {
-		_ = BuildProof(&sector, SegmentsPerSector-1, SegmentsPerSector, nil)
+	allocs := testing.AllocsPerRun(5, func() {
+		_ = BuildProof(&sector, 10, SegmentsPerSector-10, nil)
 	})
 	if allocs > 1 {
 		t.Error("expected BuildProof to allocate one time, got", allocs)
 	}
 
 	proof = BuildProof(&sector, midl, midr, nil)
-	allocs = testing.AllocsPerRun(10, func() {
+	allocs = testing.AllocsPerRun(5, func() {
 		_ = VerifyProof(proof, sector[midl*64:midr*64], midl, midr, hash)
 	})
 	if allocs > 0 {
