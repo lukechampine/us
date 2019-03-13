@@ -12,6 +12,40 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
+func TestProofSize(t *testing.T) {
+	tests := []struct {
+		n, start, end int
+		exp           int
+	}{
+		{9, 8, 9, 1},
+		{10, 8, 9, 2},
+		{10, 8, 10, 1},
+		{11, 8, 9, 3},
+		{11, 8, 10, 2},
+		{11, 8, 11, 1},
+		{12, 8, 9, 3},
+		{12, 8, 10, 2},
+		{12, 8, 11, 2},
+		{12, 8, 12, 1},
+		{13, 8, 9, 4},
+		{13, 8, 10, 3},
+		{13, 8, 11, 3},
+		{13, 8, 12, 2},
+		{13, 8, 13, 1},
+		{14, 8, 9, 4},
+		{14, 8, 10, 3},
+		{14, 8, 11, 3},
+		{14, 8, 12, 2},
+		{14, 8, 13, 2},
+		{14, 8, 14, 1},
+	}
+	for _, test := range tests {
+		if s := ProofSize(test.n, test.start, test.end); s != test.exp {
+			t.Errorf("expected ProofSize(%v, %v, %v) == %v, got %v", test.n, test.start, test.end, test.exp, s)
+		}
+	}
+}
+
 func leafHash(seg []byte) crypto.Hash {
 	return blake2b.Sum256(append([]byte{leafHashPrefix}, seg...))
 }

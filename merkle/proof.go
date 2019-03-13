@@ -7,12 +7,24 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
-func proofSize(start, end int) int {
-	// NOTE: I realize this is a bit magical (in a bad way), but it's too
-	// pretty for me not to use it. If you have some spare time, try to figure
-	// out why it works!
-	zerosCount := func(x uint) int { return bits.OnesCount(^x & (SegmentsPerSector - 1)) }
-	return bits.OnesCount(uint(start)) + zerosCount(uint(end-1))
+// ProofSize returns the size of a Merkle proof for the leaf range [start, end)
+// within a tree containing n leaves.
+func ProofSize(n, start, end int) int {
+	// In a binary tree, the path from a leaf to the root is encoded in the
+	// binary representation of the leaf index: 1s correspond to "left"
+	// branches, and 0s correspond to "right" branches. Thus, for balanced
+	// trees, the proof size is the number of 1s in start plus the number of 0s
+	// in (end-1). However, if the tree is not balanced, some "right" branches
+	// will be missing for certain indices.
+	//
+	// To compensate for this, we compare the "path" of (end-1) to the "path" of
+	// (n-1), moving from leaves to root. After the paths converge, we know that
+	// any subsequent "right" branches are not actually present in the tree and
+	// should be ignored.
+	leftHashes := bits.OnesCount(uint(start))
+	pathMask := 1<<uint(bits.Len(uint((end-1)^(n-1)))) - 1
+	rightHashes := bits.OnesCount(^uint(end-1) & uint(pathMask))
+	return leftHashes + rightHashes
 }
 
 // BuildProof constructs a proof for the segment range [start, end). If a non-
@@ -48,7 +60,7 @@ func BuildProof(sector *[renterhost.SectorSize]byte, start, end int, precalc fun
 	// it's a recursive function with side effects (appending to proof), but
 	// this is the simplest way I was able to implement it. Namely, it has the
 	// important advantage of being symmetrical to the Verify operation.
-	proof := make([]crypto.Hash, 0, proofSize(start, end))
+	proof := make([]crypto.Hash, 0, ProofSize(SegmentsPerSector, start, end))
 	var rec func(int, int)
 	rec = func(i, j int) {
 		if i >= start && j <= end {
@@ -77,7 +89,7 @@ func BuildProof(sector *[renterhost.SectorSize]byte, start, end int, precalc fun
 // verifyProof verifies a proof produced by BuildProof. This is a generic
 // version, used by VerifyProof and VerifyProofWithRoots.
 func verifyProof(proof []crypto.Hash, subtreeRoot func(i, j int) crypto.Hash, start, end int, root crypto.Hash) bool {
-	if len(proof) != proofSize(start, end) {
+	if len(proof) != ProofSize(SegmentsPerSector, start, end) {
 		return false
 	}
 
