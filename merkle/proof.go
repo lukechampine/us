@@ -170,3 +170,13 @@ func VerifyProofWithRoots(proof []crypto.Hash, segmentRoots []crypto.Hash, start
 	}
 	return verifyProof(proof, subtreeRoot, start, end, root)
 }
+
+// DiffProofSize returns the size of a diff proof for the specified actions.
+func DiffProofSize(actions []renterhost.RPCWriteAction, numLeaves uint64) int {
+	return 128
+}
+
+// VerifyDiffProof verifies a proof produced by BuildDiffProof.
+func VerifyDiffProof(actions []renterhost.RPCWriteAction, numLeaves uint64, proofHashes, leafHashes []crypto.Hash, oldRoot, newRoot crypto.Hash) bool {
+	return false
+}

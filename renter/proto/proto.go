@@ -9,6 +9,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/types"
 	"golang.org/x/crypto/ed25519"
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
 )
@@ -33,9 +34,9 @@ type (
 	}
 )
 
-// A ContractKey is a keypair that can sign revisions.
+// A ContractKey is a renterhost.HashSigner that knows its public key.
 type ContractKey interface {
-	SignHash(hash crypto.Hash) []byte
+	renterhost.HashSigner
 	PublicKey() types.SiaPublicKey
 }
 
@@ -76,11 +77,11 @@ type ContractEditor interface {
 	// contract revision. SyncWithHost returns ErrDesynchronized iff the
 	// contract has permanently desynchronized with the host and recovery is
 	// impossible.
-	SyncWithHost(rev types.FileContractRevision, hostSignatures []types.TransactionSignature) error
+	SyncWithHost(rev types.FileContractRevision, sigs []types.TransactionSignature) error
 }
 
 // A ContractRevision contains the most recent revision to a file contract and
-// the secret key used to sign it.
+// its signatures.
 type ContractRevision struct {
 	Revision   types.FileContractRevision
 	Signatures [2]types.TransactionSignature
