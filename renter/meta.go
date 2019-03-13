@@ -26,7 +26,7 @@ import (
 const (
 	// MetaFileVersion is the current version of the metafile format. It is
 	// incremented after each change to the format.
-	MetaFileVersion = 1
+	MetaFileVersion = 2
 
 	indexFilename = "index"
 )
@@ -73,50 +73,44 @@ func (s *keySeed) UnmarshalJSON(b []byte) error {
 // An EncryptionKey can encrypt and decrypt segments, where each segment is a
 // []byte with len merkle.SegmentSize.
 type EncryptionKey interface {
-	EncryptSegments(ciphertext, plaintext []byte, startIndex uint64)
-	DecryptSegments(plaintext, ciphertext []byte, startIndex uint64)
+	EncryptSegments(ciphertext, plaintext []byte, startIndex uint64, revision uint32)
+	DecryptSegments(plaintext, ciphertext []byte, startIndex uint64, revision uint32)
 }
 
 // chachaKey implements EncryptionKey using ChaCha20.
 type chachaKey struct {
-	*chacha.Cipher
+	key   [32]byte
+	nonce [chacha.NonceSize]byte
 }
 
-func (c chachaKey) EncryptSegments(ciphertext, plaintext []byte, startIndex uint64) {
+func (k *chachaKey) EncryptSegments(ciphertext, plaintext []byte, startIndex uint64, revision uint32) {
 	if len(plaintext)%merkle.SegmentSize != 0 {
 		panic("plaintext must be a multiple of segment size")
 	} else if len(plaintext) != len(ciphertext) {
 		panic("plaintext and ciphertext must have same length")
 	}
+	// use revision as the nonce and startIndex as the counter
+	binary.LittleEndian.PutUint32(k.nonce[:], revision)
+	c, err := chacha.NewCipher(k.nonce[:], k.key[:], 20)
+	if err != nil {
+		panic(err)
+	}
 	c.SetCounter(startIndex)
 	c.XORKeyStream(ciphertext, plaintext)
 }
-func (c chachaKey) DecryptSegments(plaintext, ciphertext []byte, startIndex uint64) {
-	c.EncryptSegments(plaintext, ciphertext, startIndex)
+
+func (k *chachaKey) DecryptSegments(plaintext, ciphertext []byte, startIndex uint64, revision uint32) {
+	k.EncryptSegments(plaintext, ciphertext, startIndex, revision)
 }
 
 // EncryptionKey returns the encryption key used to encrypt sectors in a given
 // shard.
 func (m *MetaIndex) EncryptionKey(shardIndex int) EncryptionKey {
 	// We derive the per-shard encryption key as H(masterKey|shardIndex).
-	// Since there's no danger of reuse, we can use an arbitrary nonce.
-	//
-	// NOTE: as far as I can tell, this isn't any more secure than using
-	// m.MasterKey directly with shardIndex as the nonce. Deriving an entirely
-	// separate key only prevents an attacker who knows one key from deriving
-	// the others. But as long as ChaCha20 remains secure, this scenario is
-	// highly unlikely; protecting the master key is all that really matters.
-	// Still, I don't see any harm in deriving a separate key, and it's what
-	// Sia has always done, so we'll follow suit.
 	b := make([]byte, len(m.MasterKey)+8)
 	copy(b, m.MasterKey[:])
 	binary.LittleEndian.PutUint64(b[len(m.MasterKey):], uint64(shardIndex))
-	key := blake2b.Sum256(b)
-	c, err := chacha.NewCipher(make([]byte, chacha.NonceSize), key[:], 20)
-	if err != nil {
-		panic(err)
-	}
-	return chachaKey{c}
+	return &chachaKey{key: blake2b.Sum256(b)}
 }
 
 // MaxChunkSize returns the maximum amount of file data that can fit into a

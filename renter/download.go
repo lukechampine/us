@@ -59,7 +59,7 @@ func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 	// we use chunkIndex * SegmentsPerSector as the starting index. See
 	// SectorBuilder.Append.
 	startIndex := uint64(chunkIndex * merkle.SegmentsPerSector)
-	d.Key.DecryptSegments(data, data, startIndex)
+	d.Key.DecryptSegments(data, data, startIndex, 0)
 	return data, nil
 }
 

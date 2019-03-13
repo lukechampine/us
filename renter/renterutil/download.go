@@ -1,12 +1,12 @@
 package renterutil
 
 import (
+	"hash/crc32"
 	"io"
 	"os"
 	"strings"
 	"sync"
 
-	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
@@ -56,7 +56,7 @@ func verifyFileContents(m *renter.MetaFile, f io.Reader) (offset int64, err erro
 		rsc.Encode(buf, dataShards)
 		chunkOk := true
 		for i, shard := range dataShards {
-			chunkOk = chunkOk && (blake2b.Sum256(shard) == slices[i][chunkIndex].Checksum)
+			chunkOk = chunkOk && (crc32.ChecksumIEEE(shard) == slices[i][chunkIndex].Checksum)
 		}
 		if !chunkOk {
 			break

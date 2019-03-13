@@ -1,10 +1,11 @@
 package renter
 
 import (
+	"hash/crc32"
+
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
-	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter/proto"
@@ -67,13 +68,13 @@ func (sb *SectorBuilder) Append(data []byte, key EncryptionKey, chunkIndex int64
 	// 280 TB. In the average case, all but the final sector will be "full",
 	// so the waste is negligible.)
 	startIndex := uint64(chunkIndex * merkle.SegmentsPerSector)
-	key.EncryptSegments(sectorSlice, sectorSlice, startIndex)
+	key.EncryptSegments(sectorSlice, sectorSlice, startIndex, 0)
 
 	// update sectorLen and record the new slice
 	sb.slices = append(sb.slices, SectorSlice{
 		SegmentIndex: uint32(sb.sectorLen / merkle.SegmentSize),
 		NumSegments:  uint32(len(sectorSlice) / merkle.SegmentSize),
-		Checksum:     blake2b.Sum256(data),
+		Checksum:     crc32.ChecksumIEEE(data),
 	})
 	sb.sectorLen += len(sectorSlice)
 }
