@@ -7,7 +7,6 @@ import (
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
 	"golang.org/x/crypto/blake2b"
@@ -194,21 +193,15 @@ func (s *Session) Close() error {
 	return s.conn.Close()
 }
 
-func hashKeys(k1, k2 crypto.X25519PublicKey) crypto.Hash {
+func hashKeys(k1, k2 [32]byte) crypto.Hash {
 	return blake2b.Sum256(append(append(make([]byte, 0, len(k1)+len(k2)), k1[:]...), k2[:]...))
 }
 
 // NewHostSession conducts the hosts's half of the renter-host protocol
 // handshake, returning a Session that can be used to handle RPC requests.
 func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (*Session, error) {
-	var id Specifier
-	if err := encoding.NewDecoder(conn, 0).Decode(&id); err != nil {
-		return nil, err
-	} else if id != loopEnter {
-		return nil, errors.Errorf("renter sent wrong specifier %q", id.String())
-	}
 	var req loopKeyExchangeRequest
-	if err := encoding.NewDecoder(conn, 1024).Decode(&req); err != nil {
+	if err := req.readFrom(conn); err != nil {
 		return nil, err
 	}
 
@@ -219,7 +212,7 @@ func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (*Session, error) {
 		}
 	}
 	if !supportsChaCha {
-		encoding.NewEncoder(conn).Encode(loopKeyExchangeResponse{Cipher: cipherNoOverlap})
+		(&loopKeyExchangeResponse{Cipher: cipherNoOverlap}).writeTo(conn)
 		return nil, errors.New("no supported ciphers")
 	}
 
@@ -229,7 +222,7 @@ func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (*Session, error) {
 		PublicKey: xpk,
 		Signature: hs.SignHash(hashKeys(req.PublicKey, xpk)),
 	}
-	if err := encoding.NewEncoder(conn).Encode(resp); err != nil {
+	if err := resp.writeTo(conn); err != nil {
 		return nil, err
 	}
 
@@ -254,15 +247,15 @@ func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (*Session, error) {
 // Note that hostdb.HostPublicKey implements the HashVerifier interface.
 func NewRenterSession(conn io.ReadWriteCloser, hv HashVerifier) (*Session, error) {
 	xsk, xpk := crypto.GenerateX25519KeyPair()
-	req := loopKeyExchangeRequest{
+	req := &loopKeyExchangeRequest{
 		PublicKey: xpk,
 		Ciphers:   []Specifier{cipherChaCha20Poly1305},
 	}
-	if err := encoding.NewEncoder(conn).EncodeAll(loopEnter, req); err != nil {
+	if err := req.writeTo(conn); err != nil {
 		return nil, err
 	}
 	var resp loopKeyExchangeResponse
-	if err := encoding.NewDecoder(conn, 64).Decode(&resp); err != nil {
+	if err := resp.readFrom(conn); err != nil {
 		return nil, err
 	}
 	// validate the signature before doing anything else

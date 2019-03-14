@@ -127,8 +127,8 @@ func newFakeConns() (io.ReadWriteCloser, io.ReadWriteCloser) {
 
 type dummyKey struct{}
 
-func (dummyKey) SignHash(hash crypto.Hash) []byte             { return []byte("dummy sig") }
-func (dummyKey) VerifyHash(hash crypto.Hash, sig []byte) bool { return string(sig) == "dummy sig" }
+func (dummyKey) SignHash(hash crypto.Hash) []byte             { return make([]byte, 64) }
+func (dummyKey) VerifyHash(hash crypto.Hash, sig []byte) bool { return true }
 
 type arb struct {
 	data interface{}

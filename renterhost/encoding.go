@@ -12,6 +12,21 @@ import (
 	"gitlab.com/NebulousLabs/Sia/types"
 )
 
+var (
+	sizeofCurrency             = (&objCurrency{}).marshalledSize()
+	sizeofFileContract         = (&objFileContract{}).marshalledSize()
+	sizeofFileContractRevision = (&objFileContractRevision{}).marshalledSize()
+	sizeofSiacoinInput         = (&objSiacoinInput{}).marshalledSize()
+	sizeofSiacoinOutput        = (&objSiacoinOutput{}).marshalledSize()
+	sizeofSiafundInput         = (&objSiafundInput{}).marshalledSize()
+	sizeofSiafundOutput        = (&objSiafundOutput{}).marshalledSize()
+	sizeofSiaPublicKey         = (&objSiaPublicKey{}).marshalledSize()
+	sizeofSpecifier            = (&Specifier{}).marshalledSize()
+	sizeofStorageProof         = (&objStorageProof{}).marshalledSize()
+	sizeofTransaction          = (&objTransaction{}).marshalledSize()
+	sizeofTransactionSignature = (&objTransactionSignature{}).marshalledSize()
+)
+
 // A ProtocolObject is an object that can be serialized for transport in the
 // renter-host protocol.
 type ProtocolObject interface {
@@ -437,7 +452,7 @@ func (r *RPCReadResponse) unmarshalBuffer(b *objBuffer) error {
 	return b.Err()
 }
 
-// RPCSectorRoot
+// RPCSectorRoots
 
 func (r *RPCSectorRootsRequest) marshalledSize() int {
 	validSize := 8
@@ -1128,16 +1143,74 @@ func (t *objTransaction) unmarshalBuffer(b *objBuffer) error {
 	return b.Err()
 }
 
-var (
-	sizeofSiaPublicKey         = (&objSiaPublicKey{}).marshalledSize()
-	sizeofTransactionSignature = (&objTransactionSignature{}).marshalledSize()
-	sizeofCurrency             = (&objCurrency{}).marshalledSize()
-	sizeofSiacoinInput         = (&objSiacoinInput{}).marshalledSize()
-	sizeofSiacoinOutput        = (&objSiacoinOutput{}).marshalledSize()
-	sizeofSiafundInput         = (&objSiafundInput{}).marshalledSize()
-	sizeofSiafundOutput        = (&objSiafundOutput{}).marshalledSize()
-	sizeofFileContract         = (&objFileContract{}).marshalledSize()
-	sizeofFileContractRevision = (&objFileContractRevision{}).marshalledSize()
-	sizeofStorageProof         = (&objStorageProof{}).marshalledSize()
-	sizeofTransaction          = (&objTransaction{}).marshalledSize()
-)
+// Handshake objects (these are sent unencrypted; they are not ProtocolObjects)
+
+func (req *loopKeyExchangeRequest) writeTo(w io.Writer) error {
+	buf := make([]byte, 16+32+8+len(req.Ciphers)*sizeofSpecifier)
+	copy(buf[:16], loopEnter[:])
+	copy(buf[16:48], req.PublicKey[:])
+	binary.LittleEndian.PutUint64(buf[48:56], uint64(len(req.Ciphers)))
+	for i := range req.Ciphers {
+		copy(buf[56+(i*16):], req.Ciphers[i][:])
+	}
+	_, err := w.Write(buf)
+	return err
+}
+
+func (req *loopKeyExchangeRequest) readFrom(r io.Reader) error {
+	// first read, to get r.PublicKey (and hopefully ciphers as well)
+	buf := make([]byte, 1024)
+	n, err := io.ReadAtLeast(r, buf, 56)
+	if err != nil {
+		return err
+	}
+	var id Specifier
+	copy(id[:], buf[:16])
+	if id != loopEnter {
+		return errors.Errorf("renter sent wrong specifier %q", id.String())
+	}
+	copy(req.PublicKey[:], buf[16:48])
+	numCiphers := binary.LittleEndian.Uint64(buf[48:])
+	if numCiphers > 16 {
+		return errors.Errorf("renter sent too many ciphers (%v)", numCiphers)
+	}
+	// second read, if necessary, to get ciphers
+	ciphersSize := int(numCiphers) * sizeofSpecifier
+	if rem := (56 + ciphersSize) - n; rem > 0 {
+		if _, err := io.ReadFull(r, buf[n:][:rem]); err != nil {
+			return err
+		}
+	}
+	buf = buf[56:]
+	req.Ciphers = make([]Specifier, numCiphers)
+	for i := range req.Ciphers {
+		copy(req.Ciphers[i][:], buf[i*sizeofSpecifier:])
+	}
+	return nil
+}
+
+func (resp *loopKeyExchangeResponse) writeTo(w io.Writer) error {
+	buf := make([]byte, 56+len(resp.Signature))
+	copy(buf[:32], resp.PublicKey[:])
+	binary.LittleEndian.PutUint64(buf[32:], uint64(len(resp.Signature)))
+	n := copy(buf[40:], resp.Signature)
+	copy(buf[40+n:], resp.Cipher[:])
+	_, err := w.Write(buf)
+	return err
+}
+
+func (resp *loopKeyExchangeResponse) readFrom(r io.Reader) error {
+	// only handle 64-byte signatures for now
+	buf := make([]byte, 32+8+64+16)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return err
+	}
+	copy(resp.PublicKey[:], buf[:32])
+	sigLen := binary.LittleEndian.Uint64(buf[32:])
+	if sigLen != 64 {
+		return errors.Errorf("host sent non-ed25519 signature (%v bytes)", sigLen)
+	}
+	resp.Signature = buf[8+32:][:64]
+	copy(resp.Cipher[:], buf[8+32+64:])
+	return nil
+}
