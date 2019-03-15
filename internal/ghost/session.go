@@ -83,7 +83,7 @@ func (h *Host) rpcFormContract(s *session) error {
 	s.extendDeadline(120 * time.Second)
 
 	var req renterhost.RPCFormContractRequest
-	if err := s.sess.ReadRequest(&req, 0); err != nil {
+	if err := s.sess.ReadRequest(&req, 4096); err != nil {
 		return err
 	}
 	if len(req.Transactions) == 0 {
@@ -136,7 +136,7 @@ func (h *Host) rpcFormContract(s *session) error {
 	}
 
 	var renterSigs renterhost.RPCFormContractSignatures
-	if err := s.sess.ReadResponse(&renterSigs, 0); err != nil {
+	if err := s.sess.ReadResponse(&renterSigs, 4096); err != nil {
 		return err
 	}
 
@@ -164,7 +164,7 @@ func (h *Host) rpcLock(s *session) error {
 	s.extendDeadline(60 * time.Second)
 
 	var req renterhost.RPCLockRequest
-	if err := s.sess.ReadRequest(&req, 0); err != nil {
+	if err := s.sess.ReadRequest(&req, 4096); err != nil {
 		return err
 	}
 
@@ -215,7 +215,7 @@ func (h *Host) rpcWrite(s *session) error {
 	// immediately
 	var sigResponse renterhost.RPCWriteResponse
 	if !req.MerkleProof {
-		if err := s.sess.ReadResponse(&sigResponse, 0); err != nil {
+		if err := s.sess.ReadResponse(&sigResponse, 4096); err != nil {
 			return err
 		}
 	}
@@ -379,7 +379,7 @@ func (h *Host) rpcWrite(s *session) error {
 	if req.MerkleProof {
 		if err := s.sess.WriteResponse(merkleResp, nil); err != nil {
 			return err
-		} else if err := s.sess.ReadResponse(&sigResponse, 0); err != nil {
+		} else if err := s.sess.ReadResponse(&sigResponse, 4096); err != nil {
 			return err
 		}
 	}
@@ -405,7 +405,7 @@ func (h *Host) rpcSectorRoots(s *session) error {
 	s.extendDeadline(120 * time.Second)
 
 	var req renterhost.RPCSectorRootsRequest
-	if err := s.sess.ReadRequest(&req, 0); err != nil {
+	if err := s.sess.ReadRequest(&req, 4096); err != nil {
 		return err
 	}
 
@@ -484,7 +484,7 @@ func (h *Host) rpcRead(s *session) error {
 	s.extendDeadline(120 * time.Second)
 
 	var req renterhost.RPCReadRequest
-	if err := s.sess.ReadRequest(&req, 0); err != nil {
+	if err := s.sess.ReadRequest(&req, 4096); err != nil {
 		return err
 	}
 
@@ -494,7 +494,7 @@ func (h *Host) rpcRead(s *session) error {
 	stopSignal := make(chan error, 1)
 	go func() {
 		var id renterhost.Specifier
-		err := s.sess.ReadResponse(&id, 0)
+		err := s.sess.ReadResponse(&id, 4096)
 		if err != nil {
 			stopSignal <- err
 		} else if id != renterhost.RPCReadStop {

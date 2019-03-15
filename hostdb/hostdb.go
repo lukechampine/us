@@ -125,7 +125,7 @@ func Scan(ctx context.Context, addr modules.NetAddress, pubkey HostPublicKey) (h
 			var resp renterhost.RPCSettingsResponse
 			if err := s.WriteRequest(renterhost.RPCSettingsID, nil); err != nil {
 				return err
-			} else if err := s.ReadResponse(&resp, 0); err != nil {
+			} else if err := s.ReadResponse(&resp, 4096); err != nil {
 				return err
 			} else if err := json.Unmarshal(resp.Settings, &host.HostSettings); err != nil {
 				return err

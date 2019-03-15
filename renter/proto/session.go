@@ -58,9 +58,9 @@ func (s *Session) call(rpcID renterhost.Specifier, req, resp renterhost.Protocol
 	if err := s.sess.WriteRequest(rpcID, req); err != nil {
 		return err
 	}
-	// use the default max message len (4KiB); the only RPCs that need more are
-	// Read and Write, and those don't use call anyway.
-	return s.sess.ReadResponse(resp, 0)
+	// use a maxlen large enough for all RPCs except Read and Write (which don't
+	// use call anyway)
+	return s.sess.ReadResponse(resp, 4096)
 }
 
 // Lock calls the Lock RPC, locking the supplied contract and synchronizing its
@@ -245,7 +245,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 		// the host is required to send a signature; if they haven't sent one
 		// yet, they should send an empty ReadResponse containing just the
 		// signature.
-		if err := s.sess.ReadResponse(&resp, 0); err != nil {
+		if err := s.sess.ReadResponse(&resp, 4096); err != nil {
 			return err
 		}
 		hostSig = resp.Signature
@@ -333,7 +333,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) error {
 
 	// read and verify Merkle proof
 	var merkleResp renterhost.RPCWriteMerkleProof
-	if err := s.sess.ReadResponse(&merkleResp, 0); err != nil {
+	if err := s.sess.ReadResponse(&merkleResp, 4096); err != nil {
 		return err
 	}
 	numSectors := rev.NewFileSize / renterhost.SectorSize
@@ -357,7 +357,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) error {
 		return err
 	}
 	var hostSig renterhost.RPCWriteResponse
-	if err := s.sess.ReadResponse(&hostSig, 0); err != nil {
+	if err := s.sess.ReadResponse(&hostSig, 4096); err != nil {
 		return err
 	}
 
