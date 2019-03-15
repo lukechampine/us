@@ -88,7 +88,7 @@ func (c *Contract) Revision() proto.ContractRevision {
 
 // Key returns the renter's signing key.
 func (c *Contract) Key() proto.ContractKey {
-	return proto.Ed25519ContractKey(c.header.key)
+	return proto.Ed25519ContractKey(c.header.key[:])
 }
 
 // AppendRoot appends a sector root to the contract, returning the new

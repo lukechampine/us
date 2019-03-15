@@ -22,8 +22,9 @@ var ErrInvalidMerkleProof = errors.New("host supplied invalid Merkle proof")
 
 // A Session is an ongoing exchange of RPCs via the renter-host protocol.
 type Session struct {
-	sess *renterhost.Session
-	conn net.Conn
+	sess    *renterhost.Session
+	conn    net.Conn
+	readBuf [renterhost.SectorSize]byte
 
 	host     hostdb.ScannedHost
 	height   types.BlockHeight
@@ -210,11 +211,12 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	// host will now stream back responses; ensure we send RPCLoopReadStop
 	// before returning
 	defer s.sess.WriteResponse(&renterhost.RPCReadStop, nil)
-	var resp renterhost.RPCReadResponse
-	resp.Data = make([]byte, 0, renterhost.SectorSize) // avoid reallocating for each section
+	resp := renterhost.RPCReadResponse{
+		Data: s.readBuf[:0], // avoid reallocating
+	}
 	var hostSig []byte
 	for _, sec := range sections {
-		if err := s.sess.ReadResponse(&resp, uint64(sec.Length)); err != nil {
+		if err := s.sess.ReadResponse(&resp, 4096+uint64(sec.Length)); err != nil {
 			return err
 		}
 		// The host may have sent data, a signature, or both. If they sent data,
@@ -339,12 +341,15 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) error {
 	leafHashes := merkleResp.OldLeafHashes
 	oldRoot, newRoot := rev.NewFileMerkleRoot, merkleResp.NewMerkleRoot
 	if !merkle.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot) {
-		return errors.New("invalid Merkle proof for old root")
+		err := errors.New("invalid Merkle proof for old root")
+		s.sess.WriteResponse(nil, err)
+		return err
 	}
 
 	// update revision and exchange signatures
 	rev.NewRevisionNumber++
 	rev.NewFileSize = newFileSize
+	rev.NewFileMerkleRoot = newRoot
 	renterSig := &renterhost.RPCWriteResponse{
 		Signature: s.contract.Key().SignHash(crypto.HashObject(rev)),
 	}

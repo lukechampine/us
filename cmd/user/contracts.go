@@ -174,7 +174,7 @@ func form(hostKeyPrefix string, funds types.Currency, end string, filename strin
 
 	// generate our contract key and execute the protocol
 	ourSK, _ := crypto.GenerateKeyPair()
-	key := proto.Ed25519ContractKey(ourSK)
+	key := proto.Ed25519ContractKey(ourSK[:])
 	contract, err := proto.FormContract(c, c, key, host, funds, currentHeight, endHeight)
 	if err != nil {
 		return err
