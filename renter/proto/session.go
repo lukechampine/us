@@ -156,7 +156,7 @@ func (s *Session) SectorRoots(offset, n int) ([]crypto.Hash, error) {
 	if err := s.contract.SyncWithHost(rev, sigs[:]); err != nil {
 		return nil, err
 	}
-	if !merkle.VerifyProofWithRoots(resp.MerkleProof, resp.SectorRoots, offset, offset+n, rev.NewFileMerkleRoot) {
+	if !merkle.VerifySectorRangeProof(resp.MerkleProof, resp.SectorRoots, offset, offset+n, rev.NewFileMerkleRoot) {
 		return nil, ErrInvalidMerkleProof
 	}
 	return resp.SectorRoots, nil

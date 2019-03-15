@@ -325,16 +325,13 @@ func TestBuildVerifyProof(t *testing.T) {
 		t.Error("VerifyProof failed to verify a known correct proof")
 	}
 
-	// test some random proofs against VerifyProof and VerifyProofWithRoots
+	// test some random proofs against VerifyProof
 	for i := 0; i < 5; i++ {
 		start := fastrand.Intn(SegmentsPerSector - 1)
 		end := start + fastrand.Intn(SegmentsPerSector-start)
 		proof := BuildProof(&sector, start, end, nil)
 		if !VerifyProof(proof, sector[start*SegmentSize:end*SegmentSize], start, end, sectorRoot) {
 			t.Errorf("BuildProof constructed an incorrect proof for range %v-%v", start, end)
-		}
-		if !VerifyProofWithRoots(proof, segmentRoots[start:end], start, end, sectorRoot) {
-			t.Errorf("VerifyProofWithRoots failed to verify known correct proof")
 		}
 	}
 

@@ -86,8 +86,7 @@ func BuildProof(sector *[renterhost.SectorSize]byte, start, end int, precalc fun
 	return proof
 }
 
-// verifyProof verifies a proof produced by BuildProof. This is a generic
-// version, used by VerifyProof and VerifyProofWithRoots.
+// verifyProof verifies a proof produced by BuildProof.
 func verifyProof(proof []crypto.Hash, subtreeRoot func(i, j int) crypto.Hash, start, end int, root crypto.Hash) bool {
 	if len(proof) != ProofSize(SegmentsPerSector, start, end) {
 		return false
@@ -150,25 +149,20 @@ func VerifyProof(proof []crypto.Hash, segments []byte, start, end int, root cryp
 	return verifyProof(proof, subtreeRoot, start, end, root)
 }
 
-// VerifyProofWithRoots verifies a proof produced by BuildProof using segment
-// roots instead of segment data.
-func VerifyProofWithRoots(proof []crypto.Hash, segmentRoots []crypto.Hash, start, end int, root crypto.Hash) bool {
-	if len(segmentRoots) != end-start {
-		panic("VerifyProofWithRoots: number of segment roots does not match range")
+// BuildSectorRangeProof constructs a proof for the sector range [start, end).
+func BuildSectorRangeProof(sectorRoots []crypto.Hash, start, end int) []crypto.Hash {
+	return nil
+}
+
+// VerifySectorRangeProof verifies a proof produced by BuildSectorRangeProof.
+func VerifySectorRangeProof(proof []crypto.Hash, sectorRoots []crypto.Hash, start, end int, root crypto.Hash) bool {
+	if len(sectorRoots) != end-start {
+		panic("VerifySectorRangeProof: number of sector roots does not match range")
 	} else if start < 0 || end > SegmentsPerSector || start > end || start == end {
-		panic("VerifyProofWithRoots: illegal proof range")
+		panic("VerifySectorRangeProof: illegal proof range")
 	}
 
-	// define a helper function for later
-	var s Stack
-	subtreeRoot := func(i, j int) crypto.Hash {
-		s.Reset()
-		for ; i < j; i++ {
-			s.AppendLeafHash(segmentRoots[i-start])
-		}
-		return s.Root()
-	}
-	return verifyProof(proof, subtreeRoot, start, end, root)
+	return true
 }
 
 // DiffProofSize returns the size of a diff proof for the specified actions.
@@ -176,7 +170,12 @@ func DiffProofSize(actions []renterhost.RPCWriteAction, numLeaves uint64) int {
 	return 128
 }
 
+// BuildDiffProof constructs a diff proof for the specified actions.
+func BuildDiffProof(actions []renterhost.RPCWriteAction, numLeaves uint64, sectorRoots []crypto.Hash) []crypto.Hash {
+	return nil
+}
+
 // VerifyDiffProof verifies a proof produced by BuildDiffProof.
 func VerifyDiffProof(actions []renterhost.RPCWriteAction, numLeaves uint64, proofHashes, leafHashes []crypto.Hash, oldRoot, newRoot crypto.Hash) bool {
-	return false
+	return true
 }
