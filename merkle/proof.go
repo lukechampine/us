@@ -27,6 +27,17 @@ func ProofSize(n, start, end int) int {
 	return leftHashes + rightHashes
 }
 
+// nextSubtreeSize returns the size of the subtree adjacent to start that does
+// not overlap end.
+func nextSubtreeSize(start, end int) int {
+	ideal := bits.TrailingZeros(uint(start))
+	max := bits.Len(uint(end-start)) - 1
+	if ideal > max {
+		return 1 << uint(max)
+	}
+	return 1 << uint(ideal)
+}
+
 // BuildProof constructs a proof for the segment range [start, end). If a non-
 // nil precalc function is provided, it will be used to supply precalculated
 // subtree Merkle roots. For example, if the root of the left half of the
@@ -151,18 +162,51 @@ func VerifyProof(proof []crypto.Hash, segments []byte, start, end int, root cryp
 
 // BuildSectorRangeProof constructs a proof for the sector range [start, end).
 func BuildSectorRangeProof(sectorRoots []crypto.Hash, start, end int) []crypto.Hash {
-	return nil
+	if start < 0 || end > len(sectorRoots) || start > end || start == end {
+		panic("BuildSectorRangeProof: illegal proof range")
+	}
+
+	proof := make([]crypto.Hash, 0, ProofSize(len(sectorRoots), start, end))
+	buildRange := func(i, j int) {
+		for i < j {
+			subtreeSize := nextSubtreeSize(i, j)
+			proof = append(proof, MetaRoot(sectorRoots[i:][:subtreeSize]))
+			i += subtreeSize
+		}
+	}
+	buildRange(0, start)
+	buildRange(end, len(sectorRoots))
+	return proof
 }
 
 // VerifySectorRangeProof verifies a proof produced by BuildSectorRangeProof.
-func VerifySectorRangeProof(proof []crypto.Hash, sectorRoots []crypto.Hash, start, end int, root crypto.Hash) bool {
-	if len(sectorRoots) != end-start {
+func VerifySectorRangeProof(proof []crypto.Hash, rangeRoots []crypto.Hash, start, end, numRoots int, root crypto.Hash) bool {
+	if len(rangeRoots) != end-start {
 		panic("VerifySectorRangeProof: number of sector roots does not match range")
-	} else if start < 0 || end > SegmentsPerSector || start > end || start == end {
+	} else if start < 0 || end > numRoots || start > end || start == end {
 		panic("VerifySectorRangeProof: illegal proof range")
 	}
+	if len(proof) != ProofSize(numRoots, start, end) {
+		return false
+	}
 
-	return true
+	var s Stack
+	insertRange := func(i, j int) {
+		for i < j {
+			subtreeSize := nextSubtreeSize(i, j)
+			height := bits.TrailingZeros(uint(subtreeSize)) // log2
+			s.insertNodeHash(proof[0], height)
+			proof = proof[1:]
+			i += subtreeSize
+		}
+	}
+
+	insertRange(0, start)
+	for _, h := range rangeRoots {
+		s.AppendLeafHash(h)
+	}
+	insertRange(end, numRoots)
+	return s.Root() == root
 }
 
 // DiffProofSize returns the size of a diff proof for the specified actions.

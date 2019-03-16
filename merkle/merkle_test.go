@@ -377,6 +377,97 @@ func TestBuildVerifyProof(t *testing.T) {
 	}
 }
 
+func TestBuildVerifySectorRangeProof(t *testing.T) {
+	// test some known proofs
+	sectorRoots := make([]crypto.Hash, 16)
+	for i := range sectorRoots {
+		fastrand.Read(sectorRoots[i][:])
+	}
+	metaRoot := MetaRoot(sectorRoots)
+
+	proof := BuildSectorRangeProof(sectorRoots, 0, len(sectorRoots))
+	if len(proof) != 0 {
+		t.Error("BuildSectorRangeProof constructed an incorrect proof for the entire tree")
+	} else if !VerifySectorRangeProof(proof, sectorRoots, 0, len(sectorRoots), len(sectorRoots), metaRoot) {
+		t.Error("VerifySectorRangeProof failed to verify a valid proof for the entire tree")
+	}
+
+	proof = BuildSectorRangeProof(sectorRoots[:2], 0, 1)
+	hash := nodeHash(sectorRoots[0], proof[0])
+	if hash != MetaRoot(sectorRoots[:2]) {
+		t.Error("BuildSectorRangeProof constructed an incorrect proof for the first sector")
+	} else if !VerifySectorRangeProof(proof, sectorRoots[0:1], 0, 1, 2, MetaRoot(sectorRoots[:2])) {
+		t.Fatal("VerifySectorRangeProof failed to verify a valid proof for the first sector")
+	}
+
+	proof = BuildSectorRangeProof(sectorRoots[:4], 0, 2)
+	hash = nodeHash(sectorRoots[0], sectorRoots[1])
+	hash = nodeHash(hash, proof[0])
+	if hash != MetaRoot(sectorRoots[:4]) {
+		t.Error("BuildSectorRangeProof constructed an incorrect proof for the first two sectors")
+	} else if !VerifySectorRangeProof(proof, sectorRoots[0:2], 0, 2, 4, MetaRoot(sectorRoots[:4])) {
+		t.Error("VerifySectorRangeProof failed to verify a valid proof for the first two sectors")
+	}
+
+	proof = BuildSectorRangeProof(sectorRoots[:5], 0, 2)
+	hash = nodeHash(sectorRoots[0], sectorRoots[1])
+	hash = nodeHash(hash, proof[0])
+	hash = nodeHash(hash, proof[1])
+	if hash != MetaRoot(sectorRoots[:5]) {
+		t.Error("BuildSectorRangeProof constructed an incorrect proof for the first two sectors")
+	} else if !VerifySectorRangeProof(proof, sectorRoots[0:2], 0, 2, 5, MetaRoot(sectorRoots[:5])) {
+		t.Error("VerifySectorRangeProof failed to verify a valid proof for the first two sectors")
+	}
+
+	// this is the largest possible proof
+	proof = BuildSectorRangeProof(sectorRoots, 7, 9)
+	left := sectorRoots[7]
+	left = nodeHash(proof[2], left)
+	left = nodeHash(proof[1], left)
+	left = nodeHash(proof[0], left)
+	right := sectorRoots[8]
+	right = nodeHash(right, proof[3])
+	right = nodeHash(right, proof[4])
+	right = nodeHash(right, proof[5])
+	hash = nodeHash(left, right)
+	if hash != MetaRoot(sectorRoots) {
+		t.Error("BuildProof constructed an incorrect proof for worst-case inputs")
+	} else if !VerifySectorRangeProof(proof, sectorRoots[7:9], 7, 9, len(sectorRoots), metaRoot) {
+		t.Error("VerifySectorRangeProof failed to verify a valid proof for worst-case inputs")
+	}
+
+	// build/verify all possible proofs in a 9-leaf tree
+	metaRoot9 := MetaRoot(sectorRoots[:9])
+	for start := 0; start < 9; start++ {
+		for end := start + 1; end <= 9; end++ {
+			proof := BuildSectorRangeProof(sectorRoots[:9], start, end)
+			if !VerifySectorRangeProof(proof, sectorRoots[start:end], start, end, 9, metaRoot9) {
+				t.Errorf("BuildProof constructed an incorrect proof for range %v-%v", start, end)
+			}
+		}
+	}
+
+	// test malformed inputs
+	if VerifySectorRangeProof([]crypto.Hash{{}}, []crypto.Hash{{}}, 0, 1, 2, crypto.Hash{}) {
+		t.Error("VerifySectorRangeProof verified an incorrect proof")
+	}
+
+	allocs := testing.AllocsPerRun(5, func() {
+		_ = BuildSectorRangeProof(sectorRoots, 0, 1)
+	})
+	if allocs > 1 {
+		t.Error("expected BuildSectorRangeProof to allocate one time, got", allocs)
+	}
+
+	proof = BuildSectorRangeProof(sectorRoots, 7, 9)
+	allocs = testing.AllocsPerRun(5, func() {
+		_ = VerifySectorRangeProof(proof, sectorRoots[7:9], 7, 9, len(sectorRoots), metaRoot)
+	})
+	if allocs > 0 {
+		t.Error("expected VerifySectorRangeProof to allocate 0 times, got", allocs)
+	}
+}
+
 func BenchmarkBuildProof(b *testing.B) {
 	var sector [renterhost.SectorSize]byte
 	fastrand.Read(sector[:])
