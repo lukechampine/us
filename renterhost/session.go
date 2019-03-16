@@ -51,7 +51,8 @@ type rpcResponse struct {
 type Session struct {
 	conn      io.ReadWriteCloser
 	aead      cipher.AEAD
-	buf       objBuffer
+	inbuf     objBuffer
+	outbuf    objBuffer
 	challenge [16]byte
 	isRenter  bool
 }
@@ -90,14 +91,14 @@ func (s *Session) writeMessage(obj ProtocolObject) error {
 	}
 
 	// write length prefix, nonce, and object directly into buffer
-	s.buf.reset()
-	s.buf.grow(msgSize)
-	s.buf.writePrefix(msgSize - 8)
-	s.buf.write(nonce)
-	obj.marshalBuffer(&s.buf)
+	s.outbuf.reset()
+	s.outbuf.grow(msgSize)
+	s.outbuf.writePrefix(msgSize - 8)
+	s.outbuf.write(nonce)
+	obj.marshalBuffer(&s.outbuf)
 
 	// encrypt the object in-place
-	msg := s.buf.bytes()[:msgSize]
+	msg := s.outbuf.bytes()[:msgSize]
 	msgNonce := msg[8:][:len(nonce)]
 	payload := msg[8+len(nonce) : msgSize-s.aead.Overhead()]
 	s.aead.Seal(payload[:0], msgNonce, payload, nil)
@@ -110,31 +111,31 @@ func (s *Session) readMessage(obj ProtocolObject, maxLen uint64) error {
 	if maxLen < MinMessageSize {
 		maxLen = MinMessageSize
 	}
-	s.buf.reset()
-	s.buf.copyN(s.conn, 8)
-	if s.buf.Err() != nil {
-		return s.buf.Err()
+	s.inbuf.reset()
+	s.inbuf.copyN(s.conn, 8)
+	if s.inbuf.Err() != nil {
+		return s.inbuf.Err()
 	}
-	msgSize := s.buf.readUint64()
+	msgSize := s.inbuf.readUint64()
 	if msgSize > maxLen {
 		return errors.Errorf("message size (%v bytes) exceeds maxLen of %v bytes", msgSize, maxLen)
 	} else if msgSize < uint64(s.aead.NonceSize()+s.aead.Overhead()) {
 		return errors.Errorf("message size (%v bytes) is too small (nonce + MAC is %v bytes)", msgSize, s.aead.NonceSize()+s.aead.Overhead())
 	}
 
-	s.buf.reset()
-	s.buf.grow(int(msgSize))
-	if err := s.buf.copyN(s.conn, msgSize); err != nil {
+	s.inbuf.reset()
+	s.inbuf.grow(int(msgSize))
+	if err := s.inbuf.copyN(s.conn, msgSize); err != nil {
 		return err
 	}
 
-	nonce := s.buf.next(s.aead.NonceSize())
-	paddedPayload := s.buf.bytes()
+	nonce := s.inbuf.next(s.aead.NonceSize())
+	paddedPayload := s.inbuf.bytes()
 	_, err := s.aead.Open(paddedPayload[:0], nonce, paddedPayload, nil)
 	if err != nil {
 		return err
 	}
-	return obj.unmarshalBuffer(&s.buf)
+	return obj.unmarshalBuffer(&s.inbuf)
 }
 
 // WriteRequest sends an encrypted RPC request, comprising an RPC ID and a
