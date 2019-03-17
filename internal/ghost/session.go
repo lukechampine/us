@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"math/bits"
 	"net"
-	"sort"
 	"time"
 
 	"github.com/pkg/errors"
@@ -15,8 +14,6 @@ import (
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
 )
-
-var errVerifyChallenge = errors.New("bad signature from renter or no such contract")
 
 type session struct {
 	sess     *renterhost.Session
@@ -175,14 +172,8 @@ func (h *Host) rpcLock(s *session) error {
 	}
 
 	contract, ok := h.contracts[req.ContractID]
-	if !ok {
-		err := errors.New("unknown contract")
-		s.sess.WriteResponse(nil, err)
-		return err
-	}
-
-	if !s.sess.VerifyChallenge(req.Signature, hostdb.HostPublicKey(contract.renterKey.String())) {
-		err := errors.New("invalid challenge signature")
+	if !ok || !s.sess.VerifyChallenge(req.Signature, hostdb.HostPublicKey(contract.renterKey.String())) {
+		err := errors.New("bad signature or no such contract")
 		s.sess.WriteResponse(nil, err)
 		return err
 	}
@@ -316,25 +307,9 @@ func (h *Host) rpcWrite(s *session) error {
 	newMerkleRoot := merkle.MetaRoot(newRoots)
 	var merkleResp *renterhost.RPCWriteMerkleProof
 	if req.MerkleProof {
-		oldNumSectors := uint64(len(s.contract.sectorRoots))
-		proofRanges := make([]crypto.ProofRange, 0, len(sectorsChanged))
-		for index := range sectorsChanged {
-			if index < oldNumSectors {
-				proofRanges = append(proofRanges, crypto.ProofRange{
-					Start: index,
-					End:   index + 1,
-				})
-			}
-		}
-		sort.Slice(proofRanges, func(i, j int) bool {
-			return proofRanges[i].Start < proofRanges[j].Start
-		})
-		leafHashes := make([]crypto.Hash, len(proofRanges))
-		for i, r := range proofRanges {
-			leafHashes[i] = s.contract.sectorRoots[r.Start]
-		}
+		treeHashes, leafHashes := merkle.BuildDiffProof(req.Actions, s.contract.sectorRoots)
 		merkleResp = &renterhost.RPCWriteMerkleProof{
-			OldSubtreeHashes: merkle.BuildDiffProof(req.Actions, oldNumSectors, s.contract.sectorRoots),
+			OldSubtreeHashes: treeHashes,
 			OldLeafHashes:    leafHashes,
 			NewMerkleRoot:    newMerkleRoot,
 		}

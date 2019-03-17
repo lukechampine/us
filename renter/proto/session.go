@@ -302,7 +302,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) error {
 
 	// estimate cost of Merkle proof
 	// TODO: calculate exact sizes
-	proofSize := merkle.DiffProofSize(actions, rev.NewFileSize/renterhost.SectorSize)
+	proofSize := merkle.DiffProofSize(actions, int(rev.NewFileSize)/renterhost.SectorSize)
 	downloadBandwidth := uint64(proofSize) * crypto.HashSize
 	bandwidthPrice := s.host.UploadBandwidthPrice.Mul64(uploadBandwidth).Add(s.host.DownloadBandwidthPrice.Mul64(downloadBandwidth))
 
@@ -336,7 +336,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) error {
 	if err := s.sess.ReadResponse(&merkleResp, 4096); err != nil {
 		return err
 	}
-	numSectors := rev.NewFileSize / renterhost.SectorSize
+	numSectors := int(rev.NewFileSize / renterhost.SectorSize)
 	proofHashes := merkleResp.OldSubtreeHashes
 	leafHashes := merkleResp.OldLeafHashes
 	oldRoot, newRoot := rev.NewFileMerkleRoot, merkleResp.NewMerkleRoot

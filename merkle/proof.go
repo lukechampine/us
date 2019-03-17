@@ -2,6 +2,7 @@ package merkle
 
 import (
 	"math/bits"
+	"sort"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/us/renterhost"
@@ -210,16 +211,185 @@ func VerifySectorRangeProof(proof []crypto.Hash, rangeRoots []crypto.Hash, start
 }
 
 // DiffProofSize returns the size of a diff proof for the specified actions.
-func DiffProofSize(actions []renterhost.RPCWriteAction, numLeaves uint64) int {
+func DiffProofSize(actions []renterhost.RPCWriteAction, numLeaves int) int {
 	return 128
 }
 
-// BuildDiffProof constructs a diff proof for the specified actions.
-func BuildDiffProof(actions []renterhost.RPCWriteAction, numLeaves uint64, sectorRoots []crypto.Hash) []crypto.Hash {
-	return nil
+func sectorsChanged(actions []renterhost.RPCWriteAction, numSectors int) []int {
+	newNumSectors := numSectors
+	sectorsChanged := make(map[int]struct{})
+	for _, action := range actions {
+		switch action.Type {
+		case renterhost.RPCWriteActionAppend:
+			sectorsChanged[newNumSectors] = struct{}{}
+			newNumSectors++
+
+		case renterhost.RPCWriteActionTrim:
+			newNumSectors -= int(action.A)
+			sectorsChanged[newNumSectors] = struct{}{}
+
+		case renterhost.RPCWriteActionSwap:
+			sectorsChanged[int(action.A)] = struct{}{}
+			sectorsChanged[int(action.B)] = struct{}{}
+
+		default:
+			panic("unknown or unsupported action type: " + action.Type.String())
+		}
+	}
+
+	var sectorIndices []int
+	for index := range sectorsChanged {
+		if index < numSectors {
+			sectorIndices = append(sectorIndices, int(index))
+		}
+	}
+	sort.Ints(sectorIndices)
+	return sectorIndices
 }
 
-// VerifyDiffProof verifies a proof produced by BuildDiffProof.
-func VerifyDiffProof(actions []renterhost.RPCWriteAction, numLeaves uint64, proofHashes, leafHashes []crypto.Hash, oldRoot, newRoot crypto.Hash) bool {
-	return true
+// BuildDiffProof constructs a diff proof for the specified actions.
+// ActionUpdate is not supported.
+func BuildDiffProof(actions []renterhost.RPCWriteAction, sectorRoots []crypto.Hash) (treeHashes, leafHashes []crypto.Hash) {
+	proofIndices := sectorsChanged(actions, len(sectorRoots))
+	leafHashes = make([]crypto.Hash, len(proofIndices))
+	for i, j := range proofIndices {
+		leafHashes[i] = sectorRoots[j]
+	}
+
+	treeHashes = make([]crypto.Hash, 0, DiffProofSize(actions, len(sectorRoots)))
+	buildRange := func(i, j int) {
+		for i < j {
+			subtreeSize := nextSubtreeSize(i, j)
+			treeHashes = append(treeHashes, MetaRoot(sectorRoots[i:][:subtreeSize]))
+			i += subtreeSize
+		}
+	}
+
+	start := 0
+	for _, end := range proofIndices {
+		buildRange(start, end)
+		start = end + 1
+	}
+	buildRange(start, len(sectorRoots))
+
+	return
+}
+
+// VerifyDiffProof verifies a proof produced by BuildDiffProof. ActionUpdate is
+// not supported.
+func VerifyDiffProof(actions []renterhost.RPCWriteAction, numLeaves int, treeHashes, leafHashes []crypto.Hash, oldRoot, newRoot crypto.Hash) bool {
+	verifyMulti := func(proofIndices []int, treeHashes, leafHashes []crypto.Hash, numLeaves int, root crypto.Hash) bool {
+		var s Stack
+		insertRange := func(i, j int) {
+			for i < j {
+				subtreeSize := nextSubtreeSize(i, j)
+				height := bits.TrailingZeros(uint(subtreeSize)) // log2
+				s.insertNodeHash(treeHashes[0], height)
+				treeHashes = treeHashes[1:]
+				i += subtreeSize
+			}
+		}
+
+		start := 0
+		for i, end := range proofIndices {
+			insertRange(start, end)
+			start = end + 1
+			s.AppendLeafHash(leafHashes[i])
+		}
+		insertRange(start, numLeaves)
+
+		return s.Root() == root
+	}
+
+	// first use the original proof to construct oldRoot
+	proofIndices := sectorsChanged(actions, numLeaves)
+	if len(proofIndices) != len(leafHashes) {
+		return false
+	}
+	if !verifyMulti(proofIndices, treeHashes, leafHashes, numLeaves, oldRoot) {
+		return false
+	}
+
+	// then modify the proof according to actions and construct the newRoot
+	newLeafHashes := modifyLeaves(leafHashes, actions, numLeaves)
+	newProofIndices := modifyProofRanges(proofIndices, actions, numLeaves)
+	numLeaves += len(newLeafHashes) - len(leafHashes)
+
+	return verifyMulti(newProofIndices, treeHashes, newLeafHashes, numLeaves, newRoot)
+}
+
+// modifyProofRanges modifies the proof ranges produced by calculateProofRanges
+// to verify a post-modification Merkle diff proof for the specified actions.
+func modifyProofRanges(proofIndices []int, actions []renterhost.RPCWriteAction, numSectors int) []int {
+	for _, action := range actions {
+		switch action.Type {
+		case renterhost.RPCWriteActionAppend:
+			proofIndices = append(proofIndices, numSectors)
+			numSectors++
+
+		case renterhost.RPCWriteActionTrim:
+			n := int(action.A)
+			proofIndices = proofIndices[:len(proofIndices)-n]
+			numSectors -= n
+
+		case renterhost.RPCWriteActionSwap:
+		case renterhost.RPCWriteActionUpdate:
+
+		default:
+			panic("unknown or unsupported action type: " + action.Type.String())
+		}
+	}
+	return proofIndices
+}
+
+// modifyLeaves modifies the leaf hashes of a Merkle diff proof to verify a
+// post-modification Merkle diff proof for the specified actions.
+func modifyLeaves(leafHashes []crypto.Hash, actions []renterhost.RPCWriteAction, numSectors int) []crypto.Hash {
+	// determine which sector index corresponds to each leaf hash
+	var indices []int
+	for _, action := range actions {
+		switch action.Type {
+		case renterhost.RPCWriteActionAppend:
+			indices = append(indices, numSectors)
+			numSectors++
+		case renterhost.RPCWriteActionTrim:
+			for j := uint64(0); j < action.A; j++ {
+				numSectors--
+				indices = append(indices, numSectors)
+			}
+		case renterhost.RPCWriteActionSwap:
+			indices = append(indices, int(action.A), int(action.B))
+
+		default:
+			panic("unknown or unsupported action type: " + action.Type.String())
+		}
+	}
+	sort.Ints(indices)
+	indexMap := make(map[int]int, len(leafHashes))
+	for i, index := range indices {
+		if i > 0 && index == indices[i-1] {
+			continue // remove duplicates
+		}
+		indexMap[index] = i
+	}
+	leafHashes = append([]crypto.Hash(nil), leafHashes...)
+	var sector [renterhost.SectorSize]byte
+	for _, action := range actions {
+		switch action.Type {
+		case renterhost.RPCWriteActionAppend:
+			copy(sector[:], action.Data)
+			leafHashes = append(leafHashes, SectorRoot(&sector))
+
+		case renterhost.RPCWriteActionTrim:
+			leafHashes = leafHashes[:len(leafHashes)-int(action.A)]
+
+		case renterhost.RPCWriteActionSwap:
+			i, j := indexMap[int(action.A)], indexMap[int(action.B)]
+			leafHashes[i], leafHashes[j] = leafHashes[j], leafHashes[i]
+
+		default:
+			panic("unknown or unsupported action type: " + action.Type.String())
+		}
+	}
+	return leafHashes
 }
