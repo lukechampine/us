@@ -14,10 +14,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-// ErrDesynchronized is returned by ContractEditor.SyncWithHost to indicate
-// that synchronization is impossible.
-var ErrDesynchronized = errors.New("renter contract has permanently desynchronized from host")
-
 type (
 	// A Wallet provides addresses and outputs, and can sign transactions.
 	Wallet interface {
@@ -62,22 +58,12 @@ type ContractEditor interface {
 	// Revision returns the latest revision of the file contract.
 	Revision() ContractRevision
 
+	// SetRevision sets the current revision of the file contract. The revision
+	// signatures do not need to be verified.
+	SetRevision(rev ContractRevision) error
+
 	// Key returns the renter's signing key.
 	Key() ContractKey
-
-	// AppendRoot appends a sector root to the contract, returning the new
-	// top-level Merkle root. The root should be written to durable storage.
-	AppendRoot(root crypto.Hash) (crypto.Hash, error)
-
-	// NumSectors returns the number of sector roots in the contract.
-	NumSectors() int
-
-	// SyncWithHost synchronizes the local version of the contract with the
-	// host's version. This may involve modifying the sector roots and/or
-	// contract revision. SyncWithHost returns ErrDesynchronized iff the
-	// contract has permanently desynchronized with the host and recovery is
-	// impossible.
-	SyncWithHost(rev types.FileContractRevision, sigs []types.TransactionSignature) error
 }
 
 // A ContractRevision contains the most recent revision to a file contract and

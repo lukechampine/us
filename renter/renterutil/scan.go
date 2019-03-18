@@ -109,7 +109,8 @@ func CheckupContract(contract *renter.Contract, hkr renter.HostKeyResolver) Chec
 	hostKey := contract.HostKey()
 	res := CheckupResult{Host: hostKey}
 
-	if contract.NumSectors() == 0 {
+	numSectors := int(contract.Revision().Revision.NewFileSize / renterhost.SectorSize)
+	if numSectors == 0 {
 		res.Error = errors.New("no sectors stored on host")
 		return res
 	}
@@ -134,12 +135,15 @@ func CheckupContract(contract *renter.Contract, hkr renter.HostKeyResolver) Chec
 	}
 	defer s.Close()
 
-	// download a random sector
-	root, err := contract.SectorRoot(fastrand.Intn(contract.NumSectors()))
+	// request a random sector root
+	roots, err := s.SectorRoots(fastrand.Intn(numSectors), 1)
 	if err != nil {
 		res.Error = errors.Wrap(err, "could not get a sector to test")
 		return res
 	}
+	root := roots[0]
+
+	// download the sector
 	start = time.Now()
 	err = s.Read(ioutil.Discard, []renterhost.RPCReadRequestSection{{
 		MerkleRoot: root,

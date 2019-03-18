@@ -543,6 +543,6 @@ Define min_shards in your config file or supply the -m flag.`)
 			convertCmd.Usage()
 			return
 		}
-		check("Conversion failed:", renter.ConvertContractV1V2(args[0]))
+		check("Conversion failed:", renter.ConvertContract(args[0]))
 	}
 }

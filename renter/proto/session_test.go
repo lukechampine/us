@@ -37,13 +37,10 @@ type contractEditor struct {
 	key ContractKey
 }
 
-func (e *contractEditor) Revision() ContractRevision                      { return e.rev }
-func (e *contractEditor) Key() ContractKey                                { return e.key }
-func (*contractEditor) AppendRoot(crypto.Hash) (h crypto.Hash, err error) { return }
-func (*contractEditor) NumSectors() (n int)                               { return }
-func (e *contractEditor) SyncWithHost(rev types.FileContractRevision, sigs []types.TransactionSignature) error {
-	e.rev.Revision = rev
-	copy(e.rev.Signatures[:], sigs)
+func (e *contractEditor) Revision() ContractRevision { return e.rev }
+func (e *contractEditor) Key() ContractKey           { return e.key }
+func (e *contractEditor) SetRevision(rev ContractRevision) error {
+	e.rev = rev
 	return nil
 }
 

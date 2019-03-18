@@ -78,7 +78,9 @@ func (s *Session) Lock(contract ContractEditor) error {
 		return err
 	}
 	s.sess.SetChallenge(resp.NewChallenge)
-	if err := contract.SyncWithHost(resp.Revision, resp.Signatures); err != nil {
+	rev := ContractRevision{Revision: resp.Revision}
+	copy(rev.Signatures[:], resp.Signatures)
+	if err := contract.SetRevision(rev); err != nil {
 		return err
 	}
 	if !resp.Acquired {
@@ -129,7 +131,7 @@ func (s *Session) SectorRoots(offset, n int) ([]crypto.Hash, error) {
 	}
 	bandwidthPrice := s.host.DownloadBandwidthPrice.Mul64(uint64(bandwidth))
 	price := s.host.BaseRPCPrice.Add(bandwidthPrice)
-	if s.contract.Revision().RenterFunds().Cmp(price) < 0 {
+	if rev.RenterFunds().Cmp(price) < 0 {
 		return nil, errors.New("contract has insufficient funds to support sector roots download")
 	}
 
@@ -154,7 +156,7 @@ func (s *Session) SectorRoots(offset, n int) ([]crypto.Hash, error) {
 	sigs := s.contract.Revision().Signatures
 	sigs[0].Signature = req.Signature
 	sigs[1].Signature = resp.Signature
-	if err := s.contract.SyncWithHost(rev, sigs[:]); err != nil {
+	if err := s.contract.SetRevision(ContractRevision{rev, sigs}); err != nil {
 		return nil, err
 	}
 	if !merkle.VerifySectorRangeProof(resp.MerkleProof, resp.SectorRoots, offset, offset+n, totalSectors, rev.NewFileMerkleRoot) {
@@ -254,7 +256,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	sigs := s.contract.Revision().Signatures
 	sigs[0].Signature = renterSig
 	sigs[1].Signature = hostSig
-	if err := s.contract.SyncWithHost(rev, sigs[:]); err != nil {
+	if err := s.contract.SetRevision(ContractRevision{rev, sigs}); err != nil {
 		return err
 	}
 
@@ -364,7 +366,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) error {
 	sigs := s.contract.Revision().Signatures
 	sigs[0].Signature = renterSig.Signature
 	sigs[1].Signature = hostSig.Signature
-	if err := s.contract.SyncWithHost(rev, sigs[:]); err != nil {
+	if err := s.contract.SetRevision(ContractRevision{rev, sigs}); err != nil {
 		return err
 	}
 
