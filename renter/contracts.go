@@ -38,7 +38,7 @@ type ContractHeader struct {
 	version uint8
 	hostKey hostdb.HostPublicKey
 	id      types.FileContractID
-	key     crypto.SecretKey
+	key     proto.Ed25519ContractKey
 }
 
 // Validate validates a ContractHeader, checking its magic bytes and version.
@@ -77,7 +77,7 @@ func (c *Contract) Revision() proto.ContractRevision {
 
 // Key returns the renter's signing key.
 func (c *Contract) Key() proto.ContractKey {
-	return proto.Ed25519ContractKey(c.header.key[:])
+	return c.header.key
 }
 
 // SetRevision sets the current revision of the file contract.
@@ -89,7 +89,7 @@ func (c *Contract) SetRevision(rev proto.ContractRevision) error {
 	return nil
 }
 
-func marshalHeader(rev proto.ContractRevision, key crypto.SecretKey) []byte {
+func marshalHeader(rev proto.ContractRevision, key proto.Ed25519ContractKey) []byte {
 	buf := bytes.NewBuffer(make([]byte, 0, ContractHeaderSize))
 	buf.WriteString(ContractMagic)
 	buf.WriteByte(ContractVersion)
@@ -108,7 +108,7 @@ func unmarshalHeader(b []byte) (h ContractHeader) {
 	copy(hpk[:], buf.Next(32))
 	h.hostKey = hostdb.HostPublicKey(types.Ed25519PublicKey(hpk).String())
 	copy(h.id[:], buf.Next(32))
-	copy(h.key[:], ed25519.NewKeyFromSeed(buf.Next(32)))
+	h.key = ed25519.NewKeyFromSeed(buf.Next(32))
 	return h
 }
 
@@ -134,7 +134,7 @@ func unmarshalRevision(b []byte, rev *proto.ContractRevision) error {
 }
 
 // SaveContract creates a new contract file using the provided contract.
-func SaveContract(contract proto.ContractRevision, key crypto.SecretKey, filename string) error {
+func SaveContract(contract proto.ContractRevision, key proto.Ed25519ContractKey, filename string) error {
 	f, err := os.Create(filename)
 	if err != nil {
 		return errors.Wrap(err, "could not create contract file")

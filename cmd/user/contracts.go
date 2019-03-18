@@ -11,8 +11,9 @@ import (
 	"text/tabwriter"
 
 	"github.com/pkg/errors"
-	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"gitlab.com/NebulousLabs/fastrand"
+	"golang.org/x/crypto/ed25519"
 
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
@@ -173,8 +174,7 @@ func form(hostKeyPrefix string, funds types.Currency, end string, filename strin
 	}
 
 	// generate our contract key and execute the protocol
-	ourSK, _ := crypto.GenerateKeyPair()
-	key := proto.Ed25519ContractKey(ourSK[:])
+	key := proto.Ed25519ContractKey(ed25519.NewKeyFromSeed(fastrand.Bytes(32)))
 	contract, err := proto.FormContract(c, c, key, host, funds, currentHeight, endHeight)
 	if err != nil {
 		return err
@@ -185,7 +185,7 @@ func form(hostKeyPrefix string, funds types.Currency, end string, filename strin
 	}
 	allPath := filepath.Join(config.ContractsAvailable, filename)
 	activePath := filepath.Join(config.ContractsEnabled, filename)
-	err = renter.SaveContract(contract, ourSK, allPath)
+	err = renter.SaveContract(contract, key, allPath)
 	if err != nil {
 		return errors.Wrap(err, "could not save contract")
 	}
