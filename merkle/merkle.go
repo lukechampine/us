@@ -27,18 +27,18 @@ var _ [0]struct{} = [renterhost.SectorSize & (renterhost.SectorSize - 1)]struct{
 // SectorRoot computes the Merkle root of a sector using SegmentSize bytes per
 // leaf.
 func SectorRoot(sector *[renterhost.SectorSize]byte) crypto.Hash {
-	var s Stack
+	var s stack
 	for i := 0; i < len(sector); i += SegmentSize {
-		s.AppendLeafHash(s.leafHash(sector[i:][:SegmentSize]))
+		s.appendLeaf(sector[i:][:SegmentSize])
 	}
-	return s.Root()
+	return s.root()
 }
 
 // MetaRoot calculates the root of a set of existing Merkle roots.
 func MetaRoot(roots []crypto.Hash) crypto.Hash {
-	var s Stack
+	var s stack
 	for _, r := range roots {
-		s.AppendLeafHash(r)
+		s.insertNodeHash(r, 0)
 	}
-	return s.Root()
+	return s.root()
 }

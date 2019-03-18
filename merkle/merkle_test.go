@@ -1,10 +1,8 @@
 package merkle
 
 import (
-	"bytes"
 	"reflect"
 	"testing"
-	"unsafe"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/fastrand"
@@ -167,91 +165,62 @@ func BenchmarkMetaRoot1TB(b *testing.B) {
 }
 
 func TestStack(t *testing.T) {
-	var s Stack
+	var s stack
 
 	// test some known roots
-	if s.Root() != (crypto.Hash{}) {
+	if s.root() != (crypto.Hash{}) {
 		t.Error("wrong Stack root for empty stack")
 	}
 
 	roots := make([]crypto.Hash, 32)
 	for _, root := range roots {
-		s.AppendLeafHash(root)
+		s.insertNodeHash(root, 0)
 	}
-	if s.Root().String() != "1c23727030051d1bba1c887273addac2054afbd6926daddef6740f4f8bf1fb7f" {
+	if s.root().String() != "1c23727030051d1bba1c887273addac2054afbd6926daddef6740f4f8bf1fb7f" {
 		t.Error("wrong Stack root for 32 empty roots")
 	}
 
-	s.Reset()
+	s.reset()
 	roots[0][0] = 1
 	for _, root := range roots {
-		s.AppendLeafHash(root)
+		s.insertNodeHash(root, 0)
 	}
-	if s.Root().String() != "c5da05749139505704ea18a5d92d46427f652ac79c5f5712e4aefb68e20dffb8" {
+	if s.root().String() != "c5da05749139505704ea18a5d92d46427f652ac79c5f5712e4aefb68e20dffb8" {
 		t.Error("wrong Stack root for roots[0][0] = 1")
 	}
 
 	// test some random roots against a reference implementation
 	for i := 0; i < 5; i++ {
-		s.Reset()
+		s.reset()
 		for j := range roots {
 			fastrand.Read(roots[j][:])
-			s.AppendLeafHash(roots[j])
+			s.insertNodeHash(roots[j], 0)
 		}
-		if s.Root() != recNodeRoot(roots) {
+		if s.root() != recNodeRoot(roots) {
 			t.Error("Stack root does not match reference implementation")
 		}
 	}
 
 	// test an odd number of roots
-	s.Reset()
+	s.reset()
 	roots = roots[:5]
 	for _, root := range roots {
-		s.AppendLeafHash(root)
+		s.insertNodeHash(root, 0)
 	}
 	refRoot := recNodeRoot([]crypto.Hash{recNodeRoot(roots[:4]), roots[4]})
-	if s.Root() != refRoot {
+	if s.root() != refRoot {
 		t.Error("Stack root does not match reference implementation")
-	}
-
-	// test NumRoots
-	if s.NumLeaves() != 5 {
-		t.Error("wrong number of nodes reported:", s.NumLeaves())
-	}
-
-	// test ReadFrom
-	s.Reset()
-	rootsBytes := *(*[5 * crypto.HashSize]byte)(unsafe.Pointer(&roots[0]))
-	n, err := s.ReadFrom(bytes.NewReader(rootsBytes[:]))
-	if err != nil {
-		t.Error("unexpected ReadFrom error:", err)
-	} else if n != int64(len(rootsBytes)) {
-		t.Error("wrong number of bytes read:", n)
-	} else if s.Root() != refRoot {
-		t.Error("wrong root after calling ReadFrom")
-	}
-
-	// test marshalling
-	var buf bytes.Buffer
-	if err := s.MarshalSia(&buf); err != nil {
-		t.Fatal(err)
-	}
-	var s2 Stack
-	if err := s2.UnmarshalSia(&buf); err != nil {
-		t.Fatal(err)
-	} else if s.Root() != s2.Root() {
-		t.Fatal("Stacks differ after marshal+unmarshal")
 	}
 }
 
 func BenchmarkStack1TB(b *testing.B) {
 	const sectorsPerTerabyte = 262144
 	b.ReportAllocs()
-	var s Stack
+	var s stack
 	for i := 0; i < b.N; i++ {
-		s.Reset()
+		s.reset()
 		for j := 0; j < sectorsPerTerabyte; j++ {
-			s.AppendLeafHash(crypto.Hash{})
+			s.insertNodeHash(crypto.Hash{}, 0)
 		}
 	}
 }

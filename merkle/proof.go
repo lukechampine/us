@@ -54,13 +54,13 @@ func BuildProof(sector *[renterhost.SectorSize]byte, start, end int, precalc fun
 	}
 
 	// define a helper function for later
-	var s Stack
+	var s stack
 	subtreeRoot := func(i, j int) crypto.Hash {
-		s.Reset()
+		s.reset()
 		for ; i < j; i++ {
-			s.AppendLeafHash(s.leafHash(sector[i*SegmentSize:][:SegmentSize]))
+			s.appendLeaf(sector[i*SegmentSize:][:SegmentSize])
 		}
-		return s.Root()
+		return s.root()
 	}
 
 	// we build the proof by recursively enumerating subtrees, left to right.
@@ -115,7 +115,7 @@ func verifyProof(proof []crypto.Hash, subtreeRoot func(i, j int) crypto.Hash, st
 	// proof set), but this is the simplest way I was able to implement it.
 	// Namely, it has the important advantage of being symmetrical to the
 	// Build operation.
-	var s Stack
+	var s stack
 	var rec func(int, int) crypto.Hash
 	rec = func(i, j int) crypto.Hash {
 		if i >= start && j <= end {
@@ -150,13 +150,13 @@ func VerifyProof(proof []crypto.Hash, segments []byte, start, end int, root cryp
 		panic("VerifyProof: illegal proof range")
 	}
 
-	var s Stack
+	var s stack
 	subtreeRoot := func(i, j int) crypto.Hash {
-		s.Reset()
+		s.reset()
 		for ; i < j; i++ {
-			s.AppendLeafHash(s.leafHash(segments[(i-start)*SegmentSize:][:SegmentSize]))
+			s.appendLeaf(segments[(i-start)*SegmentSize:][:SegmentSize])
 		}
-		return s.Root()
+		return s.root()
 	}
 	return verifyProof(proof, subtreeRoot, start, end, root)
 }
@@ -191,7 +191,7 @@ func VerifySectorRangeProof(proof []crypto.Hash, rangeRoots []crypto.Hash, start
 		return false
 	}
 
-	var s Stack
+	var s stack
 	insertRange := func(i, j int) {
 		for i < j {
 			subtreeSize := nextSubtreeSize(i, j)
@@ -204,10 +204,10 @@ func VerifySectorRangeProof(proof []crypto.Hash, rangeRoots []crypto.Hash, start
 
 	insertRange(0, start)
 	for _, h := range rangeRoots {
-		s.AppendLeafHash(h)
+		s.insertNodeHash(h, 0)
 	}
 	insertRange(end, numRoots)
-	return s.Root() == root
+	return s.root() == root
 }
 
 // DiffProofSize returns the size of a diff proof for the specified actions.
@@ -279,7 +279,7 @@ func BuildDiffProof(actions []renterhost.RPCWriteAction, sectorRoots []crypto.Ha
 // not supported.
 func VerifyDiffProof(actions []renterhost.RPCWriteAction, numLeaves int, treeHashes, leafHashes []crypto.Hash, oldRoot, newRoot crypto.Hash) bool {
 	verifyMulti := func(proofIndices []int, treeHashes, leafHashes []crypto.Hash, numLeaves int, root crypto.Hash) bool {
-		var s Stack
+		var s stack
 		insertRange := func(i, j int) {
 			for i < j {
 				subtreeSize := nextSubtreeSize(i, j)
@@ -294,11 +294,11 @@ func VerifyDiffProof(actions []renterhost.RPCWriteAction, numLeaves int, treeHas
 		for i, end := range proofIndices {
 			insertRange(start, end)
 			start = end + 1
-			s.AppendLeafHash(leafHashes[i])
+			s.insertNodeHash(leafHashes[i], 0)
 		}
 		insertRange(start, numLeaves)
 
-		return s.Root() == root
+		return s.root() == root
 	}
 
 	// first use the original proof to construct oldRoot
