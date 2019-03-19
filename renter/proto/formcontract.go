@@ -10,6 +10,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/internal/ed25519"
 	"lukechampine.com/us/renterhost"
 )
 
@@ -21,7 +22,7 @@ const (
 
 // FormContract forms a contract with a host. The resulting contract will have
 // renterPayout coins in the renter output.
-func FormContract(w Wallet, tpool TransactionPool, key ContractKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
+func FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
 	s, err := NewUnlockedSession(host.NetAddress, host.PublicKey, 0)
 	if err != nil {
 		return ContractRevision{}, err
@@ -33,7 +34,7 @@ func FormContract(w Wallet, tpool TransactionPool, key ContractKey, host hostdb.
 
 // FormContract forms a contract with a host. The resulting contract will have
 // renterPayout coins in the renter output.
-func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ContractKey, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
+func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
 	if endHeight < startHeight {
 		return ContractRevision{}, errors.New("end height must be greater than start height")
 	}
@@ -51,7 +52,10 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ContractKey,
 	// create unlock conditions
 	uc := types.UnlockConditions{
 		PublicKeys: []types.SiaPublicKey{
-			key.PublicKey(),
+			types.SiaPublicKey{
+				Algorithm: types.SignatureEd25519,
+				Key:       []byte(key.PublicKey()),
+			},
 			s.host.PublicKey.SiaPublicKey(),
 		},
 		SignaturesRequired: 2,

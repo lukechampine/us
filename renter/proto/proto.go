@@ -7,9 +7,8 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"golang.org/x/crypto/ed25519"
 	"lukechampine.com/us/hostdb"
-	"lukechampine.com/us/renterhost"
+	"lukechampine.com/us/internal/ed25519"
 
 	"github.com/pkg/errors"
 )
@@ -30,27 +29,6 @@ type (
 	}
 )
 
-// A ContractKey is a renterhost.HashSigner that knows its public key.
-type ContractKey interface {
-	renterhost.HashSigner
-	PublicKey() types.SiaPublicKey
-}
-
-// Ed25519ContractKey implements ContractKey with an ed25519 keypair.
-type Ed25519ContractKey ed25519.PrivateKey
-
-// SignHash implements ContractKey.
-func (e Ed25519ContractKey) SignHash(hash crypto.Hash) []byte {
-	return ed25519.Sign(ed25519.PrivateKey(e), hash[:])
-}
-
-// PublicKey implements ContractKey.
-func (e Ed25519ContractKey) PublicKey() types.SiaPublicKey {
-	var pk crypto.PublicKey
-	copy(pk[:], e[32:])
-	return types.Ed25519PublicKey(pk)
-}
-
 // A ContractEditor provides an interface for viewing and updating a file
 // contract transaction and the Merkle roots of each sector covered by the
 // contract.
@@ -63,7 +41,7 @@ type ContractEditor interface {
 	SetRevision(rev ContractRevision) error
 
 	// Key returns the renter's signing key.
-	Key() ContractKey
+	Key() ed25519.PrivateKey
 }
 
 // A ContractRevision contains the most recent revision to a file contract and

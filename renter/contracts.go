@@ -7,11 +7,10 @@ import (
 	"path/filepath"
 
 	"github.com/pkg/errors"
-	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"golang.org/x/crypto/ed25519"
 
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/internal/ed25519"
 	"lukechampine.com/us/renter/proto"
 )
 
@@ -38,7 +37,7 @@ type ContractHeader struct {
 	version uint8
 	hostKey hostdb.HostPublicKey
 	id      types.FileContractID
-	key     proto.Ed25519ContractKey
+	key     ed25519.PrivateKey
 }
 
 // Validate validates a ContractHeader, checking its magic bytes and version.
@@ -76,7 +75,7 @@ func (c *Contract) Revision() proto.ContractRevision {
 }
 
 // Key returns the renter's signing key.
-func (c *Contract) Key() proto.ContractKey {
+func (c *Contract) Key() ed25519.PrivateKey {
 	return c.header.key
 }
 
@@ -89,14 +88,13 @@ func (c *Contract) SetRevision(rev proto.ContractRevision) error {
 	return nil
 }
 
-func marshalHeader(rev proto.ContractRevision, key proto.Ed25519ContractKey) []byte {
+func marshalHeader(rev proto.ContractRevision, key ed25519.PrivateKey) []byte {
 	buf := bytes.NewBuffer(make([]byte, 0, ContractHeaderSize))
 	buf.WriteString(ContractMagic)
 	buf.WriteByte(ContractVersion)
-	hpk := rev.HostKey().Ed25519()
-	buf.Write(hpk[:])
+	buf.Write(rev.HostKey().Ed25519())
 	buf.Write(rev.Revision.ParentID[:])
-	buf.Write(key[:32])
+	buf.Write(key[:ed25519.SeedSize])
 	return buf.Bytes()
 }
 
@@ -104,9 +102,10 @@ func unmarshalHeader(b []byte) (h ContractHeader) {
 	buf := bytes.NewBuffer(b)
 	h.magic = string(buf.Next(len(ContractMagic)))
 	h.version, _ = buf.ReadByte()
-	var hpk crypto.PublicKey
-	copy(hpk[:], buf.Next(32))
-	h.hostKey = hostdb.HostPublicKey(types.Ed25519PublicKey(hpk).String())
+	h.hostKey = hostdb.HostPublicKey(types.SiaPublicKey{
+		Algorithm: types.SignatureEd25519,
+		Key:       buf.Next(32),
+	}.String())
 	copy(h.id[:], buf.Next(32))
 	h.key = ed25519.NewKeyFromSeed(buf.Next(32))
 	return h
@@ -134,7 +133,7 @@ func unmarshalRevision(b []byte, rev *proto.ContractRevision) error {
 }
 
 // SaveContract creates a new contract file using the provided contract.
-func SaveContract(contract proto.ContractRevision, key proto.Ed25519ContractKey, filename string) error {
+func SaveContract(contract proto.ContractRevision, key ed25519.PrivateKey, filename string) error {
 	f, err := os.Create(filename)
 	if err != nil {
 		return errors.Wrap(err, "could not create contract file")

@@ -10,7 +10,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
-	"golang.org/x/crypto/ed25519"
+	"lukechampine.com/us/internal/ed25519"
 	"lukechampine.com/us/internal/ghost"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
@@ -34,11 +34,11 @@ func (stubTpool) FeeEstimate() (min, max types.Currency, err error)    { return 
 
 type contractEditor struct {
 	rev ContractRevision
-	key ContractKey
+	key ed25519.PrivateKey
 }
 
 func (e *contractEditor) Revision() ContractRevision { return e.rev }
-func (e *contractEditor) Key() ContractKey           { return e.key }
+func (e *contractEditor) Key() ed25519.PrivateKey    { return e.key }
 func (e *contractEditor) SetRevision(rev ContractRevision) error {
 	e.rev = rev
 	return nil
@@ -67,7 +67,7 @@ func createTestingPair(tb testing.TB) (*Session, *ghost.Host) {
 		tb.Fatal("received settings do not match host's actual settings")
 	}
 
-	key := Ed25519ContractKey(ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)))
+	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
 	contractRevision, err := s.FormContract(stubWallet{}, stubTpool{}, key, types.ZeroCurrency, 0, 0)
 	if err != nil {
 		tb.Fatal(err)

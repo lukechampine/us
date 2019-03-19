@@ -13,7 +13,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"golang.org/x/crypto/ed25519"
+	"lukechampine.com/us/internal/ed25519"
 	"lukechampine.com/us/renterhost"
 )
 
@@ -48,11 +48,11 @@ func (hpk HostPublicKey) ShortKey() string {
 	return hpk.Key()[:8]
 }
 
-// Ed25519 returns the HostPublicKey as a crypto.PublicKey. The returned key
+// Ed25519 returns the HostPublicKey as an ed25519.PublicKey. The returned key
 // is invalid if hpk is not a Ed25519 key.
-func (hpk HostPublicKey) Ed25519() (cpk crypto.PublicKey) {
-	hex.Decode(cpk[:], []byte(hpk.Key()))
-	return
+func (hpk HostPublicKey) Ed25519() ed25519.PublicKey {
+	pk, _ := hex.DecodeString(hpk.Key())
+	return ed25519.PublicKey(pk)
 }
 
 // SiaPublicKey returns the HostPublicKey as a types.SiaPublicKey.
@@ -63,8 +63,10 @@ func (hpk HostPublicKey) SiaPublicKey() (spk types.SiaPublicKey) {
 
 // VerifyHash verifies that hash was signed by the public key.
 func (hpk HostPublicKey) VerifyHash(hash crypto.Hash, sig []byte) bool {
-	pk, _ := hex.DecodeString(hpk.Key())
-	return ed25519.Verify(ed25519.PublicKey(pk), hash[:], sig)
+	if !strings.HasPrefix(string(hpk), "ed25519") {
+		panic("unsupported signature algorithm")
+	}
+	return hpk.Ed25519().VerifyHash(hash, sig)
 }
 
 // HostSettings are the settings reported by a host.

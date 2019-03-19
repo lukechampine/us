@@ -193,7 +193,7 @@ func (c *SHARDClient) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAd
 	}
 
 	// verify signature
-	if crypto.VerifyHash(crypto.HashObject(ha), pubkey.Ed25519(), sig) != nil {
+	if !pubkey.VerifyHash(crypto.HashObject(ha), sig[:]) {
 		return "", errors.New("invalid signature")
 	}
 

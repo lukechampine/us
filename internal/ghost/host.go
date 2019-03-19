@@ -1,15 +1,15 @@
 package ghost
 
 import (
+	"encoding/hex"
 	"net"
-
-	"golang.org/x/crypto/ed25519"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/internal/ed25519"
 	"lukechampine.com/us/renterhost"
 )
 
@@ -22,30 +22,16 @@ type hostContract struct {
 	sectorData    map[crypto.Hash][renterhost.SectorSize]byte
 }
 
-// ed25519Key implements renterhost.HashSigner with an ed25519 secret key.
-type ed25519Key ed25519.PrivateKey
-
-// SignHash implements renterhost.HashSigner.
-func (e ed25519Key) SignHash(hash crypto.Hash) []byte {
-	return ed25519.Sign(ed25519.PrivateKey(e), hash[:])
-}
-
-func (e ed25519Key) publicKey() types.SiaPublicKey {
-	var pk crypto.PublicKey
-	copy(pk[:], e[32:])
-	return types.Ed25519PublicKey(pk)
-}
-
 type Host struct {
 	addr        modules.NetAddress
-	secretKey   ed25519Key
+	secretKey   ed25519.PrivateKey
 	listener    net.Listener
 	contracts   map[types.FileContractID]*hostContract
 	blockHeight types.BlockHeight
 }
 
 func (h *Host) PublicKey() hostdb.HostPublicKey {
-	return hostdb.HostPublicKey(h.secretKey.publicKey().String())
+	return hostdb.HostPublicKey("ed25519:" + hex.EncodeToString(h.secretKey.PublicKey()))
 }
 
 func (h *Host) Settings() hostdb.HostSettings {
@@ -87,7 +73,7 @@ func New() (*Host, error) {
 	h := &Host{
 		addr:      modules.NetAddress(l.Addr().String()),
 		listener:  l,
-		secretKey: ed25519Key(ed25519.NewKeyFromSeed(fastrand.Bytes(ed25519.SeedSize))),
+		secretKey: ed25519.NewKeyFromSeed(fastrand.Bytes(ed25519.SeedSize)),
 		contracts: make(map[types.FileContractID]*hostContract),
 	}
 	go h.listen()

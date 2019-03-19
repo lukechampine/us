@@ -13,9 +13,9 @@ import (
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
-	"golang.org/x/crypto/ed25519"
 
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/internal/ed25519"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renter/renterutil"
@@ -174,7 +174,7 @@ func form(hostKeyPrefix string, funds types.Currency, end string, filename strin
 	}
 
 	// generate our contract key and execute the protocol
-	key := proto.Ed25519ContractKey(ed25519.NewKeyFromSeed(fastrand.Bytes(32)))
+	key := ed25519.NewKeyFromSeed(fastrand.Bytes(32))
 	contract, err := proto.FormContract(c, c, key, host, funds, currentHeight, endHeight)
 	if err != nil {
 		return err
