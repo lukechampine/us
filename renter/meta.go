@@ -70,47 +70,35 @@ func (s *keySeed) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// An EncryptionKey can encrypt and decrypt segments, where each segment is a
-// []byte with len merkle.SegmentSize.
-type EncryptionKey interface {
-	EncryptSegments(ciphertext, plaintext []byte, startIndex uint64, revision uint32)
-	DecryptSegments(plaintext, ciphertext []byte, startIndex uint64, revision uint32)
+// A ChaChaKey can xor messages with a keystream.
+type ChaChaKey struct {
+	key [32]byte
 }
 
-// chachaKey implements EncryptionKey using ChaCha20.
-type chachaKey struct {
-	key   [32]byte
-	nonce [chacha.NonceSize]byte
-}
-
-func (k *chachaKey) EncryptSegments(ciphertext, plaintext []byte, startIndex uint64, revision uint32) {
-	if len(plaintext)%merkle.SegmentSize != 0 {
-		panic("plaintext must be a multiple of segment size")
-	} else if len(plaintext) != len(ciphertext) {
-		panic("plaintext and ciphertext must have same length")
+// XORKeyStream xors msg with the keystream derived from k, using startIndex as
+// the starting offset within the stream and revision as the nonce.
+func (k *ChaChaKey) XORKeyStream(msg []byte, startIndex uint64, revision uint32) {
+	if len(msg)%merkle.SegmentSize != 0 {
+		panic("message must be a multiple of segment size")
 	}
-	// use revision as the nonce and startIndex as the counter
-	binary.LittleEndian.PutUint32(k.nonce[:], revision)
-	c, err := chacha.NewCipher(k.nonce[:], k.key[:], 20)
+	nonce := make([]byte, chacha.NonceSize)
+	binary.LittleEndian.PutUint32(nonce[:4], revision)
+	c, err := chacha.NewCipher(nonce, k.key[:], 20)
 	if err != nil {
 		panic(err)
 	}
 	c.SetCounter(startIndex)
-	c.XORKeyStream(ciphertext, plaintext)
-}
-
-func (k *chachaKey) DecryptSegments(plaintext, ciphertext []byte, startIndex uint64, revision uint32) {
-	k.EncryptSegments(plaintext, ciphertext, startIndex, revision)
+	c.XORKeyStream(msg, msg)
 }
 
 // EncryptionKey returns the encryption key used to encrypt sectors in a given
 // shard.
-func (m *MetaIndex) EncryptionKey(shardIndex int) EncryptionKey {
+func (m *MetaIndex) EncryptionKey(shardIndex int) *ChaChaKey {
 	// We derive the per-shard encryption key as H(masterKey|shardIndex).
 	b := make([]byte, len(m.MasterKey)+8)
 	copy(b, m.MasterKey[:])
 	binary.LittleEndian.PutUint64(b[len(m.MasterKey):], uint64(shardIndex))
-	return &chachaKey{key: blake2b.Sum256(b)}
+	return &ChaChaKey{key: blake2b.Sum256(b)}
 }
 
 // MaxChunkSize returns the maximum amount of file data that can fit into a

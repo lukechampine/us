@@ -23,7 +23,7 @@ func BenchmarkIdealUpload(b *testing.B) {
 		}
 		rsc.Reconstruct(shards)
 		for i := range shards {
-			key.EncryptSegments(shards[i], shards[i], 0, 0)
+			key.XORKeyStream(shards[i], 0, 0)
 		}
 	}
 }

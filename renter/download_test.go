@@ -23,7 +23,7 @@ func BenchmarkIdealDownload(b *testing.B) {
 	b.SetBytes(renterhost.SectorSize * 10)
 	for i := 0; i < b.N; i++ {
 		for i := range shards[:10] {
-			key.DecryptSegments(shards[i*2], shards[i*2], 0, 0)
+			key.XORKeyStream(shards[i*2], 0, 0)
 		}
 		rsc.Recover(ioutil.Discard, shards, renterhost.SectorSize*10)
 	}

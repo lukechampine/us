@@ -40,7 +40,7 @@ func (sb *SectorBuilder) Reset() {
 // (unpadded, unencrypted) data.
 //
 // Append panics if len(data) > sb.Remaining().
-func (sb *SectorBuilder) Append(data []byte, key EncryptionKey, chunkIndex int64) {
+func (sb *SectorBuilder) Append(data []byte, key *ChaChaKey, chunkIndex int64) {
 	// pad the data to a multiple of SegmentSize, which is required
 	// by the encryption scheme
 	var padding int
@@ -68,7 +68,7 @@ func (sb *SectorBuilder) Append(data []byte, key EncryptionKey, chunkIndex int64
 	// 280 TB. In the average case, all but the final sector will be "full",
 	// so the waste is negligible.)
 	startIndex := uint64(chunkIndex * merkle.SegmentsPerSector)
-	key.EncryptSegments(sectorSlice, sectorSlice, startIndex, 0)
+	key.XORKeyStream(sectorSlice, startIndex, 0)
 
 	// update sectorLen and record the new slice
 	sb.slices = append(sb.slices, SectorSlice{
@@ -129,7 +129,7 @@ func (sb *SectorBuilder) Slices() []SectorSlice {
 type ShardUploader struct {
 	Uploader *proto.Session
 	Shard    *Shard
-	Key      EncryptionKey
+	Key      *ChaChaKey
 	Sector   SectorBuilder
 }
 
@@ -184,7 +184,7 @@ func (u *ShardUploader) Close() error {
 
 // NewShardUploader connects to a host and returns a ShardUploader capable of
 // uploading m's data and writing to one of m's Shard files.
-func NewShardUploader(m *MetaFile, key EncryptionKey, contract *Contract, hkr HostKeyResolver, currentHeight types.BlockHeight) (*ShardUploader, error) {
+func NewShardUploader(m *MetaFile, key *ChaChaKey, contract *Contract, hkr HostKeyResolver, currentHeight types.BlockHeight) (*ShardUploader, error) {
 	hostKey := contract.HostKey()
 	// open shard
 	sf, err := OpenShard(m.ShardPath(hostKey))

@@ -22,15 +22,15 @@ func TestEncryption(t *testing.T) {
 	key := m.EncryptionKey(0)
 
 	plaintext := []byte(strings.Repeat("test", 64))
-	ciphertext := make([]byte, len(plaintext))
-	key.EncryptSegments(ciphertext, plaintext, 0, 0)
+	ciphertext := append([]byte(nil), plaintext...)
+	key.XORKeyStream(ciphertext, 0, 0)
 	if bytes.Equal(ciphertext, plaintext) {
 		t.Fatal("encryption failed")
 	}
 
 	// decrypt starting at a segment offset
 	off := merkle.SegmentSize * 2
-	key.DecryptSegments(ciphertext[off:], ciphertext[off:], 2, 0)
+	key.XORKeyStream(ciphertext[off:], 2, 0)
 	if !bytes.Equal(ciphertext[off:], plaintext[off:]) {
 		t.Error("decryption failed")
 	}

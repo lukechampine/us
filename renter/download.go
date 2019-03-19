@@ -27,7 +27,7 @@ type HostKeyResolver interface {
 type ShardDownloader struct {
 	Downloader *proto.Session
 	Slices     []SectorSlice
-	Key        EncryptionKey
+	Key        *ChaChaKey
 	buf        bytes.Buffer
 }
 
@@ -59,7 +59,7 @@ func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 	// we use chunkIndex * SegmentsPerSector as the starting index. See
 	// SectorBuilder.Append.
 	startIndex := uint64(chunkIndex * merkle.SegmentsPerSector)
-	d.Key.DecryptSegments(data, data, startIndex, 0)
+	d.Key.XORKeyStream(data, startIndex, 0)
 	return data, nil
 }
 
