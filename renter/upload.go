@@ -49,14 +49,12 @@ func (sb *SectorBuilder) Append(data []byte, key *ChaChaKey) {
 	}
 
 	if sb.sectorLen+len(data)+padding > renterhost.SectorSize {
-		// TODO: make this nicer?
 		panic("data exceeds sector size")
 	}
 
-	// copy the data into the sector, adding random padding if necessary
+	// copy the data into the sector, padding if necessary
 	sectorSlice := sb.sector[sb.sectorLen:][:len(data)+padding]
 	copy(sectorSlice, data)
-	fastrand.Read(sectorSlice[len(data):])
 
 	// encrypt the data+padding in place
 	segmentIndex := sb.sectorLen / merkle.SegmentSize
