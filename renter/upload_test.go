@@ -13,6 +13,7 @@ func BenchmarkIdealUpload(b *testing.B) {
 		shards[i] = make([]byte, renterhost.SectorSize)
 	}
 	key := (&MetaFile{}).EncryptionKey(0)
+	nonce := make([]byte, 24)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -23,7 +24,7 @@ func BenchmarkIdealUpload(b *testing.B) {
 		}
 		rsc.Reconstruct(shards)
 		for i := range shards {
-			key.XORKeyStream(shards[i], 0, 0)
+			key.XORKeyStream(shards[i], nonce, 0)
 		}
 	}
 }

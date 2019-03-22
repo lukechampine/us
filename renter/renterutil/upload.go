@@ -372,7 +372,7 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 				hostIndex := curEntry.m.HostIndex(hosts[i].HostKey())
 				shard := shards[hostIndex]
 				key := curEntry.m.EncryptionKey(hostIndex)
-				sectors[i].Append(shard, key, curEntry.chunkIndex)
+				sectors[i].Append(shard, key)
 			}
 			curEntry.chunkIndex++
 			files = append(files, curEntry)

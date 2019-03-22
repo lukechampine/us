@@ -76,13 +76,11 @@ type ChaChaKey struct {
 }
 
 // XORKeyStream xors msg with the keystream derived from k, using startIndex as
-// the starting offset within the stream and revision as the nonce.
-func (k *ChaChaKey) XORKeyStream(msg []byte, startIndex uint64, revision uint32) {
+// the starting offset within the stream. The nonce must be 24 bytes.
+func (k *ChaChaKey) XORKeyStream(msg []byte, nonce []byte, startIndex uint64) {
 	if len(msg)%merkle.SegmentSize != 0 {
 		panic("message must be a multiple of segment size")
 	}
-	nonce := make([]byte, chacha.NonceSize)
-	binary.LittleEndian.PutUint32(nonce[:4], revision)
 	c, err := chacha.NewCipher(nonce, k.key[:], 20)
 	if err != nil {
 		panic(err)

@@ -40,7 +40,7 @@ func (sb *SectorBuilder) Reset() {
 // (unpadded, unencrypted) data.
 //
 // Append panics if len(data) > sb.Remaining().
-func (sb *SectorBuilder) Append(data []byte, key *ChaChaKey, chunkIndex int64) {
+func (sb *SectorBuilder) Append(data []byte, key *ChaChaKey) {
 	// pad the data to a multiple of SegmentSize, which is required
 	// by the encryption scheme
 	var padding int
@@ -59,21 +59,17 @@ func (sb *SectorBuilder) Append(data []byte, key *ChaChaKey, chunkIndex int64) {
 	fastrand.Read(sectorSlice[len(data):])
 
 	// encrypt the data+padding in place
-	//
-	// NOTE: to avoid reusing the same segment index for multiple encryptions,
-	// we use chunkIndex * SegmentsPerSector as the starting index. This is
-	// slightly wasteful, but the space is large enough that we can afford it.
-	// (In the worst case, a single byte of data is stored per chunkIndex; we
-	// can then store up to (2^64/SegmentsPerSector) = 2^48 bytes, or about
-	// 280 TB. In the average case, all but the final sector will be "full",
-	// so the waste is negligible.)
-	startIndex := uint64(chunkIndex * merkle.SegmentsPerSector)
-	key.XORKeyStream(sectorSlice, startIndex, 0)
+	segmentIndex := sb.sectorLen / merkle.SegmentSize
+	var nonce [20]byte
+	fastrand.Read(nonce[:])
+	xchachaNonce := append(nonce[:], make([]byte, 4)...)
+	key.XORKeyStream(sectorSlice, xchachaNonce, uint64(segmentIndex))
 
-	// update sectorLen and record the new slice
+	// record the new slice and update sectorLen
 	sb.slices = append(sb.slices, SectorSlice{
-		SegmentIndex: uint32(sb.sectorLen / merkle.SegmentSize),
+		SegmentIndex: uint32(segmentIndex),
 		NumSegments:  uint32(len(sectorSlice) / merkle.SegmentSize),
+		Nonce:        nonce,
 		Checksum:     crc32.ChecksumIEEE(data),
 	})
 	sb.sectorLen += len(sectorSlice)
@@ -159,7 +155,7 @@ func (u *ShardUploader) EncryptAndUpload(data []byte, chunkIndex int64) (SectorS
 		return SectorSlice{}, errors.New("data exceeds sector size")
 	}
 	u.Sector.Reset()
-	u.Sector.Append(data, u.Key, chunkIndex)
+	u.Sector.Append(data, u.Key)
 	if err := u.Upload(chunkIndex); err != nil {
 		return SectorSlice{}, err
 	}

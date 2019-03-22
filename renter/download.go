@@ -54,12 +54,8 @@ func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 	}
 	data := d.buf.Bytes()
 	// decrypt segments
-	//
-	// NOTE: to avoid reusing the same segment index for multiple encryptions,
-	// we use chunkIndex * SegmentsPerSector as the starting index. See
-	// SectorBuilder.Append.
-	startIndex := uint64(chunkIndex * merkle.SegmentsPerSector)
-	d.Key.XORKeyStream(data, startIndex, 0)
+	xchachaNonce := append(s.Nonce[:], make([]byte, 4)...)
+	d.Key.XORKeyStream(data, xchachaNonce, uint64(s.SegmentIndex))
 	return data, nil
 }
 

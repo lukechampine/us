@@ -20,17 +20,18 @@ func TestEncryption(t *testing.T) {
 	var m MetaIndex
 	fastrand.Read(m.MasterKey[:])
 	key := m.EncryptionKey(0)
+	nonce := make([]byte, 24)
 
 	plaintext := []byte(strings.Repeat("test", 64))
 	ciphertext := append([]byte(nil), plaintext...)
-	key.XORKeyStream(ciphertext, 0, 0)
+	key.XORKeyStream(ciphertext, nonce, 0)
 	if bytes.Equal(ciphertext, plaintext) {
 		t.Fatal("encryption failed")
 	}
 
 	// decrypt starting at a segment offset
 	off := merkle.SegmentSize * 2
-	key.XORKeyStream(ciphertext[off:], 2, 0)
+	key.XORKeyStream(ciphertext[off:], nonce, 2)
 	if !bytes.Equal(ciphertext[off:], plaintext[off:]) {
 		t.Error("decryption failed")
 	}
