@@ -20,7 +20,6 @@ import (
 	"github.com/aead/chacha20/chacha"
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/fastrand"
-	"golang.org/x/crypto/blake2b"
 )
 
 const (
@@ -45,20 +44,21 @@ type MetaIndex struct {
 	Filesize  int64       // original file size
 	Mode      os.FileMode // mode bits
 	ModTime   time.Time   // set when Archive is called
-	MasterKey keySeed     // seed from which shard encryption keys are derived
+	MasterKey KeySeed     // seed from which shard encryption keys are derived
 	MinShards int         // number of shards required to recover file
 	Hosts     []hostdb.HostPublicKey
 }
 
-type keySeed [32]byte
+// A KeySeed derives subkeys and uses them to encrypt and decrypt messages.
+type KeySeed [32]byte
 
 // MarshalJSON implements the json.Marshaler interface.
-func (s keySeed) MarshalJSON() ([]byte, error) {
+func (s KeySeed) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + hex.EncodeToString(s[:]) + `"`), nil
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface.
-func (s *keySeed) UnmarshalJSON(b []byte) error {
+func (s *KeySeed) UnmarshalJSON(b []byte) error {
 	if len(b) < 1 {
 		return errors.New("wrong seed length")
 	}
@@ -70,33 +70,23 @@ func (s *keySeed) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// A ChaChaKey can xor messages with a keystream.
-type ChaChaKey struct {
-	key [32]byte
-}
-
-// XORKeyStream xors msg with the keystream derived from k, using startIndex as
+// XORKeyStream xors msg with the keystream derived from s, using startIndex as
 // the starting offset within the stream. The nonce must be 24 bytes.
-func (k *ChaChaKey) XORKeyStream(msg []byte, nonce []byte, startIndex uint64) {
+func (s *KeySeed) XORKeyStream(msg []byte, nonce []byte, startIndex uint64) {
 	if len(msg)%merkle.SegmentSize != 0 {
 		panic("message must be a multiple of segment size")
+	} else if len(nonce) != chacha.XNonceSize {
+		panic("nonce must be 24 bytes")
 	}
-	c, err := chacha.NewCipher(nonce, k.key[:], 20)
+	// NOTE: since we're using XChaCha20, the nonce and KeySeed are hashed
+	// together to produce a subkey; this is why s is referred to as a "seed"
+	// rather than a key in its own right.
+	c, err := chacha.NewCipher(nonce, s[:], 20)
 	if err != nil {
 		panic(err)
 	}
 	c.SetCounter(startIndex)
 	c.XORKeyStream(msg, msg)
-}
-
-// EncryptionKey returns the encryption key used to encrypt sectors in a given
-// shard.
-func (m *MetaIndex) EncryptionKey(shardIndex int) *ChaChaKey {
-	// We derive the per-shard encryption key as H(masterKey|shardIndex).
-	b := make([]byte, len(m.MasterKey)+8)
-	copy(b, m.MasterKey[:])
-	binary.LittleEndian.PutUint64(b[len(m.MasterKey):], uint64(shardIndex))
-	return &ChaChaKey{key: blake2b.Sum256(b)}
 }
 
 // MaxChunkSize returns the maximum amount of file data that can fit into a

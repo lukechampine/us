@@ -36,7 +36,7 @@ func Checkup(contracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKe
 
 func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver) {
 	defer close(results)
-	for i, hostKey := range m.Hosts {
+	for _, hostKey := range m.Hosts {
 		res := CheckupResult{Host: hostKey}
 
 		contract, ok := contracts[hostKey]
@@ -81,7 +81,7 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 		h := renter.ShardDownloader{
 			Downloader: s,
 			Slices:     slices,
-			Key:        m.EncryptionKey(i),
+			Key:        m.MasterKey,
 		}
 
 		// download a random slice

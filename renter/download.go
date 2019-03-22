@@ -27,7 +27,7 @@ type HostKeyResolver interface {
 type ShardDownloader struct {
 	Downloader *proto.Session
 	Slices     []SectorSlice
-	Key        *ChaChaKey
+	Key        KeySeed
 	buf        bytes.Buffer
 }
 
@@ -90,7 +90,7 @@ func NewShardDownloader(m *MetaFile, contract *Contract, hkr HostKeyResolver) (*
 	}
 	return &ShardDownloader{
 		Downloader: d,
-		Key:        m.EncryptionKey(m.HostIndex(hostKey)),
+		Key:        m.MasterKey,
 		Slices:     slices,
 	}, nil
 }

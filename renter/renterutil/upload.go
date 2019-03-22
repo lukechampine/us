@@ -371,8 +371,7 @@ func uploadDir(op *Operation, nextFile FileIter, contracts renter.ContractSet, m
 			for i := range sectors {
 				hostIndex := curEntry.m.HostIndex(hosts[i].HostKey())
 				shard := shards[hostIndex]
-				key := curEntry.m.EncryptionKey(hostIndex)
-				sectors[i].Append(shard, key)
+				sectors[i].Append(shard, curEntry.m.MasterKey)
 			}
 			curEntry.chunkIndex++
 			files = append(files, curEntry)
@@ -484,7 +483,7 @@ func dialUploaders(m *renter.MetaFile, contracts renter.ContractSet, hkr renter.
 			if !ok {
 				res.err = errors.Errorf("%v: no contract for host", hostKey.ShortKey())
 			} else {
-				res.host, res.err = renter.NewShardUploader(m, m.EncryptionKey(i), contract, hkr, currentHeight)
+				res.host, res.err = renter.NewShardUploader(m, contract, hkr, currentHeight)
 			}
 			resChan <- res
 		}(i)

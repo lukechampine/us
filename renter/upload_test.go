@@ -12,7 +12,7 @@ func BenchmarkIdealUpload(b *testing.B) {
 	for i := range shards {
 		shards[i] = make([]byte, renterhost.SectorSize)
 	}
-	key := (&MetaFile{}).EncryptionKey(0)
+	key := (&MetaFile{}).MasterKey
 	nonce := make([]byte, 24)
 
 	b.ResetTimer()

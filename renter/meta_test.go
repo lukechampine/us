@@ -19,7 +19,7 @@ import (
 func TestEncryption(t *testing.T) {
 	var m MetaIndex
 	fastrand.Read(m.MasterKey[:])
-	key := m.EncryptionKey(0)
+	key := m.MasterKey
 	nonce := make([]byte, 24)
 
 	plaintext := []byte(strings.Repeat("test", 64))

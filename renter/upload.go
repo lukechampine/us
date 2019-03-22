@@ -40,7 +40,7 @@ func (sb *SectorBuilder) Reset() {
 // (unpadded, unencrypted) data.
 //
 // Append panics if len(data) > sb.Remaining().
-func (sb *SectorBuilder) Append(data []byte, key *ChaChaKey) {
+func (sb *SectorBuilder) Append(data []byte, key KeySeed) {
 	// pad the data to a multiple of SegmentSize, which is required
 	// by the encryption scheme
 	var padding int
@@ -123,7 +123,7 @@ func (sb *SectorBuilder) Slices() []SectorSlice {
 type ShardUploader struct {
 	Uploader *proto.Session
 	Shard    *Shard
-	Key      *ChaChaKey
+	Key      KeySeed
 	Sector   SectorBuilder
 }
 
@@ -178,7 +178,7 @@ func (u *ShardUploader) Close() error {
 
 // NewShardUploader connects to a host and returns a ShardUploader capable of
 // uploading m's data and writing to one of m's Shard files.
-func NewShardUploader(m *MetaFile, key *ChaChaKey, contract *Contract, hkr HostKeyResolver, currentHeight types.BlockHeight) (*ShardUploader, error) {
+func NewShardUploader(m *MetaFile, contract *Contract, hkr HostKeyResolver, currentHeight types.BlockHeight) (*ShardUploader, error) {
 	hostKey := contract.HostKey()
 	// open shard
 	sf, err := OpenShard(m.ShardPath(hostKey))
@@ -200,6 +200,6 @@ func NewShardUploader(m *MetaFile, key *ChaChaKey, contract *Contract, hkr HostK
 	return &ShardUploader{
 		Uploader: u,
 		Shard:    sf,
-		Key:      key,
+		Key:      m.MasterKey,
 	}, nil
 }

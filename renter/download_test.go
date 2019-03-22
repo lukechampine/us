@@ -16,7 +16,7 @@ func BenchmarkIdealDownload(b *testing.B) {
 			shards[i] = shards[i][:0]
 		}
 	}
-	key := (&MetaFile{}).EncryptionKey(0)
+	key := (&MetaFile{}).MasterKey
 	nonce := make([]byte, 24)
 
 	b.ResetTimer()

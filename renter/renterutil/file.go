@@ -56,7 +56,7 @@ func (f *PseudoFile) downloadChunk(chunk int64) error {
 		defer f.ds.release(hostKey)
 		hosts[i] = &renter.ShardDownloader{
 			Downloader: d,
-			Key:        f.m.EncryptionKey(i),
+			Key:        f.m.MasterKey,
 			Slices:     f.shards[i],
 		}
 	}
