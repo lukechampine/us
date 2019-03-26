@@ -3,50 +3,24 @@ package renterutil
 import (
 	"bytes"
 	"io"
+	"strings"
 	"sync"
 
 	"github.com/pkg/errors"
-	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 )
 
 // A PseudoFile presents a file-like interface for a metafile stored on Sia
 // hosts.
 type PseudoFile struct {
-	// static fields
-	m             renter.MetaIndex
-	shards        [][]renter.SectorSlice
-	ds            *DownloaderSet
-	lastChunkSize int64
-
-	// dynamic fields
-	buf         bytes.Buffer
-	offset      int64 // current offset within file
-	chunk       int64 // current chunk index
-	chunkOffset int64 // current offset within chunk
-
-	mu sync.Mutex
+	m      renter.MetaIndex
+	shards [][]renter.SectorSlice
+	ds     *DownloaderSet
+	offset int64
+	mu     sync.Mutex // serializes all methods
 }
 
-func (f *PseudoFile) calculateChunkOffset(offset int64) (chunkIndex, chunkOffset int64) {
-	if len(f.shards) == 0 {
-		return -1, -1
-	}
-	rem := offset
-	for i, s := range f.shards[0] {
-		chunkSize := int64(s.NumSegments*merkle.SegmentSize) * int64(f.m.MinShards)
-		if rem < chunkSize {
-			return int64(i), rem
-		}
-		rem -= chunkSize
-	}
-	return -1, -1
-}
-
-func (f *PseudoFile) downloadChunk(chunk int64) error {
-	if chunk >= int64(len(f.shards[0])) {
-		return io.EOF
-	}
+func (f *PseudoFile) downloadShards(n int) ([][]byte, error) {
 	hosts := make([]*renter.ShardDownloader, len(f.m.Hosts))
 	for i, hostKey := range f.m.Hosts {
 		d, ok := f.ds.acquire(hostKey)
@@ -60,23 +34,92 @@ func (f *PseudoFile) downloadChunk(chunk int64) error {
 			Slices:     f.shards[i],
 		}
 	}
-	shards, shardLen, _, err := DownloadChunkShards(hosts, chunk, f.m.MinShards, nil)
-	if err != nil {
-		return err
+	// compute per-shard offset + length, padding to segment size
+	offset := f.offset / int64(f.m.MinShards)
+	if offset%64 != 0 {
+		offset += 64 - (offset % 64)
+	}
+	length := int64(n / f.m.MinShards)
+	if length%64 != 0 {
+		length += 64 - (length % 64)
+	}
+	return downloadRange(hosts, offset, length, f.m.MinShards)
+}
+
+func downloadRange(hosts []*renter.ShardDownloader, offset, length int64, minShards int) (shards [][]byte, err error) {
+	errNoHost := errors.New("no downloader for this host")
+	type result struct {
+		shardIndex int
+		shard      []byte
+		err        error
+	}
+	// spawn minShards goroutines that receive download requests from
+	// reqChan and send responses to resChan.
+	reqChan := make(chan int, minShards)
+	resChan := make(chan result, minShards)
+	var wg sync.WaitGroup
+	reqIndex := 0
+	for ; reqIndex < minShards; reqIndex++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for shardIndex := range reqChan {
+				res := result{shardIndex: shardIndex}
+				host := hosts[shardIndex]
+				if host == nil {
+					res.err = errNoHost
+				} else {
+					var buf bytes.Buffer
+					res.err = host.CopySection(&buf, offset, length)
+					res.err = errors.Wrap(res.err, host.HostKey().ShortKey())
+					res.shard = buf.Bytes()
+				}
+				resChan <- res
+			}
+		}()
+		// prepopulate reqChan with first minShards shards
+		reqChan <- reqIndex
+	}
+	// make sure all goroutines exit before returning
+	defer func() {
+		close(reqChan)
+		wg.Wait()
+	}()
+
+	// collect the results of each shard download, appending successful
+	// downloads to goodRes and failed downloads to badRes. If a download
+	// fails, send the next untried shard index. Break as soon as we have
+	// minShards successful downloads or if the number of failures makes it
+	// impossible to recover the chunk.
+	var goodRes, badRes []result
+	for len(goodRes) < minShards && len(badRes) <= len(hosts)-minShards {
+		res := <-resChan
+		if res.err == nil {
+			goodRes = append(goodRes, res)
+		} else {
+			badRes = append(badRes, res)
+			if reqIndex < len(hosts) {
+				reqChan <- reqIndex
+				reqIndex++
+			}
+		}
+	}
+	if len(goodRes) < minShards {
+		var errStrings []string
+		for _, r := range badRes {
+			if r.err != errNoHost {
+				errStrings = append(errStrings, r.err.Error())
+			}
+		}
+		return nil, errors.New("too many hosts did not supply their shard:\n" + strings.Join(errStrings, "\n"))
 	}
 
-	// reconstruct missing shards and write to buffer
-	f.buf.Reset()
-	writeLen := shardLen * f.m.MinShards
-	if chunk == int64(len(f.shards[0])-1) {
-		// last chunk is a special case
-		writeLen = int(f.lastChunkSize)
+	shards = make([][]byte, len(hosts))
+	for _, r := range goodRes {
+		shards[r.shardIndex] = r.shard
 	}
-	err = f.m.ErasureCode().Recover(&f.buf, shards, writeLen)
-	if err != nil {
-		return errors.Wrap(err, "could not recover sector")
-	}
-	return nil
+
+	return shards, nil
 }
 
 // Read implements io.Reader.
@@ -87,18 +130,24 @@ func (f *PseudoFile) Read(p []byte) (int, error) {
 	if f.offset >= f.m.Filesize {
 		return 0, io.EOF
 	}
-	if f.chunkOffset >= int64(f.buf.Len()) {
-		if err := f.downloadChunk(f.chunk); err != nil {
-			return 0, err
-		}
-		f.chunk++
-		f.chunkOffset = 0
+
+	shards, err := f.downloadShards(len(p))
+	if err != nil {
+		return 0, err
 	}
-	buf := f.buf.Bytes()
-	n := copy(p, buf[f.chunkOffset:])
-	f.chunkOffset += int64(n)
-	f.offset += int64(n)
-	return n, nil
+
+	// recover data shards directly into p
+	buf := bytes.NewBuffer(p[:0])
+	writeLen := len(p)
+	if writeLen > int(f.m.Filesize-f.offset) {
+		writeLen = int(f.m.Filesize - f.offset)
+	}
+	err = f.m.ErasureCode().Recover(buf, shards, writeLen)
+	if err != nil {
+		return 0, errors.Wrap(err, "could not recover chunk")
+	}
+	f.offset += int64(writeLen)
+	return writeLen, nil
 }
 
 // Seek implements io.Seeker.
@@ -119,11 +168,6 @@ func (f *PseudoFile) Seek(offset int64, whence int) (int64, error) {
 		return 0, errors.New("seek position cannot be negative")
 	}
 	f.offset = newOffset
-	oldChunk := f.chunk
-	f.chunk, f.chunkOffset = f.calculateChunkOffset(newOffset)
-	if f.chunk != oldChunk {
-		f.buf.Reset()
-	}
 	return f.offset, nil
 }
 
@@ -137,16 +181,9 @@ func NewPseudoFile(m *renter.MetaFile, downloaders *DownloaderSet) (*PseudoFile,
 		}
 		shards[i] = shard
 	}
-	// determine lastChunkSize
-	lastChunkSize := m.Filesize
-	for _, s := range shards[0][:len(shards[0])-1] {
-		lastChunkSize -= int64(s.NumSegments*merkle.SegmentSize) * int64(m.MinShards)
-	}
 	return &PseudoFile{
-		m:             m.MetaIndex,
-		shards:        shards,
-		ds:            downloaders,
-		chunk:         0,
-		lastChunkSize: lastChunkSize,
+		m:      m.MetaIndex,
+		shards: shards,
+		ds:     downloaders,
 	}, nil
 }
