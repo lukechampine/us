@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	"lukechampine.com/us/merkle"
+
 	"github.com/pkg/errors"
 	"lukechampine.com/us/renter"
 )
@@ -35,15 +37,12 @@ func (f *PseudoFile) downloadShards(n int) ([][]byte, error) {
 		}
 	}
 	// compute per-shard offset + length, padding to segment size
-	offset := f.offset / int64(f.m.MinShards)
-	if offset%64 != 0 {
-		offset += 64 - (offset % 64)
+	start := (f.offset / int64(f.m.MinShards*merkle.SegmentSize)) * merkle.SegmentSize
+	end := ((f.offset + int64(n)) / int64(f.m.MinShards*merkle.SegmentSize)) * merkle.SegmentSize
+	if (f.offset+int64(n))%int64(f.m.MinShards*merkle.SegmentSize) != 0 {
+		end += merkle.SegmentSize
 	}
-	length := int64(n / f.m.MinShards)
-	if length%64 != 0 {
-		length += 64 - (length % 64)
-	}
-	return downloadRange(hosts, offset, length, f.m.MinShards)
+	return downloadRange(hosts, start, end-start, f.m.MinShards)
 }
 
 func downloadRange(hosts []*renter.ShardDownloader, offset, length int64, minShards int) (shards [][]byte, err error) {
@@ -53,8 +52,6 @@ func downloadRange(hosts []*renter.ShardDownloader, offset, length int64, minSha
 		shard      []byte
 		err        error
 	}
-	// spawn minShards goroutines that receive download requests from
-	// reqChan and send responses to resChan.
 	reqChan := make(chan int, minShards)
 	resChan := make(chan result, minShards)
 	var wg sync.WaitGroup
@@ -77,20 +74,12 @@ func downloadRange(hosts []*renter.ShardDownloader, offset, length int64, minSha
 				resChan <- res
 			}
 		}()
-		// prepopulate reqChan with first minShards shards
 		reqChan <- reqIndex
 	}
-	// make sure all goroutines exit before returning
 	defer func() {
 		close(reqChan)
 		wg.Wait()
 	}()
-
-	// collect the results of each shard download, appending successful
-	// downloads to goodRes and failed downloads to badRes. If a download
-	// fails, send the next untried shard index. Break as soon as we have
-	// minShards successful downloads or if the number of failures makes it
-	// impossible to recover the chunk.
 	var goodRes, badRes []result
 	for len(goodRes) < minShards && len(badRes) <= len(hosts)-minShards {
 		res := <-resChan
@@ -113,13 +102,26 @@ func downloadRange(hosts []*renter.ShardDownloader, offset, length int64, minSha
 		}
 		return nil, errors.New("too many hosts did not supply their shard:\n" + strings.Join(errStrings, "\n"))
 	}
-
 	shards = make([][]byte, len(hosts))
 	for _, r := range goodRes {
 		shards[r.shardIndex] = r.shard
 	}
-
 	return shards, nil
+}
+
+type skipWriter struct {
+	b    *bytes.Buffer
+	skip int
+}
+
+func (sw *skipWriter) Write(p []byte) (int, error) {
+	toSkip := sw.skip
+	if toSkip > len(p) {
+		toSkip = len(p)
+	}
+	sw.b.Write(p[toSkip:])
+	sw.skip -= toSkip
+	return len(p), nil
 }
 
 // Read implements io.Reader.
@@ -137,12 +139,13 @@ func (f *PseudoFile) Read(p []byte) (int, error) {
 	}
 
 	// recover data shards directly into p
-	buf := bytes.NewBuffer(p[:0])
-	writeLen := len(p)
+	skip := int(f.offset % merkle.SegmentSize)
+	w := &skipWriter{bytes.NewBuffer(p[:0]), skip}
+	writeLen := skip + len(p)
 	if writeLen > int(f.m.Filesize-f.offset) {
 		writeLen = int(f.m.Filesize - f.offset)
 	}
-	err = f.m.ErasureCode().Recover(buf, shards, writeLen)
+	err = f.m.ErasureCode().Recover(w, shards, writeLen)
 	if err != nil {
 		return 0, errors.Wrap(err, "could not recover chunk")
 	}
