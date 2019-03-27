@@ -161,4 +161,12 @@ func TestFile(t *testing.T) {
 	} else if !bytes.Equal(p[:n], data[len(data)-500:]) {
 		t.Fatal("data from Read does not match actual data")
 	}
+
+	// truncate and read
+	if err := pf.Truncate(1023); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.Seek(512, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	checkRead(data[512:1023])
 }

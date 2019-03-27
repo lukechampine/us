@@ -177,6 +177,21 @@ func (f *PseudoFile) Seek(offset int64, whence int) (int64, error) {
 	return f.offset, nil
 }
 
+// Truncate changes the size of the file.
+// It does not change the I/O offset.
+func (f *PseudoFile) Truncate(n int64) error {
+	if n < 0 {
+		return errors.New("new size cannot be negative")
+	}
+	if n > f.m.Filesize {
+		// TODO: this should be legal; the new space should be filled with
+		// zeros. Unfortunately, this requires uploading new data.
+		return errors.New("new size cannot exceed current size")
+	}
+	f.m.Filesize = n
+	return nil
+}
+
 // NewPseudoFile returns a PseudoFile for the specified metafile.
 func NewPseudoFile(m *renter.MetaFile, downloaders *DownloaderSet) (*PseudoFile, error) {
 	shards := make([][]renter.SectorSlice, len(m.Hosts))
