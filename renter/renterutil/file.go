@@ -110,7 +110,7 @@ func downloadRange(hosts []*renter.ShardDownloader, offset, length int64, minSha
 }
 
 type skipWriter struct {
-	b    *bytes.Buffer
+	buf  []byte
 	skip int
 }
 
@@ -119,7 +119,11 @@ func (sw *skipWriter) Write(p []byte) (int, error) {
 	if toSkip > len(p) {
 		toSkip = len(p)
 	}
-	sw.b.Write(p[toSkip:])
+	if len(p[toSkip:]) > len(sw.buf) {
+		panic("write is too large for buffer")
+	}
+	n := copy(sw.buf, p[toSkip:])
+	sw.buf = sw.buf[n:]
 	sw.skip -= toSkip
 	return len(p), nil
 }
@@ -140,7 +144,7 @@ func (f *PseudoFile) Read(p []byte) (int, error) {
 
 	// recover data shards directly into p
 	skip := int(f.offset % merkle.SegmentSize)
-	w := &skipWriter{bytes.NewBuffer(p[:0]), skip}
+	w := &skipWriter{p, skip}
 	writeLen := skip + len(p)
 	if writeLen > int(f.m.Filesize-f.offset) {
 		writeLen = int(f.m.Filesize - f.offset)
