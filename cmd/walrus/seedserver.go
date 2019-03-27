@@ -113,6 +113,11 @@ func (s *seedServer) consensusHandler(w http.ResponseWriter, req *http.Request, 
 	})
 }
 
+func (s *seedServer) feeHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	median, _ := s.tp.FeeEstimation()
+	writeJSON(w, median)
+}
+
 // A LimboUTXO is an unspent transaction output that may or may not be
 // spendable.
 type LimboUTXO struct {
@@ -413,6 +418,7 @@ func NewSeedServer(w *wallet.SeedWallet, tp wallet.TransactionPool) http.Handler
 	mux.GET("/balance", s.balanceHandler)
 	mux.POST("/broadcast", s.broadcastHandler)
 	mux.GET("/consensus", s.consensusHandler)
+	mux.GET("/fee", s.feeHandler)
 	mux.PUT("/limbo/:id", s.limboHandlerPUT)
 	mux.GET("/limbo", s.limboHandler)
 	mux.DELETE("/limbo/:id", s.limboHandlerDELETE)

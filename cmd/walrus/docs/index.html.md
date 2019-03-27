@@ -112,8 +112,8 @@ curl "localhost:9380/balance"
 "123000000000000000000000000000"
 ```
 
-Returns the current wallet balance in Hastings. This is equivalent to summing
-the values of the outputs returned by `/utxos`.
+Returns the current wallet balance in hastings. This is equivalent to summing
+the values of the outputs returned by [`/utxos`](#list-unspent-outputs).
 
 ### HTTP Request
 
@@ -207,6 +207,47 @@ clients should always poll the consensus change ID for changes, not the height.
 None
 
 
+## Get Recommended Transaction Fee
+
+> Example Request:
+
+```shell
+curl "localhost:9380/fee"
+```
+
+> Example Response:
+
+```json
+"123000000000"
+```
+
+Returns the current recommended transaction fee in hastings per byte of the
+Sia-encoded transaction.
+
+<aside class="notice">
+This value is the median fee of the last six blocks. Using a higher fee may
+result in your transaction being confirmed faster.
+</aside>
+
+<aside class="notice">
+You can approximate the size of a standard Sia-encoded transaction with the
+following equation:<br>
+<br>
+<code>size = 100 + (num_inputs * 313) + (num_outputs * 50)</code><br>
+<br>
+Do not use this equation for transactions that include arbitrary data, file
+contracts, storage proofs, siafunds, or multi-sig inputs.
+</aside>
+
+### HTTP Request
+
+`GET http://localhost:9380/consensus`
+
+### Errors
+
+None
+
+
 ## List Limbo Outputs
 
 > Example Request:
@@ -248,8 +289,8 @@ curl "localhost:9380/limbo/8d16e3de006a57028fd014ab85c2a76a32c5bbd2e1df9340b0479
   -X PUT
 ```
 
-Places an output in [Limbo](#limbo). The output will no longer appear in `/utxos` or
-contribute to the wallet's balance.
+Places an output in [Limbo](#limbo). The output will no longer appear in
+[`/utxos`](#list-unspent-outputs) or contribute to the wallet's balance.
 
 <aside class="notice">
 Manually moving outputs to Limbo is typically unnecessary. When a transaction is
@@ -282,8 +323,8 @@ curl "localhost:9380/limbo/8d16e3de006a57028fd014ab85c2a76a32c5bbd2e1df9340b0479
   -X DELETE
 ```
 
-Removes an output from [Limbo](#limbo). The output will appear in `/utxos` and
-contribute to the wallet's balance.
+Removes an output from [Limbo](#limbo). The output will appear in
+[`/utxos`](#list-unspent-outputs) and contribute to the wallet's balance.
 
 <aside class="notice">
 If an output appears in the blockchain, it will automatically be removed from
@@ -320,7 +361,7 @@ curl "localhost:9380/memos/2936d6eab2272dda76603aa8078be02d979cf52ac3d06c799536c
 
 Adds a memo for a transaction, overwriting the previous memo if it exists.
 
-<aside class="notice">
+<aside class="warning">
 Memos are not stored on the blockchain! They exist only in your local wallet.
 </aside>
 
@@ -487,7 +528,7 @@ curl "localhost:9380/transactions/2936d6eab2272dda76603aa8078be02d979cf52ac3d06c
 ```
 
 Returns the transaction with the specified ID, as well as inflow, outflow, and
-fee information. The transaction must appear in `/transactions`.
+fee information. The transaction must appear in [`/transactions`](#list-transactions).
 
 ### HTTP Request
 
@@ -553,8 +594,8 @@ None
 
 # Hot Wallet API
 
-Hot wallets have all of the routes of generic wallets, but are also capable of
-generating new addresses and signing transactions.
+Hot wallets have all of the routes of [generic wallets](#generic-wallet-api),
+but are also capable of generating new addresses and signing transactions.
 
 ## Generate a New Address
 
@@ -572,7 +613,7 @@ curl "localhost:9380/nextaddress" \
 ```
 
 Generates a new address from the wallet's seed. The address will also appear in
-`/addresses`.
+[`/addresses`](#list-addresses).
 
 <aside class="notice">
 Generating a new address increments the seed index.
@@ -602,7 +643,8 @@ curl "localhost:9380/seedindex"
 ```
 
 Returns the wallet's current seed index. This index will be used to derive the
-next address. It is equal to the number of addresses reported by `/addresses`.
+next address. It is equal to the number of addresses reported by
+[`/addresses`](#list-addresses).
 
 ### HTTP Request
 
@@ -709,9 +751,9 @@ Signs the supplied transaction using keys derived from the wallet's seed.
 
 # Watch-Only Wallet API
 
-Watch-only wallets have all of the routes of generic wallets, as well as the
-ability to track arbitrary addresses. Unlike hot wallets, watch-only wallets
-cannot generate new addresses or sign transactions.
+Watch-only wallets have all of the routes of [generic wallets](#generic-wallet-api),
+as well as the ability to track arbitrary addresses. Unlike hot wallets,
+watch-only wallets cannot generate new addresses or sign transactions.
 
 ## Import an Address
 
@@ -794,11 +836,23 @@ Parameter | Description
 # Limbo
 
 When an output is spent in a transaction, it cannot be spent again. However,
-there is a period of uncertainty between the transaction being *broadcast* and
-the transaction appearing in the blockchain. During this period, we say that the
-transaction's outputs are "in Limbo." If an output has been in Limbo for a long
-time (multiple blocks), it is typically safe to reuse it in a different
-transaction.
+there is a period of uncertainty between the transaction being *broadcast* to
+miners and the transaction actually appearing in the blockchain. If the
+transaction has insufficient fees, or is invalidated by a later block, miners
+may discard it.
+
+During this period of uncertainty, we say that the transaction's outputs are "in
+Limbo." After an output has been in Limbo for a sufficiently long time, it is
+typically safe to assume that its corresponding transaction will never be
+included in a future block. The output may then be manually removed from Limbo
+and reused in a different transaction without risking a double-spend.
+
+<aside class="warning">
+Limbo is distinct from the question of transaction finality. Outputs will be
+removed from Limbo as soon as they have a single confirmation, but subsequent
+blocks may reorg the chain and "unspend" the output. Limbo should be used solely
+as a means to avoid accidental double-spends.
+</aside>
 
 
 # Transaction Structure
@@ -845,8 +899,9 @@ transaction. The `parentID` identifies which output is being spent, and the
 address). Unlock conditions consist of a set of `publicKeys`, a number of
 `signaturesRequired`, and a `timelock`. The vast majority of unlock conditions
 use a single public key and no timelock (i.e. a timelock of 0); these are known
-as "standard unlock conditions." (The addresses returned by `/nextaddress`
-always have standard unlock conditions.)
+as "standard unlock conditions." The addresses returned by
+[`/nextaddress`](#generate-a-new-address) always have standard unlock
+conditions.
 
 Next come the `siacoinOutputs`. Each output specifies an `unlockHash` (address)
 and a `value` of coins to send to that address. When these outputs are later
@@ -858,8 +913,8 @@ Values are specified in hastings, where 10^24 hastings = 1 siacoin. You must use
 an arbitrary-precision integer library to perform arithmetic on hastings.
 </aside>
 
-Next are the `minerFees`. Unlike Bitcoin, the fees are specified explicitly; the
-sum of the inputs must equal the sum of the outputs, plus the miner fees.
+Next are the `minerFees`. Unlike Bitcoin, the fees are specified explicitly: the
+sum of the inputs must equal the sum of the outputs plus the miner fees.
 
 Finally come the `transactionSignatures`. Every input must have a corresponding
 signature. The `parentID` specifies which input is being signed, and the

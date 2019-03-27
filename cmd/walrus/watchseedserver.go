@@ -123,6 +123,11 @@ func (s *watchSeedServer) consensusHandler(w http.ResponseWriter, req *http.Requ
 	})
 }
 
+func (s *watchSeedServer) feeHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	median, _ := s.tp.FeeEstimation()
+	writeJSON(w, median)
+}
+
 func (s *watchSeedServer) limboHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	outputs := s.w.LimboOutputs()
 	utxos := make(ResponseLimboUTXOs, len(outputs))
@@ -275,6 +280,7 @@ func NewWatchSeedServer(w *wallet.WatchOnlyWallet, tp wallet.TransactionPool) ht
 	mux.GET("/balance", s.balanceHandler)
 	mux.POST("/broadcast", s.broadcastHandler)
 	mux.GET("/consensus", s.consensusHandler)
+	mux.GET("/fee", s.feeHandler)
 	mux.GET("/limbo", s.limboHandler)
 	mux.PUT("/limbo/:id", s.limboHandlerPUT)
 	mux.DELETE("/limbo/:id", s.limboHandlerDELETE)
