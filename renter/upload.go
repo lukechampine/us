@@ -32,31 +32,32 @@ func (sb *SectorBuilder) Reset() {
 }
 
 // Append appends data to the sector being constructed, encrypting it with the
-// given key and chunkIndex. The data is also padded with random bytes to the
-// nearest multiple of merkle.SegmentSize.
+// given key and chunkIndex. The data must be a multiple of merkle.SegmentSize.
 //
 // Each call to Append creates a SectorSlice that is accessible via the Slices
 // method. This SectorSlice reflects the length and checksum of the original
-// (unpadded, unencrypted) data.
+// (unencrypted) data.
 //
 // Append panics if len(data) > sb.Remaining().
 func (sb *SectorBuilder) Append(data []byte, key KeySeed) {
-	// pad the data to a multiple of SegmentSize, which is required
-	// by the encryption scheme
-	var padding int
-	if mod := len(data) % merkle.SegmentSize; mod != 0 {
-		padding = merkle.SegmentSize - mod
+	if len(data)%merkle.SegmentSize != 0 {
+		// NOTE: instead of panicking, we could silently pad the data; however,
+		// this is very dangerous, because the SectorSlice will not record the
+		// true size of the data, but rather the rounded-up number of segments.
+		// Padding is okay at the end of the file, since we can use the filesize
+		// to figure out how much padding was added, but padding in the middle
+		// of a file is almost certainly a developer error.
+		panic("len(data) must be a multiple of merkle.SegmentSize bytes")
 	}
-
-	if sb.sectorLen+len(data)+padding > renterhost.SectorSize {
+	if sb.sectorLen+len(data) > renterhost.SectorSize {
 		panic("data exceeds sector size")
 	}
 
-	// copy the data into the sector, padding if necessary
-	sectorSlice := sb.sector[sb.sectorLen:][:len(data)+padding]
+	// copy the data into the sector
+	sectorSlice := sb.sector[sb.sectorLen:][:len(data)]
 	copy(sectorSlice, data)
 
-	// encrypt the data+padding in place
+	// encrypt the data in place
 	segmentIndex := sb.sectorLen / merkle.SegmentSize
 	var nonce [20]byte
 	fastrand.Read(nonce[:])
