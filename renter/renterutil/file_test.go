@@ -3,7 +3,6 @@ package renterutil
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -130,33 +129,36 @@ func TestFile(t *testing.T) {
 	}
 
 	// begin file method tests
-	p := make([]byte, 1024)
-	if _, err := pf.Read(p); err != nil {
-		t.Fatal(err)
-	} else if !bytes.Equal(p, data[:len(p)]) {
-		fmt.Println(bytes.Index(data, p[:134]))
-		t.Fatal("data from Read does not match actual data")
+	p := make([]byte, m.Filesize)
+	checkRead := func(d []byte) {
+		if n, err := pf.Read(p[:len(d)]); err != nil {
+			t.Fatal(err)
+		} else if !bytes.Equal(p[:n], d) {
+			t.Fatal("data from Read does not match actual data")
+		}
 	}
-	p = make([]byte, 1024)
-	if _, err := pf.Read(p); err != nil {
+	checkRead(data[:1024])
+	checkRead(data[1024:2048])
+
+	if _, err := pf.Seek(-2048, io.SeekCurrent); err != nil {
 		t.Fatal(err)
-	} else if !bytes.Equal(p, data[len(p):2*len(p)]) {
-		t.Fatal("data from Read does not match actual data")
 	}
-	p = make([]byte, 1024)
-	if _, err := pf.Seek(0, io.SeekStart); err != nil {
-		t.Fatal(err)
-	} else if _, err := pf.Read(p); err != nil {
-		t.Fatal(err)
-	} else if !bytes.Equal(p, data[:len(p)]) {
-		t.Fatal("data from Read does not match actual data")
-	}
-	p = make([]byte, 1024)
+	checkRead(data[:1024])
+
 	if _, err := pf.Seek(1, io.SeekStart); err != nil {
 		t.Fatal(err)
-	} else if _, err := pf.Read(p); err != nil {
+	}
+	checkRead(data[1 : 1+1024])
+
+	// partial read at end
+	if _, err := pf.Seek(500, io.SeekEnd); err != nil {
 		t.Fatal(err)
-	} else if !bytes.Equal(p, data[1:][:len(p)]) {
+	}
+	if n, err := pf.Read(p); err != nil {
+		t.Fatal(err)
+	} else if n != 500 {
+		t.Fatalf("expected to read 500 bytes, got %v", n)
+	} else if !bytes.Equal(p[:n], data[len(data)-500:]) {
 		t.Fatal("data from Read does not match actual data")
 	}
 }

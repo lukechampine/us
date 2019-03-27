@@ -135,6 +135,9 @@ func (f *PseudoFile) Read(p []byte) (int, error) {
 
 	if f.offset >= f.m.Filesize {
 		return 0, io.EOF
+	} else if int64(len(p)) > f.m.Filesize-f.offset {
+		// partial read
+		p = p[:f.m.Filesize-f.offset]
 	}
 
 	shards, err := f.downloadShards(len(p))
@@ -145,16 +148,12 @@ func (f *PseudoFile) Read(p []byte) (int, error) {
 	// recover data shards directly into p
 	skip := int(f.offset % merkle.SegmentSize)
 	w := &skipWriter{p, skip}
-	writeLen := skip + len(p)
-	if writeLen > int(f.m.Filesize-f.offset) {
-		writeLen = int(f.m.Filesize - f.offset)
-	}
-	err = f.m.ErasureCode().Recover(w, shards, writeLen)
+	err = f.m.ErasureCode().Recover(w, shards, skip+len(p))
 	if err != nil {
 		return 0, errors.Wrap(err, "could not recover chunk")
 	}
-	f.offset += int64(writeLen)
-	return writeLen, nil
+	f.offset += int64(len(p))
+	return len(p), nil
 }
 
 // Seek implements io.Seeker.
