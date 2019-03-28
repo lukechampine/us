@@ -12,14 +12,17 @@ import (
 	"lukechampine.com/us/renter"
 )
 
+var errNoHost = errors.New("no downloader for this host")
+
 // A PseudoFile presents a file-like interface for a metafile stored on Sia
 // hosts.
 type PseudoFile struct {
-	m      renter.MetaIndex
-	shards [][]renter.SectorSlice
-	ds     *DownloaderSet
-	offset int64
-	mu     sync.Mutex // serializes all methods
+	m         renter.MetaIndex
+	shards    [][]renter.SectorSlice
+	ds        *DownloaderSet
+	offset    int64
+	shardBufs []bytes.Buffer
+	mu        sync.Mutex // serializes all methods
 }
 
 func (f *PseudoFile) downloadShards(n int) ([][]byte, error) {
@@ -42,21 +45,19 @@ func (f *PseudoFile) downloadShards(n int) ([][]byte, error) {
 	if (f.offset+int64(n))%int64(f.m.MinShards*merkle.SegmentSize) != 0 {
 		end += merkle.SegmentSize
 	}
-	return downloadRange(hosts, start, end-start, f.m.MinShards)
-}
+	offset, length := start, end-start
 
-func downloadRange(hosts []*renter.ShardDownloader, offset, length int64, minShards int) (shards [][]byte, err error) {
-	errNoHost := errors.New("no downloader for this host")
+	// download in parallel
 	type result struct {
 		shardIndex int
 		shard      []byte
 		err        error
 	}
-	reqChan := make(chan int, minShards)
-	resChan := make(chan result, minShards)
+	reqChan := make(chan int, f.m.MinShards)
+	resChan := make(chan result, f.m.MinShards)
 	var wg sync.WaitGroup
 	reqIndex := 0
-	for ; reqIndex < minShards; reqIndex++ {
+	for ; reqIndex < f.m.MinShards; reqIndex++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -66,8 +67,9 @@ func downloadRange(hosts []*renter.ShardDownloader, offset, length int64, minSha
 				if host == nil {
 					res.err = errNoHost
 				} else {
-					var buf bytes.Buffer
-					res.err = host.CopySection(&buf, offset, length)
+					buf := &f.shardBufs[shardIndex]
+					buf.Reset()
+					res.err = host.CopySection(buf, offset, length)
 					res.err = errors.Wrap(res.err, host.HostKey().ShortKey())
 					res.shard = buf.Bytes()
 				}
@@ -81,7 +83,7 @@ func downloadRange(hosts []*renter.ShardDownloader, offset, length int64, minSha
 		wg.Wait()
 	}()
 	var goodRes, badRes []result
-	for len(goodRes) < minShards && len(badRes) <= len(hosts)-minShards {
+	for len(goodRes) < f.m.MinShards && len(badRes) <= len(hosts)-f.m.MinShards {
 		res := <-resChan
 		if res.err == nil {
 			goodRes = append(goodRes, res)
@@ -93,7 +95,7 @@ func downloadRange(hosts []*renter.ShardDownloader, offset, length int64, minSha
 			}
 		}
 	}
-	if len(goodRes) < minShards {
+	if len(goodRes) < f.m.MinShards {
 		var errStrings []string
 		for _, r := range badRes {
 			if r.err != errNoHost {
@@ -102,7 +104,7 @@ func downloadRange(hosts []*renter.ShardDownloader, offset, length int64, minSha
 		}
 		return nil, errors.New("too many hosts did not supply their shard:\n" + strings.Join(errStrings, "\n"))
 	}
-	shards = make([][]byte, len(hosts))
+	shards := make([][]byte, len(hosts))
 	for _, r := range goodRes {
 		shards[r.shardIndex] = r.shard
 	}
@@ -203,8 +205,9 @@ func NewPseudoFile(m *renter.MetaFile, downloaders *DownloaderSet) (*PseudoFile,
 		shards[i] = shard
 	}
 	return &PseudoFile{
-		m:      m.MetaIndex,
-		shards: shards,
-		ds:     downloaders,
+		m:         m.MetaIndex,
+		shards:    shards,
+		ds:        downloaders,
+		shardBufs: make([]bytes.Buffer, len(m.Hosts)),
 	}, nil
 }
