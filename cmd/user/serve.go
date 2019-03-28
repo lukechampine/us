@@ -38,6 +38,7 @@ func serve(contractDir, metaDir, addr string) error {
 		<-sigChan
 		log.Println("Stopping server...")
 		srv.Close()
+		downloaders.Close()
 	}()
 	log.Printf("Listening on %v...", addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

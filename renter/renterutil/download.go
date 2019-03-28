@@ -139,6 +139,7 @@ func downloadStream(op *Operation, w io.Writer, offset int64, contracts renter.C
 		op.die(err)
 		return
 	}
+	defer downloaders.Close()
 	pf, err := NewPseudoFile(m, downloaders)
 	if err != nil {
 		op.die(err)
