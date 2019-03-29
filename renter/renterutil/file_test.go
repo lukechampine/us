@@ -41,7 +41,7 @@ func (hkr testHKR) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAddre
 // createTestingPair creates a renter and host, initiates a Session between
 // them, and forms and locks a contract.
 func createHostWithContract(tb testing.TB) (*ghost.Host, *renter.Contract) {
-	host, err := ghost.New()
+	host, err := ghost.New(":0")
 	if err != nil {
 		tb.Fatal(err)
 	}

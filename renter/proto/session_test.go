@@ -49,7 +49,7 @@ func (e *contractEditor) SetRevision(rev ContractRevision) error {
 func createTestingPair(tb testing.TB) (*Session, *ghost.Host) {
 	tb.Helper()
 
-	host, err := ghost.New()
+	host, err := ghost.New(":0")
 	if err != nil {
 		tb.Fatal(err)
 	}

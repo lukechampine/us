@@ -64,9 +64,9 @@ func (h *Host) Close() error {
 	return h.listener.Close()
 }
 
-// New returns a new host listening on a random port.
-func New() (*Host, error) {
-	l, err := net.Listen("tcp", ":0")
+// New returns a new host listening on the specified address.
+func New(addr string) (*Host, error) {
+	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
