@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"log"
 	"net/http"
 	"os"
@@ -89,8 +90,10 @@ func (d metaDir) Readdir(n int) ([]os.FileInfo, error) {
 type httpFile struct {
 	metaInfo
 	*renterutil.PseudoFile
+	br *bufio.Reader
 }
 
+func (f *httpFile) Read(p []byte) (int, error)         { return f.br.Read(p) }
 func (f *httpFile) Close() error                       { return nil }
 func (f *httpFile) Readdir(int) ([]os.FileInfo, error) { return nil, nil }
 func (f *httpFile) Stat() (os.FileInfo, error)         { return f.metaInfo, nil }
@@ -112,6 +115,7 @@ func HTTPFile(name string, downloaders *renterutil.DownloaderSet) (http.File, er
 			name: strings.TrimSuffix(name, metafileExt),
 		},
 		PseudoFile: pf,
+		br:         bufio.NewReaderSize(pf, 1<<20), // 1 MiB
 	}, nil
 }
 
