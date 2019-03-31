@@ -3,11 +3,8 @@ package main
 import (
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 
 	"github.com/pkg/errors"
 	"lukechampine.com/us/renter"
@@ -26,11 +23,11 @@ func mount(contractDir, metaDir, mountDir string) error {
 	defer contracts.Close()
 
 	c := makeLimitedClient()
-	downloaders, err := renterutil.NewDownloaderSet(contracts, c)
+	pfs, err := renterutil.NewFileSystem(metaDir, contracts, c)
 	if err != nil {
 		return errors.Wrap(err, "could not connect to hosts")
 	}
-	nfs := pathfs.NewPathNodeFs(fileSystem(metaDir, downloaders), nil)
+	nfs := pathfs.NewPathNodeFs(fileSystem(pfs), nil)
 	server, _, err := nodefs.MountRoot(mountDir, nfs.Root(), nil)
 	if err != nil {
 		return errors.Wrap(err, "could not mount")
@@ -45,42 +42,37 @@ func mount(contractDir, metaDir, mountDir string) error {
 	return server.Unmount()
 }
 
-// PseudoFS implements a FUSE filesystem by downloading data from Sia hosts.
-type PseudoFS struct {
+type fuseFS struct {
 	pathfs.FileSystem
-
-	root        string
-	downloaders *renterutil.DownloaderSet
+	pfs *renterutil.PseudoFS
 }
 
 // GetAttr implements the GetAttr method of pathfs.FileSystem.
-func (fs *PseudoFS) GetAttr(name string, _ *fuse.Context) (*fuse.Attr, fuse.Status) {
-	path := filepath.Join(fs.root, name)
-	if stat, err := os.Stat(path); err == nil && stat.IsDir() {
-		return &fuse.Attr{
-			Mode: fuse.S_IFDIR | 0755,
-		}, fuse.OK
-	} else if os.IsNotExist(err) {
-		path += metafileExt
-	}
-	index, err := renter.ReadMetaIndex(path)
+func (fs *fuseFS) GetAttr(name string, _ *fuse.Context) (*fuse.Attr, fuse.Status) {
+	stat, err := fs.pfs.Stat(name)
 	if err != nil {
 		return nil, fuse.ENOENT
 	}
+	var mode uint32
+	if stat.IsDir() {
+		mode = fuse.S_IFDIR
+	} else {
+		mode = fuse.S_IFREG
+	}
 	return &fuse.Attr{
-		Size:  uint64(index.Filesize),
-		Mode:  fuse.S_IFREG | uint32(index.Mode),
-		Mtime: uint64(index.ModTime.Unix()),
+		Size:  uint64(stat.Size()),
+		Mode:  mode | uint32(stat.Mode()),
+		Mtime: uint64(stat.ModTime().Unix()),
 	}, fuse.OK
 }
 
 // OpenDir implements the OpenDir method of pathfs.FileSystem.
-func (fs *PseudoFS) OpenDir(name string, context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
-	path := filepath.Join(fs.root, name)
-	dir, err := os.Open(path)
+func (fs *fuseFS) OpenDir(name string, context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
+	dir, err := fs.pfs.Open(name)
 	if err != nil {
 		return nil, fuse.ENOENT
 	}
+	defer dir.Close()
 	files, err := dir.Readdir(-1)
 	if err != nil {
 		return nil, fuse.ENOENT
@@ -93,7 +85,6 @@ func (fs *PseudoFS) OpenDir(name string, context *fuse.Context) ([]fuse.DirEntry
 			mode |= fuse.S_IFDIR
 		} else {
 			mode |= fuse.S_IFREG
-			name = strings.TrimSuffix(name, metafileExt)
 		}
 		entries[i] = fuse.DirEntry{
 			Name: name,
@@ -104,42 +95,38 @@ func (fs *PseudoFS) OpenDir(name string, context *fuse.Context) ([]fuse.DirEntry
 }
 
 // Open implements the Open method of pathfs.FileSystem.
-func (fs *PseudoFS) Open(name string, flags uint32, context *fuse.Context) (file nodefs.File, code fuse.Status) {
+func (fs *fuseFS) Open(name string, flags uint32, context *fuse.Context) (file nodefs.File, code fuse.Status) {
 	if flags&fuse.O_ANYWRITE != 0 {
 		return nil, fuse.EPERM
 	}
 
-	path := filepath.Join(fs.root, name) + metafileExt
-	hf, err := HTTPFile(path, fs.downloaders)
+	pf, err := fs.pfs.Open(name)
 	if err != nil {
 		return nil, fuse.ENOENT
 	}
-
 	return &metaFSFile{
 		File: nodefs.NewDefaultFile(),
-		hf:   hf,
+		pf:   pf,
 	}, fuse.OK
 }
 
-// fileSystem returns a PseudoFS rooted at the specified root.
-func fileSystem(root string, downloaders *renterutil.DownloaderSet) *PseudoFS {
-	return &PseudoFS{
-		FileSystem:  pathfs.NewDefaultFileSystem(),
-		root:        root,
-		downloaders: downloaders,
+func fileSystem(pfs *renterutil.PseudoFS) *fuseFS {
+	return &fuseFS{
+		FileSystem: pathfs.NewDefaultFileSystem(),
+		pfs:        pfs,
 	}
 }
 
 type metaFSFile struct {
 	nodefs.File
-	hf http.File
+	pf *renterutil.PseudoFile
 }
 
 func (f *metaFSFile) Read(p []byte, off int64) (fuse.ReadResult, fuse.Status) {
-	if _, err := f.hf.Seek(off, io.SeekStart); err != nil {
+	if _, err := f.pf.Seek(off, io.SeekStart); err != nil {
 		return nil, fuse.ENOENT
 	}
-	n, err := f.hf.Read(p)
+	n, err := f.pf.Read(p)
 	if err != nil && err != io.EOF {
 		return nil, fuse.ENOENT
 	}

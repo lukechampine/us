@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"golang.org/x/crypto/ssh/terminal"
 	"lukechampine.com/us/renter/renterutil"
+	"lukechampine.com/us/renterhost"
 )
 
 func writeUpdate(w io.Writer, u interface{}, typ string) {
@@ -35,7 +37,7 @@ func trackUpload(filename string, op *renterutil.Operation, log io.Writer) error
 				if uploadStart.IsZero() {
 					uploadStart = time.Now()
 				}
-				printSimpleProgress(filename, u, time.Since(uploadStart))
+				printOperationProgress(filename, u, time.Since(uploadStart))
 
 			case renterutil.DialStatsUpdate:
 				writeUpdate(log, u, "dial")
@@ -52,62 +54,51 @@ func trackUpload(filename string, op *renterutil.Operation, log io.Writer) error
 	}
 }
 
-func trackDownload(filename string, op *renterutil.Operation, log io.Writer) error {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
-
-	var downloadStart time.Time
-	for {
-		select {
-		case u, ok := <-op.Updates():
-			if !ok {
-				fmt.Println()
-				return op.Err()
-			}
-			switch u := u.(type) {
-			case renterutil.TransferProgressUpdate:
-				if downloadStart.IsZero() {
-					downloadStart = time.Now()
-				}
-				printSimpleProgress(filename, u, time.Since(downloadStart))
-
-			case renterutil.DialStatsUpdate:
-				writeUpdate(log, u, "dial")
-			case renterutil.DownloadStatsUpdate:
-				writeUpdate(log, u, "download")
-			}
-		case <-sigChan:
-			fmt.Println("\rStopping...")
-			op.Cancel()
-			for range op.Updates() {
-			}
-			return nil
-		}
-	}
+type trackWriter struct {
+	w                io.Writer
+	name             string
+	off, xfer, total int64
+	start            time.Time
+	sigChan          <-chan os.Signal
 }
 
-func trackDownloadStream(op *renterutil.Operation, log io.Writer) error {
+func (tw *trackWriter) Write(p []byte) (int, error) {
+	// check for cancellation
+	select {
+	case <-tw.sigChan:
+		return 0, context.Canceled
+	default:
+	}
+	n, err := tw.w.Write(p)
+	tw.xfer += int64(n)
+	printSimpleProgress(tw.name, tw.off, tw.xfer, tw.total, time.Since(tw.start))
+	return n, err
+}
+
+func trackCopy(f *os.File, pf *renterutil.PseudoFile, off int64) error {
+	if off == pf.MetaIndex().Filesize {
+		printAlreadyFinished(f.Name(), off)
+		fmt.Println()
+		return nil
+	}
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
-	for {
-		select {
-		case u, ok := <-op.Updates():
-			if !ok {
-				return op.Err()
-			}
-			switch u := u.(type) {
-			case renterutil.DialStatsUpdate:
-				writeUpdate(log, u, "dial")
-			case renterutil.DownloadStatsUpdate:
-				writeUpdate(log, u, "download")
-			}
-		case <-sigChan:
-			op.Cancel()
-			for range op.Updates() {
-			}
-			return nil
-		}
+	tw := &trackWriter{
+		w:       f,
+		name:    f.Name(),
+		off:     off,
+		total:   pf.MetaIndex().Filesize,
+		start:   time.Now(),
+		sigChan: sigChan,
 	}
+	buf := make([]byte, renterhost.SectorSize*pf.MetaIndex().MinShards)
+	_, err := io.CopyBuffer(tw, pf, buf)
+	if err == context.Canceled {
+		err = nil
+	}
+	fmt.Println()
+	return err
 }
 
 func trackDownloadDir(op *renterutil.Operation, log io.Writer) error {
@@ -133,9 +124,9 @@ func trackDownloadDir(op *renterutil.Operation, log io.Writer) error {
 					Total:       u.Filesize,
 					Transferred: 0,
 				}
-				printSimpleProgress(filename, p, time.Since(downloadStart))
+				printOperationProgress(filename, p, time.Since(downloadStart))
 			case renterutil.TransferProgressUpdate:
-				printSimpleProgress(filename, u, time.Since(downloadStart))
+				printOperationProgress(filename, u, time.Since(downloadStart))
 			case renterutil.DirSkipUpdate:
 				fmt.Printf("Skip %v: %v\n", u.Filename, u.Err)
 				filename = ""
@@ -222,7 +213,7 @@ func trackMigrateFile(filename string, op *renterutil.Operation) error {
 			}
 			switch u := u.(type) {
 			case renterutil.TransferProgressUpdate:
-				printSimpleProgress(filename, u, time.Since(migrateStart))
+				printOperationProgress(filename, u, time.Since(migrateStart))
 			}
 		case <-sigChan:
 			fmt.Println("\rStopping...")
@@ -257,9 +248,9 @@ func trackMigrateDir(op *renterutil.Operation) error {
 					Total:       u.Filesize,
 					Transferred: 0,
 				}
-				printSimpleProgress(filename, p, time.Since(migrateStart))
+				printOperationProgress(filename, p, time.Since(migrateStart))
 			case renterutil.TransferProgressUpdate:
-				printSimpleProgress(filename, u, time.Since(migrateStart))
+				printOperationProgress(filename, u, time.Since(migrateStart))
 			case renterutil.DirSkipUpdate:
 				fmt.Printf("Skip %v: %v\n", u.Filename, u.Err)
 				filename = ""
@@ -303,16 +294,30 @@ func makeBuf(width int) []rune {
 	return buf
 }
 
-func printSimpleProgress(filename string, u renterutil.TransferProgressUpdate, elapsed time.Duration) {
+func printSimpleProgress(filename string, start, xfer, total int64, elapsed time.Duration) {
 	termWidth := getWidth()
-	bytesPerSec := int64(float64(u.Transferred) / elapsed.Seconds())
-	pct := (100 * (u.Start + u.Transferred)) / u.Total
-	metrics := fmt.Sprintf("%4v%%   %8s  %9s/s    ", pct, filesizeUnits(u.Total), filesizeUnits(bytesPerSec))
+	bytesPerSec := int64(float64(xfer) / elapsed.Seconds())
+	pct := (100 * (start + xfer)) / total
+	metrics := fmt.Sprintf("%4v%%   %8s  %9s/s    ", pct, filesizeUnits(total), filesizeUnits(bytesPerSec))
 	name := formatFilename(filename, termWidth-len(metrics)-4)
 	buf := makeBuf(termWidth)
 	copy(buf, []rune(name))
 	copy(buf[len(buf)-len(metrics):], []rune(metrics))
 	fmt.Printf("\r%s", string(buf))
+}
+
+func printAlreadyFinished(filename string, total int64) {
+	termWidth := getWidth()
+	metrics := fmt.Sprintf("%4v%%   %8s  %9s/s    ", 100.0, filesizeUnits(total), "--- B")
+	name := formatFilename(filename, termWidth-len(metrics)-4)
+	buf := makeBuf(termWidth)
+	copy(buf, []rune(name))
+	copy(buf[len(buf)-len(metrics):], []rune(metrics))
+	fmt.Printf("\r%s", string(buf))
+}
+
+func printOperationProgress(filename string, u renterutil.TransferProgressUpdate, elapsed time.Duration) {
+	printSimpleProgress(filename, u.Start, u.Transferred, u.Total, elapsed)
 }
 
 func printUploadDirProgress(queue []renterutil.DirQueueUpdate, u renterutil.TransferProgressUpdate, start time.Time) {

@@ -6,10 +6,13 @@ import (
 	"log"
 	"math"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/renterutil"
+	"lukechampine.com/us/renterhost"
 
 	"github.com/pkg/errors"
 )
@@ -133,52 +136,93 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 	return trackUpload(f.Name(), op, log)
 }
 
+func resumedownload(f *os.File, metaPath string, pf *renterutil.PseudoFile) error {
+	if ok, err := renter.MetaFileCanDownload(metaPath); err == nil && !ok {
+		return errors.New("file is not sufficiently uploaded")
+	}
+	// set file mode and size
+	stat, err := f.Stat()
+	if err != nil {
+		return errors.Wrap(err, "could not stat file")
+	}
+	pstat, err := pf.Stat()
+	if err != nil {
+		return err
+	}
+	if stat.Mode() != pstat.Mode() {
+		if err := f.Chmod(pstat.Mode()); err != nil {
+			return errors.Wrap(err, "could not set file mode")
+		}
+	}
+	if stat.Size() > pstat.Size() {
+		if err := f.Truncate(pstat.Size()); err != nil {
+			return errors.Wrap(err, "could not resize file")
+		}
+	}
+
+	// if file is already partially downloaded, pick up where we left off
+	off, err := renter.CompareFileContents(f, metaPath)
+	if err != nil {
+		// an error here is non-fatal, just means more work
+		off = 0
+	} else if _, err := f.Seek(off, io.SeekStart); err != nil {
+		off = 0
+	}
+	if _, err := pf.Seek(off, io.SeekStart); err != nil {
+		return err // should never happen
+	}
+	return trackCopy(f, pf, off)
+}
+
 func downloadmetafile(f *os.File, contractDir, metaPath string) error {
+	if ok, err := renter.MetaFileCanDownload(metaPath); err == nil && !ok {
+		return errors.New("file is not sufficiently uploaded")
+	}
 	contracts, err := renter.LoadContracts(contractDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
 	defer contracts.Close()
 
-	if ok, err := renter.MetaFileCanDownload(metaPath); err == nil && !ok {
-		return errors.New("file is not sufficiently uploaded")
-	}
-
-	m, err := renter.OpenMetaFile(metaPath)
+	dir, name := filepath.Dir(metaPath), strings.TrimSuffix(filepath.Base(metaPath), ".usa")
+	fs, err := renterutil.NewFileSystem(dir, contracts, makeLimitedClient())
 	if err != nil {
-		return errors.Wrap(err, "could not load metafile")
+		return err
 	}
-	defer closeMetaFile(m)
-
-	c := makeLimitedClient()
-	log, cleanup := openLog()
-	defer cleanup()
-	op := renterutil.Download(f, contracts, m, c)
-	return trackDownload(f.Name(), op, log)
+	defer fs.Close()
+	pf, err := fs.Open(name)
+	if err != nil {
+		return err
+	}
+	defer pf.Close()
+	return resumedownload(f, metaPath, pf)
 }
 
 func downloadmetastream(w io.Writer, contractDir, metaPath string) error {
+	if ok, err := renter.MetaFileCanDownload(metaPath); err == nil && !ok {
+		return errors.New("file is not sufficiently uploaded")
+	}
 	contracts, err := renter.LoadContracts(contractDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
 	}
 	defer contracts.Close()
 
-	if ok, err := renter.MetaFileCanDownload(metaPath); err == nil && !ok {
-		return errors.New("file is not sufficiently uploaded")
-	}
-
-	m, err := renter.OpenMetaFile(metaPath)
+	dir, name := filepath.Dir(metaPath), strings.TrimSuffix(filepath.Base(metaPath), ".usa")
+	fs, err := renterutil.NewFileSystem(dir, contracts, makeLimitedClient())
 	if err != nil {
-		return errors.Wrap(err, "could not load metafile")
+		return err
 	}
-	defer closeMetaFile(m)
+	defer fs.Close()
+	pf, err := fs.Open(name)
+	if err != nil {
+		return err
+	}
+	defer pf.Close()
 
-	c := makeLimitedClient()
-	log, cleanup := openLog()
-	defer cleanup()
-	op := renterutil.DownloadStream(w, contracts, m, c)
-	return trackDownloadStream(op, log)
+	buf := make([]byte, renterhost.SectorSize*pf.MetaIndex().MinShards)
+	_, err = io.CopyBuffer(w, pf, buf)
+	return err
 }
 
 func downloadmetadir(dir, contractDir, metaDir string) error {
@@ -187,13 +231,30 @@ func downloadmetadir(dir, contractDir, metaDir string) error {
 		return errors.Wrap(err, "could not load contracts")
 	}
 	defer contracts.Close()
+	fs, err := renterutil.NewFileSystem(metaDir, contracts, makeLimitedClient())
+	if err != nil {
+		return err
+	}
+	defer fs.Close()
 
-	c := makeLimitedClient()
-	log, cleanup := openLog()
-	defer cleanup()
-	metafileIter := renterutil.NewRecursiveMetaFileIter(metaDir, dir)
-	op := renterutil.DownloadDir(metafileIter, contracts, c)
-	return trackDownloadDir(op, log)
+	return filepath.Walk(metaDir, func(metaPath string, info os.FileInfo, err error) error {
+		if info.IsDir() {
+			return nil
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(metaPath, metaDir), ".usa")
+		pf, err := fs.Open(name)
+		if err != nil {
+			return err
+		}
+		defer pf.Close()
+		fpath := filepath.Join(dir, name)
+		os.MkdirAll(filepath.Dir(fpath), 0700)
+		f, err := os.OpenFile(fpath, os.O_RDWR|os.O_CREATE, info.Mode())
+		if err != nil {
+			return err
+		}
+		return resumedownload(f, metaPath, pf)
+	})
 }
 
 func checkupMeta(contractDir, metaPath string) error {

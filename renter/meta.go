@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
@@ -543,4 +544,47 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 		}
 	}
 	return index, fullShards, nil
+}
+
+// CompareFileContents checks whether the contents of f match the data of the
+// metafile, returning the earliest offset at which the contents differ.
+func CompareFileContents(f io.Reader, metaPath string) (offset int64, err error) {
+	m, shards, err := ReadMetaFileContents(metaPath)
+	if err != nil {
+		return -1, errors.Wrap(err, "could not read metafile")
+	}
+
+	// Before verifying the checksums, we have to recreate the erasure-
+	// encoding of the file. Since we're only looking at the data pieces,
+	// we can use an m-of-m code.
+	rsc := NewRSCode(m.MinShards, m.MinShards)
+	chunk := make([]byte, 0, renterhost.SectorSize*m.MinShards)
+	dataShards := make([][]byte, m.MinShards)
+	for i := range dataShards {
+		dataShards[i] = make([]byte, 0, renterhost.SectorSize)
+	}
+	for chunkIndex := range shards[0] {
+		chunkSize := int64(shards[0][chunkIndex].NumSegments) * merkle.SegmentSize * int64(m.MinShards)
+		if offset+chunkSize > m.Filesize {
+			chunkSize = m.Filesize - offset
+		}
+		buf := chunk[:chunkSize]
+		_, err := io.ReadFull(f, buf)
+		if err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				err = nil // benign
+			}
+			return offset, err
+		}
+		rsc.Encode(buf, dataShards)
+		chunkOk := true
+		for i, shard := range dataShards {
+			chunkOk = chunkOk && (crc32.ChecksumIEEE(shard) == shards[i][chunkIndex].Checksum)
+		}
+		if !chunkOk {
+			break
+		}
+		offset += chunkSize
+	}
+	return offset, nil
 }

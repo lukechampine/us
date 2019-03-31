@@ -66,7 +66,7 @@ func createHostWithContract(tb testing.TB) (*ghost.Host, *renter.Contract) {
 	return host, contract
 }
 
-func TestFile(t *testing.T) {
+func TestFileSystem(t *testing.T) {
 	// create three hosts and form contracts with each of them
 	hosts := make([]*ghost.Host, 3)
 	contracts := make(renter.ContractSet)
@@ -88,8 +88,9 @@ func TestFile(t *testing.T) {
 	rsc.Encode(data, shards)
 
 	// create metafile
-	metaPath := filepath.Join(os.TempDir(), t.Name()+"-"+hex.EncodeToString(fastrand.Bytes(6))+".usa")
-	m, err := renter.NewMetaFile(metaPath, 0777, int64(len(data)), contracts, 2)
+	dir := os.TempDir()
+	metaName := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	m, err := renter.NewMetaFile(filepath.Join(dir, metaName+".usa"), 0777, int64(len(data)), contracts, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,19 +117,59 @@ func TestFile(t *testing.T) {
 		}
 		u.Close()
 	}
+	m.Close()
 
-	// create downloader set and pseudofile
-	ds, err := NewDownloaderSet(contracts, hkr)
+	// create filesystem
+	fs, err := NewFileSystem(dir, contracts, hkr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ds.Close()
-	pf, err := NewPseudoFile(m, ds)
+	defer fs.Close()
+
+	// stat file
+	stat, err := fs.Stat(metaName)
+	if err != nil {
+		t.Fatal(err)
+	} else if stat.Name() != metaName {
+		t.Error("incorrect name")
+	} else if stat.Size() != m.Filesize {
+		t.Error("incorrect size")
+	} else if stat.Mode() != m.Mode {
+		t.Error("incorrect mode")
+	}
+
+	// rename file
+	err = fs.Rename(metaName, "foo")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// begin file method tests
+	// chmod file
+	err = fs.Chmod("foo", 676)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// open file
+	pf, err := fs.Open("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pf.Close()
+
+	// stat file (this time via method)
+	stat, err = pf.Stat()
+	if err != nil {
+		t.Fatal(err)
+	} else if stat.Name() != "foo" || stat.Name() != pf.Name() {
+		t.Error("incorrect name")
+	} else if stat.Size() != m.Filesize {
+		t.Error("incorrect size")
+	} else if stat.Mode() != 676 {
+		t.Error("incorrect mode")
+	}
+
+	// read and seek within file
 	p := make([]byte, m.Filesize)
 	checkRead := func(d []byte) {
 		if n, err := pf.Read(p[:len(d)]); err != nil {
@@ -161,6 +202,12 @@ func TestFile(t *testing.T) {
 	} else if !bytes.Equal(p[:n], data[len(data)-500:]) {
 		t.Fatal("data from Read does not match actual data")
 	}
+	// with ReadAt, partial read should return io.EOF
+	if n, err := pf.ReadAt(p, stat.Size()-500); err != io.EOF {
+		t.Fatalf("expected io.EOF, got %v", err)
+	} else if n != 500 {
+		t.Fatalf("expected to read 500 bytes, got %v", n)
+	}
 
 	// truncate and read
 	if err := pf.Truncate(1023); err != nil {
@@ -169,4 +216,12 @@ func TestFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkRead(data[512:1023])
+
+	// remove file
+	if err := pf.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.Remove(pf.Name()); err != nil {
+		t.Fatal(err)
+	}
 }
