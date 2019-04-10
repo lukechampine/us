@@ -51,7 +51,17 @@ type bufferedFile struct {
 	br *bufio.Reader
 }
 
-func (f bufferedFile) Read(p []byte) (int, error) { return f.br.Read(p) }
+func (f *bufferedFile) Read(p []byte) (int, error) {
+	if f.br == nil {
+		f.br = bufio.NewReaderSize(f.PseudoFile, 1<<20) // 1 MiB
+	}
+	return f.br.Read(p)
+}
+
+func (f *bufferedFile) Seek(offset int64, whence int) (int64, error) {
+	f.br = nil // have to throw away buffer after each seek
+	return f.PseudoFile.Seek(offset, whence)
+}
 
 type httpFS struct {
 	pfs *renterutil.PseudoFS
@@ -62,8 +72,7 @@ func (hfs *httpFS) Open(name string) (http.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return bufferedFile{
+	return &bufferedFile{
 		PseudoFile: pf,
-		br:         bufio.NewReaderSize(pf, 1<<20), // 1 MiB
 	}, nil
 }
