@@ -136,7 +136,7 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 	return trackUpload(f.Name(), op, log)
 }
 
-func resumedownload(f *os.File, metaPath string, pf *renterutil.PseudoFile) error {
+func resumedownload(f *os.File, metaPath string, pf renterutil.PseudoFile) error {
 	if ok, err := renter.MetaFileCanDownload(metaPath); err == nil && !ok {
 		return errors.New("file is not sufficiently uploaded")
 	}
@@ -219,8 +219,15 @@ func downloadmetastream(w io.Writer, contractDir, metaPath string) error {
 		return err
 	}
 	defer pf.Close()
+	stat, err := pf.Stat()
+	if err != nil {
+		return err
+	} else if stat.IsDir() {
+		return errors.New("is a directory")
+	}
+	index := stat.Sys().(renter.MetaIndex)
 
-	buf := make([]byte, renterhost.SectorSize*pf.MetaIndex().MinShards)
+	buf := make([]byte, renterhost.SectorSize*index.MinShards)
 	_, err = io.CopyBuffer(w, pf, buf)
 	return err
 }

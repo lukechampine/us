@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh/terminal"
+	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/renterutil"
 	"lukechampine.com/us/renterhost"
 )
@@ -75,8 +76,12 @@ func (tw *trackWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func trackCopy(f *os.File, pf *renterutil.PseudoFile, off int64) error {
-	if off == pf.MetaIndex().Filesize {
+func trackCopy(f *os.File, pf renterutil.PseudoFile, off int64) error {
+	stat, err := pf.Stat()
+	if err != nil {
+		return err
+	}
+	if off == stat.Size() {
 		printAlreadyFinished(f.Name(), off)
 		fmt.Println()
 		return nil
@@ -88,12 +93,13 @@ func trackCopy(f *os.File, pf *renterutil.PseudoFile, off int64) error {
 		w:       f,
 		name:    f.Name(),
 		off:     off,
-		total:   pf.MetaIndex().Filesize,
+		total:   stat.Size(),
 		start:   time.Now(),
 		sigChan: sigChan,
 	}
-	buf := make([]byte, renterhost.SectorSize*pf.MetaIndex().MinShards)
-	_, err := io.CopyBuffer(tw, pf, buf)
+	index := stat.Sys().(renter.MetaIndex)
+	buf := make([]byte, renterhost.SectorSize*index.MinShards)
+	_, err = io.CopyBuffer(tw, pf, buf)
 	if err == context.Canceled {
 		err = nil
 	}

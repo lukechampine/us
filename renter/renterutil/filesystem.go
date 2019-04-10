@@ -12,10 +12,11 @@ import (
 	"github.com/pkg/errors"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renterhost"
 )
 
 // helper type that skips a prefix of the bytes written to it; see
-// (PseudoFile).Read
+// (roPseudoFile).Read
 type skipWriter struct {
 	buf  []byte
 	skip int
@@ -83,10 +84,11 @@ func (fs *PseudoFS) Chmod(name string, mode os.FileMode) error {
 	return nil
 }
 
-// Create creates the named file with mode 0666 (before umask), truncating it if
-// it already exists. The returned file has mode os.O_RDWR.
-func (fs *PseudoFS) Create(name string) (*PseudoFile, error) {
-	return fs.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+// Create creates the named file with the specified redundancy and mode 0666
+// (before umask), truncating it if it already exists. The returned file only
+// supports Write calls at the end of the file.
+func (fs *PseudoFS) Create(name string, minShards int) (PseudoFile, error) {
+	return fs.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_TRUNC, 0666, minShards)
 }
 
 // Mkdir creates a new directory with the specified name and permission bits
@@ -103,36 +105,62 @@ func (fs *PseudoFS) MkdirAll(path string, perm os.FileMode) error {
 	return os.MkdirAll(fs.path(path), perm)
 }
 
-// Open opens the named file for reading. The returned file has mode os.O_RDONLY.
-func (fs *PseudoFS) Open(name string) (*PseudoFile, error) {
-	return fs.OpenFile(name, os.O_RDONLY, 0)
+// Open opens the named file for reading. The returned file is read-only.
+func (fs *PseudoFS) Open(name string) (PseudoFile, error) {
+	return fs.OpenFile(name, os.O_RDONLY, 0, 0)
 }
 
 // OpenFile is the generalized open call; most users will use Open or Create
 // instead. It opens the named file with specified flag (os.O_RDONLY etc.) and perm
 // (before umask), if applicable.
-func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode) (*PseudoFile, error) {
+func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards int) (PseudoFile, error) {
 	path := fs.path(name)
 	if isDir(path) {
 		dir, err := os.OpenFile(path, flag, perm)
-		return &PseudoFile{dir: dir}, err
+		return &dirPseudoFile{dir}, err
 	}
 	path += ".usa"
 
-	if flag != os.O_RDONLY {
-		return nil, errors.New("filesystem is read-only")
+	// currently, the only modes supported are RDONLY and APPEND
+	if flag == os.O_RDONLY {
+		index, shards, err := renter.ReadMetaFileContents(path)
+		if err != nil {
+			return nil, errors.Wrapf(err, "open %v", name)
+		}
+		return &roPseudoFile{
+			pseudoFileInfo: pseudoFileInfo{name, index},
+			shards:         shards,
+			ds:             fs.downloaders,
+			shardBufs:      make([]bytes.Buffer, len(shards)),
+		}, nil
+	} else if flag == os.O_APPEND|os.O_CREATE|os.O_TRUNC {
+		// NewMetaFile expects a map of contracts, so fake one.
+		// TODO: find a better way.
+		contracts := make(renter.ContractSet)
+		for hostKey := range fs.downloaders.downloaders {
+			contracts[hostKey] = nil
+		}
+		m, err := renter.NewMetaFile(path, perm, 0, contracts, minShards)
+		if err != nil {
+			return nil, errors.Wrapf(err, "open %v", name)
+		}
+		shards := make([]*renter.Shard, len(m.Hosts))
+		for i := range shards {
+			sf, err := renter.OpenShard(m.ShardPath(m.Hosts[i]))
+			if err != nil {
+				return nil, errors.Wrapf(err, "open %v", name)
+			}
+			shards[i] = sf
+		}
+		return &aoPseudoFile{
+			pseudoFileInfo: pseudoFileInfo{name, m.MetaIndex},
+			m:              m,
+			shards:         shards,
+			ds:             fs.downloaders,
+		}, nil
+	} else {
+		return nil, errors.New("unsupported flag combination")
 	}
-
-	index, shards, err := renter.ReadMetaFileContents(path)
-	if err != nil {
-		return nil, errors.Wrapf(err, "open %v", name)
-	}
-	return &PseudoFile{
-		pseudoFileInfo: pseudoFileInfo{name, index},
-		shards:         shards,
-		ds:             fs.downloaders,
-		shardBufs:      make([]bytes.Buffer, len(shards)),
-	}, nil
 }
 
 // Remove removes the named file or (empty) directory.
@@ -208,9 +236,48 @@ func NewFileSystem(root string, contracts renter.ContractSet, hkr renter.HostKey
 
 // A PseudoFile presents a file-like interface for a metafile stored on Sia
 // hosts.
-type PseudoFile struct {
+type PseudoFile interface {
+	Close() error
+	Read(p []byte) (int, error)
+	Write(p []byte) (int, error)
+	ReadAt(p []byte, off int64) (int, error)
+	WriteAt(p []byte, off int64) (int, error)
+	Seek(offset int64, whence int) (int64, error)
+	Name() string
+	Readdir(n int) ([]os.FileInfo, error)
+	Readdirnames(n int) ([]string, error)
+	Stat() (os.FileInfo, error)
+	Sync() error
+	Truncate(size int64) error
+}
+
+// A dirPseudoFile is a wrapper around a directory file, overloading only the
+// Readdir method to operate on metafiles instead of standard files.
+type dirPseudoFile struct {
+	*os.File
+}
+
+func (f *dirPseudoFile) Readdir(n int) ([]os.FileInfo, error) {
+	files, err := f.File.Readdir(n)
+	for i := range files {
+		if files[i].IsDir() {
+			continue
+		}
+		index, err := renter.ReadMetaIndex(filepath.Join(f.File.Name(), files[i].Name()))
+		if err != nil {
+			return nil, err
+		}
+		files[i] = pseudoFileInfo{
+			m:    index,
+			name: strings.TrimSuffix(files[i].Name(), ".usa"),
+		}
+	}
+	return files, err
+}
+
+// An roPseudoFile is a read-only PseudoFile.
+type roPseudoFile struct {
 	pseudoFileInfo
-	dir       *os.File // nil if metafile
 	perm      int
 	shards    [][]renter.SectorSlice
 	ds        *DownloaderSet
@@ -219,13 +286,9 @@ type PseudoFile struct {
 	mu        sync.Mutex // serializes all methods
 }
 
-func (f *PseudoFile) writable() bool {
-	return f.perm&os.O_WRONLY != 0
-}
-
 var errNoHost = errors.New("no downloader for this host")
 
-func (f *PseudoFile) downloadShards(offset int64, n int) ([][]byte, error) {
+func (f *roPseudoFile) downloadShards(offset int64, n int) ([][]byte, error) {
 	hosts := make([]*renter.ShardDownloader, len(f.m.Hosts))
 	for i, hostKey := range f.m.Hosts {
 		d, ok := f.ds.acquire(hostKey)
@@ -311,20 +374,9 @@ func (f *PseudoFile) downloadShards(offset int64, n int) ([][]byte, error) {
 	return shards, nil
 }
 
-// Close closes the file, rendering it unusable for I/O.
-func (f *PseudoFile) Close() error {
-	if f.dir != nil {
-		return f.dir.Close()
-	}
-	return nil
-}
-
 // Read reads up to len(p) bytes from the File. It returns the number of bytes
 // read and any error encountered.
-func (f *PseudoFile) Read(p []byte) (int, error) {
-	if f.dir != nil {
-		return f.dir.Read(p)
-	}
+func (f *roPseudoFile) Read(p []byte) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -351,22 +403,10 @@ func (f *PseudoFile) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Write writes len(p) bytes to the File. It returns the number of bytes written
-// and an error, if any. Write returns a non-nil error when n != len(p).
-func (f *PseudoFile) Write(p []byte) (int, error) {
-	if f.dir != nil {
-		return f.dir.Write(p)
-	}
-	panic("unimplemented")
-}
-
 // ReadAt reads len(p) bytes from the File starting at byte offset off. It
 // returns the number of bytes read and the error, if any. ReadAt always returns
 // a non-nil error when n < len(p). At end of file, that error is io.EOF.
-func (f *PseudoFile) ReadAt(p []byte, off int64) (int, error) {
-	if f.dir != nil {
-		return f.dir.ReadAt(p, off)
-	}
+func (f *roPseudoFile) ReadAt(p []byte, off int64) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -396,23 +436,10 @@ func (f *PseudoFile) ReadAt(p []byte, off int64) (int, error) {
 	return len(p), nil
 }
 
-// WriteAt writes len(p) bytes to the File starting at byte offset off. It
-// returns the number of bytes written and an error, if any. WriteAt returns a
-// non-nil error when n != len(p).
-func (f *PseudoFile) WriteAt(p []byte, off int64) (int, error) {
-	if f.dir != nil {
-		return f.dir.WriteAt(p, off)
-	}
-	panic("unimplemented")
-}
-
 // Seek sets the offset for the next Read or Write on file to offset,
 // interpreted according to whence. It returns the new offset and an error, if
 // any. If f was opened with O_APPEND, Seek always returns an error.
-func (f *PseudoFile) Seek(offset int64, whence int) (int64, error) {
-	if f.dir != nil {
-		return f.dir.Seek(offset, whence)
-	}
+func (f *roPseudoFile) Seek(offset int64, whence int) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	newOffset := f.offset
@@ -432,94 +459,135 @@ func (f *PseudoFile) Seek(offset int64, whence int) (int64, error) {
 }
 
 // Name returns the name of the file.
-func (f *PseudoFile) Name() string {
-	if f.dir != nil {
-		return f.dir.Name()
-	}
+func (f *roPseudoFile) Name() string {
 	return f.name
 }
 
-// Readdir reads the contents of the directory associated with file and returns
-// a slice of up to n FileInfo values, as would be returned by Lstat, in
-// directory order. Subsequent calls on the same file will yield further
-// FileInfos.
-//
-// If n > 0, Readdir returns at most n FileInfo structures. In this case, if
-// Readdir returns an empty slice, it will return a non-nil error explaining
-// why. At the end of a directory, the error is io.EOF.
-//
-// If n <= 0, Readdir returns all the FileInfo from the directory in a single
-// slice. In this case, if Readdir succeeds (reads all the way to the end of the
-// directory), it returns the slice and a nil error. If it encounters an error
-// before the end of the directory, Readdir returns the FileInfo read until that
-// point and a non-nil error.
-func (f *PseudoFile) Readdir(n int) ([]os.FileInfo, error) {
-	if f.dir == nil {
-		return nil, errors.New("not a directory")
-	}
-	files, err := f.dir.Readdir(n)
-	for i := range files {
-		if files[i].IsDir() {
-			continue
-		}
-		index, err := renter.ReadMetaIndex(filepath.Join(f.dir.Name(), files[i].Name()))
-		if err != nil {
-			return nil, err
-		}
-		files[i] = pseudoFileInfo{
-			m:    index,
-			name: strings.TrimSuffix(files[i].Name(), ".usa"),
-		}
-	}
-	return files, err
-}
-
-// Readdirnames reads and returns a slice of names from the directory f.
-//
-// If n > 0, Readdirnames returns at most n names. In this case, if Readdirnames
-// returns an empty slice, it will return a non-nil error explaining why. At the
-// end of a directory, the error is io.EOF.
-//
-// If n <= 0, Readdirnames returns all the names from the directory in a single
-// slice. In this case, if Readdirnames succeeds (reads all the way to the end
-// of the directory), it returns the slice and a nil error. If it encounters an
-// error before the end of the directory, Readdirnames returns the names read
-// until that point and a non-nil error.
-func (f *PseudoFile) Readdirnames(n int) ([]string, error) {
-	if f.dir != nil {
-		return f.dir.Readdirnames(n)
-	}
-	return nil, errors.New("not a directory")
-}
-
 // Stat returns the FileInfo structure describing f.
-func (f *PseudoFile) Stat() (os.FileInfo, error) {
-	if f.dir != nil {
-		return f.dir.Stat()
-	}
+func (f *roPseudoFile) Stat() (os.FileInfo, error) {
 	return f.pseudoFileInfo, nil
 }
 
-// MetaIndex returns the metafile index of f. The result is invalid if f is a
-// directory.
-func (f *PseudoFile) MetaIndex() renter.MetaIndex {
-	return f.m
+// Close closes the file, rendering it unusable for I/O.
+func (f *roPseudoFile) Close() error {
+	return nil
 }
 
 // Sync commits the current contents of the file to its Sia hosts.
-func (f *PseudoFile) Sync() error {
-	if f.dir != nil {
-		return f.dir.Sync()
+func (f *roPseudoFile) Sync() error {
+	return nil
+}
+
+func (f *roPseudoFile) Write(p []byte) (int, error) {
+	return 0, errors.New("file is read-only")
+}
+
+func (f *roPseudoFile) WriteAt(p []byte, off int64) (int, error) {
+	return 0, errors.New("file is read-only")
+}
+
+func (f *roPseudoFile) Readdir(n int) ([]os.FileInfo, error) {
+	return nil, errors.New("not a directory")
+}
+
+func (f *roPseudoFile) Readdirnames(n int) ([]string, error) {
+	return nil, errors.New("not a directory")
+}
+
+func (f *roPseudoFile) Truncate(size int64) error {
+	return errors.New("file is read-only")
+}
+
+// An aoPseudoFile is a PseudoFile in O_APPEND mode, supporting only writes at
+// the end of the file.
+type aoPseudoFile struct {
+	pseudoFileInfo
+	m          *renter.MetaFile
+	ds         *DownloaderSet
+	shards     []*renter.Shard
+	chunkIndex int64
+	mu         sync.Mutex
+}
+
+// Write writes len(p) bytes to the File. It returns the number of bytes written
+// and an error, if any. Write returns a non-nil error when n != len(p).
+func (f *aoPseudoFile) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	rsc := f.m.ErasureCode()
+	shards := make([][]byte, len(f.m.Hosts))
+	for i := range shards {
+		shards[i] = make([]byte, renterhost.SectorSize)
 	}
+	// encode p into shards
+	rsc.Encode(p, shards)
+
+	// acquire uploaders
+	hosts := make([]*renter.ShardUploader, len(f.m.Hosts))
+	for i, hostKey := range f.m.Hosts {
+		d, ok := f.ds.acquire(hostKey)
+		if !ok {
+			continue
+		}
+		defer f.ds.release(hostKey)
+		hosts[i] = &renter.ShardUploader{
+			Uploader: d,
+			Shard:    f.shards[i],
+			Key:      f.m.MasterKey,
+		}
+	}
+
+	// upload each shard
+	for i := range shards {
+		_, err := hosts[i].EncryptAndUpload(shards[i], f.chunkIndex)
+		if err != nil {
+			return 0, err
+		}
+	}
+	f.chunkIndex++
+	f.m.Filesize += int64(len(p))
+	return len(p), nil
+}
+
+func (f *aoPseudoFile) WriteAt(p []byte, off int64) (int, error) {
+	// TODO: technically we could support WriteAt when off == filesize, but no
+	// point bothering yet. We'll come back to it when arbitrary writes are
+	// supported.
+	return 0, errors.New("file is append-only")
+}
+
+func (f *aoPseudoFile) Seek(offset int64, whence int) (int64, error) {
+	// TODO: technically we could support Seek, as long as the seek offset is at
+	// the end of the file when Write is called, but no point bothering yet.
+	// We'll come back to it when arbitrary writes are supported.
+	return 0, errors.New("file is append-only")
+}
+
+// Name returns the name of the file.
+func (f *aoPseudoFile) Name() string {
+	return f.name
+}
+
+// Stat returns the FileInfo structure describing f.
+func (f *aoPseudoFile) Stat() (os.FileInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pseudoFileInfo, nil
+}
+
+// Sync commits the current contents of the file to its Sia hosts.
+func (f *aoPseudoFile) Sync() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	panic("unimplemented")
 }
 
 // Truncate changes the size of the file. It does not change the I/O offset.
 // The new size may not be greater than the current size.
-func (f *PseudoFile) Truncate(size int64) error {
-	if f.dir != nil {
-		return f.dir.Truncate(size)
-	}
+func (f *aoPseudoFile) Truncate(size int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if size < 0 {
 		return errors.New("new size cannot be negative")
 	}
@@ -528,4 +596,27 @@ func (f *PseudoFile) Truncate(size int64) error {
 	}
 	f.m.Filesize = size
 	return nil
+}
+
+// Close closes the file, rendering it unusable for I/O.
+func (f *aoPseudoFile) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.m.Close()
+}
+
+func (f *aoPseudoFile) Read(p []byte) (int, error) {
+	return 0, errors.New("file is append-only")
+}
+
+func (f *aoPseudoFile) ReadAt(p []byte, off int64) (int, error) {
+	return 0, errors.New("file is append-only")
+}
+
+func (f *aoPseudoFile) Readdir(n int) ([]os.FileInfo, error) {
+	return nil, errors.New("not a directory")
+}
+
+func (f *aoPseudoFile) Readdirnames(n int) ([]string, error) {
+	return nil, errors.New("not a directory")
 }

@@ -15,7 +15,6 @@ import (
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/internal/ed25519"
 	"lukechampine.com/us/internal/ghost"
-	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 )
@@ -78,53 +77,53 @@ func TestFileSystem(t *testing.T) {
 		hkr[h.PublicKey()] = h.Settings().NetAddress
 	}
 
-	// create test data and encode it in a 2-of-3 scheme
-	data := fastrand.Bytes(4096 * 2)
-	rsc := renter.NewRSCode(2, 3)
-	shards := make([][]byte, 3)
-	for i := range shards {
-		shards[i] = make([]byte, 4096)
-	}
-	rsc.Encode(data, shards)
-
-	// create metafile
-	dir := os.TempDir()
-	metaName := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
-	m, err := renter.NewMetaFile(filepath.Join(dir, metaName+".usa"), 0777, int64(len(data)), contracts, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer m.Close()
-
-	// upload to hosts, using lots of small, weird SectorSlices (instead of
-	// uniform SectorSize-sized ones) to test that edge cases are being handled
-	for i, hostKey := range m.Hosts {
-		u, err := renter.NewShardUploader(m, contracts[hostKey], hkr, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		buf := bytes.NewBuffer(shards[i])
-		u.Sector.Append(buf.Next(merkle.SegmentSize), m.MasterKey)
-		u.Sector.Append(buf.Next(merkle.SegmentSize*7), m.MasterKey)
-		u.Sector.Append(buf.Next(merkle.SegmentSize*4), m.MasterKey)
-		if err := u.Upload(0); err != nil {
-			t.Fatal(err)
-		}
-		u.Sector.Reset()
-		u.Sector.Append(buf.Bytes(), m.MasterKey)
-		if err := u.Upload(3); err != nil {
-			t.Fatal(err)
-		}
-		u.Close()
-	}
-	m.Close()
-
 	// create filesystem
-	fs, err := NewFileSystem(dir, contracts, hkr)
+	fs, err := NewFileSystem(os.TempDir(), contracts, hkr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer fs.Close()
+
+	// create metafile
+	metaName := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	pf, err := fs.Create(metaName, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// fill file with random data, using lots of small, weird SectorSlices
+	// (instead of uniform SectorSize-sized ones) to test that edge cases are
+	// being handled
+	//
+	// TODO: handle non-segsize-multiple sizes
+	sizes := []int{4096, 64, 127, 12, 256}
+	sizes = []int{128, 256, 4096, 128, 512}
+	totalSize := 0
+	for _, s := range sizes {
+		totalSize += s
+	}
+	data := fastrand.Bytes(totalSize)
+	buf := bytes.NewBuffer(data)
+	for _, size := range sizes {
+		if _, err := pf.Write(buf.Next(size)); err != nil {
+			t.Fatal(err)
+		}
+		// must flush each slice individually, otherwise they'll be aggregated
+		// into a single sector
+		// if err := pf.Sync(); err != nil {
+		// 	t.Fatal(err)
+		// }
+	}
+
+	// truncate
+	data = data[:len(data)-13]
+	if err := pf.Truncate(int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+
+	// close file
+	if err := pf.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	// stat file
 	stat, err := fs.Stat(metaName)
@@ -132,9 +131,9 @@ func TestFileSystem(t *testing.T) {
 		t.Fatal(err)
 	} else if stat.Name() != metaName {
 		t.Error("incorrect name")
-	} else if stat.Size() != m.Filesize {
+	} else if stat.Size() != int64(len(data)) {
 		t.Error("incorrect size")
-	} else if stat.Mode() != m.Mode {
+	} else if stat.Mode() != 0666 {
 		t.Error("incorrect mode")
 	}
 
@@ -150,8 +149,8 @@ func TestFileSystem(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// open file
-	pf, err := fs.Open("foo")
+	// open file for reading
+	pf, err = fs.Open("foo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,23 +162,26 @@ func TestFileSystem(t *testing.T) {
 		t.Fatal(err)
 	} else if stat.Name() != "foo" || stat.Name() != pf.Name() {
 		t.Error("incorrect name")
-	} else if stat.Size() != m.Filesize {
+	} else if stat.Size() != int64(len(data)) {
 		t.Error("incorrect size")
 	} else if stat.Mode() != 676 {
 		t.Error("incorrect mode")
 	}
 
 	// read and seek within file
-	p := make([]byte, m.Filesize)
+	p := make([]byte, stat.Size())
 	checkRead := func(d []byte) {
+		t.Helper()
 		if n, err := pf.Read(p[:len(d)]); err != nil {
 			t.Fatal(err)
 		} else if !bytes.Equal(p[:n], d) {
 			t.Fatal("data from Read does not match actual data")
 		}
 	}
-	checkRead(data[:1024])
-	checkRead(data[1024:2048])
+	checkRead(data[:10])
+	checkRead(data[10:1024])
+	checkRead(data[1024:1530])
+	checkRead(data[1530:2048])
 
 	if _, err := pf.Seek(-2048, io.SeekCurrent); err != nil {
 		t.Fatal(err)
@@ -208,14 +210,6 @@ func TestFileSystem(t *testing.T) {
 	} else if n != 500 {
 		t.Fatalf("expected to read 500 bytes, got %v", n)
 	}
-
-	// truncate and read
-	if err := pf.Truncate(1023); err != nil {
-		t.Fatal(err)
-	} else if _, err := pf.Seek(512, io.SeekStart); err != nil {
-		t.Fatal(err)
-	}
-	checkRead(data[512:1023])
 
 	// remove file
 	if err := pf.Close(); err != nil {
