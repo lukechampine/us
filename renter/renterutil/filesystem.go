@@ -341,7 +341,7 @@ func (f *PseudoFile) Read(p []byte) (int, error) {
 	}
 
 	// recover data shards directly into p
-	skip := int(f.offset % merkle.SegmentSize)
+	skip := int(f.offset % (int64(f.m.MinShards) * merkle.SegmentSize))
 	w := &skipWriter{p, skip}
 	err = f.m.ErasureCode().Recover(w, shards, skip+len(p))
 	if err != nil {
