@@ -160,18 +160,8 @@ func resumedownload(f *os.File, metaPath string, pf renterutil.PseudoFile) error
 		}
 	}
 
-	// if file is already partially downloaded, pick up where we left off
-	off, err := renter.CompareFileContents(f, metaPath)
-	if err != nil {
-		// an error here is non-fatal, just means more work
-		off = 0
-	} else if _, err := f.Seek(off, io.SeekStart); err != nil {
-		off = 0
-	}
-	if _, err := pf.Seek(off, io.SeekStart); err != nil {
-		return err // should never happen
-	}
-	return trackCopy(f, pf, off)
+	// TODO: if file is already partially downloaded, pick up where we left off
+	return trackCopy(f, pf, 0)
 }
 
 func downloadmetafile(f *os.File, contractDir, metaPath string) error {

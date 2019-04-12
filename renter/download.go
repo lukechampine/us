@@ -104,9 +104,8 @@ func (cw *cryptWriter) Write(p []byte) (int, error) {
 		if i == 0 {
 			s.SegmentIndex += uint32(rem / merkle.SegmentSize)
 		}
-		xchachaNonce := append(s.Nonce[:], make([]byte, 4)...)
 		bb := b.Next(int(s.NumSegments) * merkle.SegmentSize)
-		cw.key.XORKeyStream(bb, xchachaNonce, uint64(s.SegmentIndex))
+		cw.key.XORKeyStream(bb, s.Nonce[:], uint64(s.SegmentIndex))
 	}
 	cw.off += int64(len(p))
 	return cw.w.Write(p)

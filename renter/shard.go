@@ -17,8 +17,7 @@ type SectorSlice struct {
 	MerkleRoot   crypto.Hash
 	SegmentIndex uint32
 	NumSegments  uint32
-	Nonce        [20]byte
-	Checksum     uint32
+	Nonce        [24]byte
 }
 
 // SectorSliceSize is the encoded size of a SectorSlice.
@@ -53,7 +52,6 @@ func (s *Shard) WriteSlice(slice SectorSlice, index int64) error {
 	binary.LittleEndian.PutUint32(encSlice[32:], slice.SegmentIndex)
 	binary.LittleEndian.PutUint32(encSlice[36:], slice.NumSegments)
 	copy(encSlice[40:], slice.Nonce[:])
-	binary.LittleEndian.PutUint32(encSlice[60:], slice.Checksum)
 
 	// write slice
 	if _, err := s.f.WriteAt(encSlice, index*SectorSliceSize); err != nil {
@@ -115,8 +113,7 @@ func ReadShard(filename string) ([]SectorSlice, error) {
 		copy(slices[i].MerkleRoot[:], buf[:32])
 		slices[i].SegmentIndex = binary.LittleEndian.Uint32(buf[32:36])
 		slices[i].NumSegments = binary.LittleEndian.Uint32(buf[36:40])
-		copy(slices[i].Nonce[:], buf[40:60])
-		slices[i].Checksum = binary.LittleEndian.Uint32(buf[60:64])
+		copy(slices[i].Nonce[:], buf[40:64])
 	}
 	return slices, nil
 }

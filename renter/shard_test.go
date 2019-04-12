@@ -2,7 +2,6 @@ package renter
 
 import (
 	"encoding/hex"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -34,9 +33,9 @@ func TestShard(t *testing.T) {
 		s := SectorSlice{
 			SegmentIndex: uint32(fastrand.Uint64n(20)),
 			NumSegments:  uint32(fastrand.Uint64n(20)),
-			Checksum:     uint32(fastrand.Uint64n(math.MaxUint32)),
 		}
 		fastrand.Read(s.MerkleRoot[:])
+		fastrand.Read(s.Nonce[:])
 		slices[int64(fastrand.Intn(20))] = s
 	}
 	for index, s := range slices {

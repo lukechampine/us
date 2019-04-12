@@ -1,8 +1,6 @@
 package renter
 
 import (
-	"hash/crc32"
-
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
@@ -59,17 +57,15 @@ func (sb *SectorBuilder) Append(data []byte, key KeySeed) {
 
 	// encrypt the data in place
 	segmentIndex := sb.sectorLen / merkle.SegmentSize
-	var nonce [20]byte
+	var nonce [24]byte
 	fastrand.Read(nonce[:])
-	xchachaNonce := append(nonce[:], make([]byte, 4)...)
-	key.XORKeyStream(sectorSlice, xchachaNonce, uint64(segmentIndex))
+	key.XORKeyStream(sectorSlice, nonce[:], uint64(segmentIndex))
 
 	// record the new slice and update sectorLen
 	sb.slices = append(sb.slices, SectorSlice{
 		SegmentIndex: uint32(segmentIndex),
 		NumSegments:  uint32(len(sectorSlice) / merkle.SegmentSize),
 		Nonce:        nonce,
-		Checksum:     crc32.ChecksumIEEE(data),
 	})
 	sb.sectorLen += len(sectorSlice)
 }

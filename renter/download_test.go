@@ -20,19 +20,18 @@ func TestCopySection(t *testing.T) {
 	}
 	// construct shard from sector data
 	slices := []SectorSlice{
-		{MerkleRoot: crypto.Hash{0}, SegmentIndex: 0, NumSegments: 1, Nonce: [20]byte{0}},
-		{MerkleRoot: crypto.Hash{1}, SegmentIndex: 1, NumSegments: 2, Nonce: [20]byte{1}},
-		{MerkleRoot: crypto.Hash{1}, SegmentIndex: 4, NumSegments: 1, Nonce: [20]byte{1}},
-		{MerkleRoot: crypto.Hash{0}, SegmentIndex: 7, NumSegments: 6, Nonce: [20]byte{0}},
-		{MerkleRoot: crypto.Hash{2}, SegmentIndex: 0, NumSegments: 6, Nonce: [20]byte{2}},
+		{MerkleRoot: crypto.Hash{0}, SegmentIndex: 0, NumSegments: 1, Nonce: [24]byte{0}},
+		{MerkleRoot: crypto.Hash{1}, SegmentIndex: 1, NumSegments: 2, Nonce: [24]byte{1}},
+		{MerkleRoot: crypto.Hash{1}, SegmentIndex: 4, NumSegments: 1, Nonce: [24]byte{1}},
+		{MerkleRoot: crypto.Hash{0}, SegmentIndex: 7, NumSegments: 6, Nonce: [24]byte{0}},
+		{MerkleRoot: crypto.Hash{2}, SegmentIndex: 0, NumSegments: 6, Nonce: [24]byte{2}},
 	}
 	var key KeySeed
 	var shard []byte
 	for _, s := range slices {
 		off, n := s.SegmentIndex*merkle.SegmentSize, int(s.NumSegments*merkle.SegmentSize)
 		shard = append(shard, sectors[s.MerkleRoot][off:][:n]...)
-		nonce := append(s.Nonce[:], make([]byte, 4)...)
-		key.XORKeyStream(shard[len(shard)-n:], nonce, uint64(s.SegmentIndex))
+		key.XORKeyStream(shard[len(shard)-n:], s.Nonce[:], uint64(s.SegmentIndex))
 	}
 
 	tests := []struct {

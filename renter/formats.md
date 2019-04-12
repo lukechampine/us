@@ -67,27 +67,15 @@ host is also its shard index in the erasure code.
 
 ### shard
 
-A shard is a binary array of slices. Each slice uniquely identifies a
-contiguous slice of a sector stored on a host by specifying the Merkle root of
-the sector, an offset within it, and a length. The shard as a whole represents
-a contiguous slice of data that may span many sectors. As such, the order of
-the array is significant.
+A shard is a binary array of slices. Each slice uniquely identifies a contiguous
+slice of a sector stored on a host by specifying the Merkle root of the sector,
+an offset within it, a length, and an encryption nonce. The shard as a whole
+represents a contiguous slice of data that may span many sectors. As such, the
+order of the array is significant.
 
 The offset and length are in terms of segments (64 bytes), which are the
 atomic unit of transfer in the Sia renter-host protocol. Storing data thus
-requires adding (and later removing) padding if the file's size is not an
-exact multiple of 64 bytes.
-
-Each slice also includes the 20-byte nonce used to encrypt that slice's data,
-which must be chosen randomly. This is smaller than the 24-byte nonce required
-by XChaCha20; it must be padded with four zeros before use. (Shaving off these
-four bytes means an encoded slice fits in 64 bytes, without significantly
-reducing security.)
-
-Lastly, each slice contains an IEEE CRC32 checksum of the pre-encryption data.
-This checksum is **not** used to verify data received from the host -- we use
-Merkle proofs for that. Rather, the checksum allows us to check whether a local
-file on disk matches the contents of a metafile, e.g. when resuming a download.
+requires adding (and later removing) padding.
 
 ```go
 type Shard []SectorSlice
@@ -96,7 +84,6 @@ type SectorSlice struct {
 	MerkleRoot   [32]byte
 	SegmentIndex uint32
 	NumSegments  uint32
-	Nonce        [20]byte
-	Checksum     [4]byte
+	Nonce        [24]byte
 }
 ```
