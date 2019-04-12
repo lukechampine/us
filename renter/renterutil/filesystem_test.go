@@ -93,25 +93,14 @@ func TestFileSystem(t *testing.T) {
 	// fill file with random data, using lots of small, weird SectorSlices
 	// (instead of uniform SectorSize-sized ones) to test that edge cases are
 	// being handled
-	//
-	// TODO: handle non-segsize-multiple sizes
-	sizes := []int{4096, 64, 127, 12, 256}
-	sizes = []int{128, 256, 4096, 128, 512}
-	totalSize := 0
-	for _, s := range sizes {
-		totalSize += s
-	}
-	data := fastrand.Bytes(totalSize)
-	buf := bytes.NewBuffer(data)
+	sizes := []int{64, 127, 12, 4096, 253}
+	var data []byte
 	for _, size := range sizes {
-		if _, err := pf.Write(buf.Next(size)); err != nil {
+		d := fastrand.Bytes(size)
+		if _, err := pf.Write(d); err != nil {
 			t.Fatal(err)
 		}
-		// must flush each slice individually, otherwise they'll be aggregated
-		// into a single sector
-		// if err := pf.Sync(); err != nil {
-		// 	t.Fatal(err)
-		// }
+		data = append(data, d...)
 	}
 
 	// truncate
@@ -179,7 +168,8 @@ func TestFileSystem(t *testing.T) {
 		}
 	}
 	checkRead(data[:10])
-	checkRead(data[10:1024])
+	checkRead(data[10:150])
+	checkRead(data[150:1024])
 	checkRead(data[1024:1530])
 	checkRead(data[1530:2048])
 

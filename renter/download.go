@@ -93,7 +93,7 @@ func calcSlices(slices []SectorSlice, off int64) ([]SectorSlice, int64) {
 		}
 		n += size
 	}
-	panic("unreachable")
+	return nil, off - n
 }
 
 func (cw *cryptWriter) Write(p []byte) (int, error) {

@@ -509,6 +509,59 @@ type aoPseudoFile struct {
 	mu         sync.Mutex
 }
 
+func (f *aoPseudoFile) readChunkAt(p []byte, off int64) error {
+	if len(p)%f.m.MinShards*merkle.SegmentSize != 0 {
+		panic("illegal chunk size")
+	}
+	if off >= f.m.Filesize {
+		return io.EOF
+	}
+
+	hosts := make([]*renter.ShardDownloader, len(f.m.Hosts))
+	for i, hostKey := range f.m.Hosts {
+		d, ok := f.ds.acquire(hostKey)
+		if !ok {
+			continue
+		}
+		defer f.ds.release(hostKey)
+		slices, err := renter.ReadShard(f.m.ShardPath(hostKey))
+		if err != nil {
+			return err
+		}
+		hosts[i] = &renter.ShardDownloader{
+			Downloader: d,
+			Key:        f.m.MasterKey,
+			Slices:     slices,
+		}
+	}
+	start := (off / int64(f.m.MinShards*merkle.SegmentSize)) * merkle.SegmentSize
+	offset, length := start, int64(merkle.SegmentSize)
+
+	shards := make([][]byte, len(hosts))
+	var nShards int
+	for shardIndex, host := range hosts {
+		if host == nil {
+			continue
+		}
+		var buf bytes.Buffer
+		err := host.CopySection(&buf, offset, length)
+		if err == nil {
+			shards[shardIndex] = buf.Bytes()
+			if nShards++; nShards >= f.m.MinShards {
+				break
+			}
+		}
+	}
+
+	// recover data shards directly into p
+	w := &skipWriter{p, 0}
+	err := f.m.ErasureCode().Recover(w, shards, len(p))
+	if err != nil {
+		return errors.Wrap(err, "could not recover chunk")
+	}
+	return nil
+}
+
 // Write writes len(p) bytes to the File. It returns the number of bytes written
 // and an error, if any. Write returns a non-nil error when n != len(p).
 func (f *aoPseudoFile) Write(p []byte) (int, error) {
@@ -520,8 +573,43 @@ func (f *aoPseudoFile) Write(p []byte) (int, error) {
 	for i := range shards {
 		shards[i] = make([]byte, renterhost.SectorSize)
 	}
+
 	// encode p into shards
-	rsc.Encode(p, shards)
+	if align := int(f.m.Filesize % int64(merkle.SegmentSize*f.m.MinShards)); align == 0 {
+		// already aligned, no extra work necessary
+		rsc.Encode(p, shards)
+	} else {
+		// The current offset is unaligned, i.e. the previous write did not
+		// occupy a full chunk, and was thus padded with zeros. We want to fill
+		// those zeros with data from p, but we can't upload less than a chunk.
+		// So we need to download the previous partial chunk, append p to it
+		// (thus overwriting any zeros), and upload the result. We also need to
+		// update the previous write's SectorSlice, or even delete it entirely.
+		chunk := make([]byte, merkle.SegmentSize*f.m.MinShards)
+		err := f.readChunkAt(chunk[:merkle.SegmentSize*f.m.MinShards], f.m.Filesize-int64(align))
+		if err != nil {
+			return 0, err
+		}
+		chunk = append(chunk[:align], p...)
+		rsc.Encode(chunk, shards)
+
+		// trim old SectorSlices
+		for i, hostKey := range f.m.Hosts {
+			slices, err := renter.ReadShard(f.m.ShardPath(hostKey))
+			if err != nil {
+				return 0, err
+			}
+			s := slices[len(slices)-1]
+			s.NumSegments--
+			if s.NumSegments == 0 {
+				f.chunkIndex = int64(len(slices) - 1)
+			} else {
+				if err := f.shards[i].WriteSlice(s, int64(len(slices)-1)); err != nil {
+					return 0, err
+				}
+			}
+		}
+	}
 
 	// acquire uploaders
 	hosts := make([]*renter.ShardUploader, len(f.m.Hosts))
@@ -595,6 +683,37 @@ func (f *aoPseudoFile) Truncate(size int64) error {
 		return errors.New("new size cannot exceed current size")
 	}
 	f.m.Filesize = size
+
+	// update shard files
+	for shardIndex, hostKey := range f.m.Hosts {
+		slices, err := renter.ReadShard(f.m.ShardPath(hostKey))
+		if err != nil {
+			return err
+		}
+		var n int64
+		for i, s := range slices {
+			sliceSize := int64(s.NumSegments) * merkle.SegmentSize * int64(f.m.MinShards)
+			if n+sliceSize > f.m.Filesize {
+				// trim number of segments
+				s.NumSegments -= uint32(n+sliceSize-f.m.Filesize) / uint32(merkle.SegmentSize*f.m.MinShards)
+				if s.NumSegments == 0 {
+					slices = slices[:i]
+				} else {
+					if err := f.shards[shardIndex].WriteSlice(s, int64(i)); err != nil {
+						return err
+					}
+					slices = slices[:i+1]
+				}
+				break
+			}
+			n += sliceSize
+		}
+		err = os.Truncate(f.m.ShardPath(hostKey), int64(len(slices))*renter.SectorSliceSize)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
