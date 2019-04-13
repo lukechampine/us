@@ -205,11 +205,11 @@ func ReadContractRevision(filename string) (proto.ContractRevision, error) {
 	}
 	defer f.Close()
 	b := make([]byte, ContractSize)
-	if _, err := f.ReadAt(b, ContractHeaderSize); err != nil {
+	if _, err := f.ReadAt(b, 0); err != nil {
 		return proto.ContractRevision{}, errors.Wrap(err, "could not read revision")
 	}
 	var rev proto.ContractRevision
-	err = unmarshalRevision(b, &rev)
+	err = unmarshalRevision(b[ContractHeaderSize:], &rev)
 	return rev, err
 }
 
