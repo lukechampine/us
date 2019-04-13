@@ -66,24 +66,24 @@ func uploadmetafile(f *os.File, minShards int, contractDir, metaPath string) err
 	if err != nil {
 		return errors.Wrap(err, "could not stat file")
 	}
-	m, err := renter.NewMetaFile(metaPath, stat.Mode(), stat.Size(), contracts, minShards)
-	if err != nil {
-		return errors.Wrap(err, "could not create metafile")
-	}
-	defer closeMetaFile(m)
 
 	c := makeLimitedClient()
 	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
-	currentHeight, err := c.ChainHeight()
+
+	dir, name := filepath.Dir(metaPath), strings.TrimSuffix(filepath.Base(metaPath), ".usa")
+	fs, err := renterutil.NewFileSystem(dir, contracts, c)
 	if err != nil {
-		return errors.Wrap(err, "could not determine current height")
+		return err
 	}
-	log, cleanup := openLog()
-	defer cleanup()
-	op := renterutil.Upload(f, contracts, m, c, currentHeight)
-	return trackUpload(f.Name(), op, log)
+	defer fs.Close()
+	pf, err := fs.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_TRUNC, stat.Mode(), minShards)
+	if err != nil {
+		return err
+	}
+	defer pf.Close()
+	return trackUpload(pf, f)
 }
 
 func uploadmetadir(dir, metaDir, contractDir string, minShards int) error {
@@ -116,24 +116,23 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 	}
 	defer contracts.Close()
 
-	m, err := renter.OpenMetaFile(metaPath)
-	if err != nil {
-		return errors.Wrap(err, "could not load metafile")
-	}
-	defer closeMetaFile(m)
-
 	c := makeLimitedClient()
 	if synced, err := c.Synced(); !synced && err == nil {
 		return errors.New("blockchain is not synchronized")
 	}
-	currentHeight, err := c.ChainHeight()
+
+	dir, name := filepath.Dir(metaPath), strings.TrimSuffix(filepath.Base(metaPath), ".usa")
+	fs, err := renterutil.NewFileSystem(dir, contracts, c)
 	if err != nil {
-		return errors.Wrap(err, "could not determine current height")
+		return err
 	}
-	log, cleanup := openLog()
-	defer cleanup()
-	op := renterutil.Upload(f, contracts, m, c, currentHeight)
-	return trackUpload(f.Name(), op, log)
+	defer fs.Close()
+	pf, err := fs.Open(name)
+	if err != nil {
+		return err
+	}
+	defer pf.Close()
+	return trackUpload(pf, f)
 }
 
 func resumedownload(f *os.File, metaPath string, pf renterutil.PseudoFile) error {
@@ -161,7 +160,7 @@ func resumedownload(f *os.File, metaPath string, pf renterutil.PseudoFile) error
 	}
 
 	// TODO: if file is already partially downloaded, pick up where we left off
-	return trackCopy(f, pf, 0)
+	return trackDownload(f, pf, 0)
 }
 
 func downloadmetafile(f *os.File, contractDir, metaPath string) error {

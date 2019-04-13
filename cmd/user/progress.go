@@ -21,40 +21,6 @@ func writeUpdate(w io.Writer, u interface{}, typ string) {
 	fmt.Fprintf(w, `{"type":%q,"data":%s}`+"\n", typ, js)
 }
 
-func trackUpload(filename string, op *renterutil.Operation, log io.Writer) error {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
-
-	var uploadStart time.Time
-	for {
-		select {
-		case u, ok := <-op.Updates():
-			if !ok {
-				fmt.Println()
-				return op.Err()
-			}
-			switch u := u.(type) {
-			case renterutil.TransferProgressUpdate:
-				if uploadStart.IsZero() {
-					uploadStart = time.Now()
-				}
-				printOperationProgress(filename, u, time.Since(uploadStart))
-
-			case renterutil.DialStatsUpdate:
-				writeUpdate(log, u, "dial")
-			case renterutil.UploadStatsUpdate:
-				writeUpdate(log, u, "upload")
-			}
-		case <-sigChan:
-			fmt.Println("\rStopping...")
-			op.Cancel()
-			for range op.Updates() {
-			}
-			return nil
-		}
-	}
-}
-
 type trackWriter struct {
 	w                io.Writer
 	name             string
@@ -76,7 +42,7 @@ func (tw *trackWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func trackCopy(f *os.File, pf renterutil.PseudoFile, off int64) error {
+func trackDownload(f *os.File, pf renterutil.PseudoFile, off int64) error {
 	stat, err := pf.Stat()
 	if err != nil {
 		return err
@@ -100,6 +66,41 @@ func trackCopy(f *os.File, pf renterutil.PseudoFile, off int64) error {
 	index := stat.Sys().(renter.MetaIndex)
 	buf := make([]byte, renterhost.SectorSize*index.MinShards)
 	_, err = io.CopyBuffer(tw, pf, buf)
+	if err == context.Canceled {
+		err = nil
+	}
+	fmt.Println()
+	return err
+}
+
+func trackUpload(pf renterutil.PseudoFile, f *os.File) error {
+	stat, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	pstat, err := pf.Stat()
+	if err != nil {
+		return err
+	}
+	if pstat.Size() == stat.Size() {
+		printAlreadyFinished(f.Name(), pstat.Size())
+		fmt.Println()
+		return nil
+	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
+	tw := &trackWriter{
+		w:       pf,
+		name:    f.Name(),
+		off:     pstat.Size(),
+		total:   stat.Size(),
+		start:   time.Now(),
+		sigChan: sigChan,
+	}
+	index := pstat.Sys().(renter.MetaIndex)
+	buf := make([]byte, renterhost.SectorSize*index.MinShards)
+	_, err = io.CopyBuffer(tw, f, buf)
 	if err == context.Canceled {
 		err = nil
 	}
