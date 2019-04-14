@@ -78,6 +78,7 @@ func (fs *PseudoFS) Chmod(name string, mode os.FileMode) error {
 		return errors.Wrapf(err, "chmod %v", path)
 	}
 	m.Mode = mode
+	m.ModTime = time.Now()
 	if err := m.Close(); err != nil {
 		return errors.Wrapf(err, "chmod %v", path)
 	}
@@ -645,6 +646,7 @@ func (f *aoPseudoFile) Write(p []byte) (int, error) {
 	}
 	f.chunkIndex++
 	f.m.Filesize += int64(len(p))
+	f.m.ModTime = time.Now()
 	return len(p), nil
 }
 
@@ -724,6 +726,7 @@ func (f *aoPseudoFile) Truncate(size int64) error {
 		}
 	}
 
+	f.m.ModTime = time.Now()
 	return nil
 }
 
