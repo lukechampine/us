@@ -66,6 +66,10 @@ func createHostWithContract(tb testing.TB) (*ghost.Host, *renter.Contract) {
 }
 
 func TestFileSystem(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
 	// create three hosts and form contracts with each of them
 	hosts := make([]*ghost.Host, 3)
 	contracts := make(renter.ContractSet)
@@ -130,7 +134,7 @@ func TestFileSystem(t *testing.T) {
 	}
 
 	// chmod file
-	err = fs.Chmod("foo", 676)
+	err = fs.Chmod("foo", 0676)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +154,7 @@ func TestFileSystem(t *testing.T) {
 		t.Error("incorrect name")
 	} else if stat.Size() != int64(len(data)) {
 		t.Error("incorrect size")
-	} else if stat.Mode() != 676 {
+	} else if stat.Mode() != 0676 {
 		t.Error("incorrect mode")
 	}
 

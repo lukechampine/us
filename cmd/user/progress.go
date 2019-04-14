@@ -108,54 +108,6 @@ func trackUpload(pf renterutil.PseudoFile, f *os.File) error {
 	return err
 }
 
-func trackDownloadDir(op *renterutil.Operation, log io.Writer) error {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
-
-	var filename string
-	var downloadStart time.Time
-	for {
-		select {
-		case u, ok := <-op.Updates():
-			if !ok {
-				return op.Err()
-			}
-			switch u := u.(type) {
-			case renterutil.DirQueueUpdate:
-				if filename != "" {
-					fmt.Println()
-				}
-				filename = u.Filename
-				downloadStart = time.Now()
-				p := renterutil.TransferProgressUpdate{
-					Total:       u.Filesize,
-					Transferred: 0,
-				}
-				printOperationProgress(filename, p, time.Since(downloadStart))
-			case renterutil.TransferProgressUpdate:
-				printOperationProgress(filename, u, time.Since(downloadStart))
-			case renterutil.DirSkipUpdate:
-				fmt.Printf("Skip %v: %v\n", u.Filename, u.Err)
-				filename = ""
-
-			case renterutil.DialStatsUpdate:
-				writeUpdate(log, u, "dial")
-			case renterutil.DownloadStatsUpdate:
-				writeUpdate(log, u, "download")
-			}
-		case <-sigChan:
-			fmt.Println("\nStopping...")
-			op.Cancel()
-			for range op.Updates() {
-			}
-			if op.Err() != renterutil.ErrCanceled {
-				return op.Err()
-			}
-			return nil
-		}
-	}
-}
-
 func trackUploadDir(op *renterutil.Operation, log io.Writer) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)

@@ -70,7 +70,7 @@ func (fs *PseudoFS) Chmod(name string, mode os.FileMode) error {
 	if isDir(path) {
 		return os.Chmod(path, mode)
 	}
-	path += ".usa"
+	path += metafileExt
 	// TODO: how does this interact with open files?
 	// TODO: this can be done without a working directory
 	m, err := renter.OpenMetaFile(path)
@@ -119,7 +119,7 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 		dir, err := os.OpenFile(path, flag, perm)
 		return &dirPseudoFile{dir}, err
 	}
-	path += ".usa"
+	path += metafileExt
 
 	// currently, the only modes supported are RDONLY and APPEND
 	if flag == os.O_RDONLY {
@@ -182,7 +182,7 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 func (fs *PseudoFS) Remove(name string) error {
 	path := fs.path(name)
 	if !isDir(path) {
-		path += ".usa"
+		path += metafileExt
 	}
 	// TODO: delete remote sectors?
 	// TODO: how does this interact with open files?
@@ -197,7 +197,7 @@ func (fs *PseudoFS) RemoveAll(path string) error {
 	// TODO: how does this interact with open files?
 	path = fs.path(path)
 	if !isDir(path) {
-		path += ".usa"
+		path += metafileExt
 	}
 	return os.RemoveAll(path)
 }
@@ -209,10 +209,10 @@ func (fs *PseudoFS) Rename(oldname, newname string) error {
 	// TODO: how does this interact with open files?
 	oldpath, newpath := fs.path(oldname), fs.path(newname)
 	if !isDir(oldpath) {
-		oldpath += ".usa"
+		oldpath += metafileExt
 	}
 	if !isDir(newpath) {
-		newpath += ".usa"
+		newpath += metafileExt
 	}
 	return os.Rename(oldpath, newpath)
 }
@@ -223,7 +223,7 @@ func (fs *PseudoFS) Stat(name string) (os.FileInfo, error) {
 	if isDir(path) {
 		return os.Stat(path)
 	}
-	path += ".usa"
+	path += metafileExt
 	index, err := renter.ReadMetaIndex(path)
 	if err != nil {
 		return nil, errors.Wrapf(err, "stat %v", name)
@@ -280,7 +280,7 @@ func (f *dirPseudoFile) Readdir(n int) ([]os.FileInfo, error) {
 		}
 		files[i] = pseudoFileInfo{
 			m:    index,
-			name: strings.TrimSuffix(files[i].Name(), ".usa"),
+			name: strings.TrimSuffix(files[i].Name(), metafileExt),
 		}
 	}
 	return files, err
@@ -289,7 +289,6 @@ func (f *dirPseudoFile) Readdir(n int) ([]os.FileInfo, error) {
 // An roPseudoFile is a read-only PseudoFile.
 type roPseudoFile struct {
 	pseudoFileInfo
-	perm      int
 	shards    [][]renter.SectorSlice
 	hs        *HostSet
 	offset    int64

@@ -1,4 +1,6 @@
-package renterhost
+// Package renterhost implements the handshake and transport for the Sia
+// renter-host protocol.
+package renterhost // import "lukechampine.com/us/renterhost"
 
 import (
 	"bytes"

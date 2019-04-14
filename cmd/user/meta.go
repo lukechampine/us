@@ -227,7 +227,7 @@ func downloadmetadir(dir, contractDir, metaDir string) error {
 	defer fs.Close()
 
 	return filepath.Walk(metaDir, func(metaPath string, info os.FileInfo, err error) error {
-		if info.IsDir() {
+		if info.IsDir() || err != nil {
 			return nil
 		}
 		name := strings.TrimSuffix(strings.TrimPrefix(metaPath, metaDir), ".usa")
