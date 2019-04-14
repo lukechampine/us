@@ -23,10 +23,7 @@ func mount(contractDir, metaDir, mountDir string) error {
 	defer contracts.Close()
 
 	c := makeLimitedClient()
-	pfs, err := renterutil.NewFileSystem(metaDir, contracts, c)
-	if err != nil {
-		return errors.Wrap(err, "could not connect to hosts")
-	}
+	pfs := renterutil.NewFileSystem(metaDir, contracts, c)
 	nfs := pathfs.NewPathNodeFs(fileSystem(pfs), nil)
 	server, _, err := nodefs.MountRoot(mountDir, nfs.Root(), nil)
 	if err != nil {

@@ -21,10 +21,7 @@ func serve(contractDir, metaDir, addr string) error {
 	defer contracts.Close()
 
 	c := makeLimitedClient()
-	pfs, err := renterutil.NewFileSystem(metaDir, contracts, c)
-	if err != nil {
-		return errors.Wrap(err, "could not connect to hosts")
-	}
+	pfs := renterutil.NewFileSystem(metaDir, contracts, c)
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: http.FileServer(&httpFS{pfs}),

@@ -78,10 +78,7 @@ func TestFileSystem(t *testing.T) {
 	}
 
 	// create filesystem
-	fs, err := NewFileSystem(os.TempDir(), contracts, hkr)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fs := NewFileSystem(os.TempDir(), contracts, hkr)
 	defer fs.Close()
 
 	// create metafile

@@ -51,8 +51,8 @@ func (i pseudoFileInfo) Sys() interface{}   { return i.m }
 
 // PseudoFS implements a filesystem by downloading data from Sia hosts.
 type PseudoFS struct {
-	root        string
-	downloaders *DownloaderSet
+	root  string
+	hosts *HostSet
 }
 
 func (fs *PseudoFS) path(name string) string {
@@ -130,7 +130,7 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 		return &roPseudoFile{
 			pseudoFileInfo: pseudoFileInfo{name, index},
 			shards:         shards,
-			ds:             fs.downloaders,
+			hs:             fs.hosts,
 			shardBufs:      make([]bytes.Buffer, len(shards)),
 		}, nil
 	} else if flag == os.O_APPEND|os.O_CREATE|os.O_TRUNC {
@@ -156,7 +156,7 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 			pseudoFileInfo: pseudoFileInfo{name, m.MetaIndex},
 			m:              m,
 			shards:         shards,
-			ds:             fs.downloaders,
+			hs:             fs.hosts,
 		}, nil
 	} else {
 		return nil, errors.New("unsupported flag combination")
@@ -218,20 +218,16 @@ func (fs *PseudoFS) Stat(name string) (os.FileInfo, error) {
 
 // Close closes the filesystem by terminating all active host sessions.
 func (fs *PseudoFS) Close() error {
-	return fs.downloaders.Close()
+	return fs.hosts.Close()
 }
 
 // NewFileSystem returns a new pseudo-filesystem rooted at root, which must be a
 // directory containing only metafiles and other directories.
-func NewFileSystem(root string, contracts renter.ContractSet, hkr renter.HostKeyResolver) (*PseudoFS, error) {
-	ds, err := NewDownloaderSet(contracts, hkr)
-	if err != nil {
-		return nil, err
-	}
+func NewFileSystem(root string, contracts renter.ContractSet, hkr renter.HostKeyResolver) *PseudoFS {
 	return &PseudoFS{
-		root:        root,
-		downloaders: ds,
-	}, nil
+		root:  root,
+		hosts: NewHostSet(contracts, hkr),
+	}
 }
 
 // A PseudoFile presents a file-like interface for a metafile stored on Sia
@@ -280,24 +276,24 @@ type roPseudoFile struct {
 	pseudoFileInfo
 	perm      int
 	shards    [][]renter.SectorSlice
-	ds        *DownloaderSet
+	hs        *HostSet
 	offset    int64
 	shardBufs []bytes.Buffer
 	mu        sync.Mutex // serializes all methods
 }
 
-var errNoHost = errors.New("no downloader for this host")
-
 func (f *roPseudoFile) downloadShards(offset int64, n int) ([][]byte, error) {
 	hosts := make([]*renter.ShardDownloader, len(f.m.Hosts))
+	hostErrs := make([]error, len(f.m.Hosts))
 	for i, hostKey := range f.m.Hosts {
-		d, ok := f.ds.acquire(hostKey)
-		if !ok {
+		s, err := f.hs.acquire(hostKey)
+		if err != nil {
+			hostErrs[i] = err
 			continue
 		}
-		defer f.ds.release(hostKey)
+		defer f.hs.release(hostKey)
 		hosts[i] = &renter.ShardDownloader{
-			Downloader: d,
+			Downloader: s,
 			Key:        f.m.MasterKey,
 			Slices:     f.shards[i],
 		}
@@ -328,7 +324,7 @@ func (f *roPseudoFile) downloadShards(offset int64, n int) ([][]byte, error) {
 				res := result{shardIndex: shardIndex}
 				host := hosts[shardIndex]
 				if host == nil {
-					res.err = errNoHost
+					res.err = hostErrs[shardIndex]
 				} else {
 					buf := &f.shardBufs[shardIndex]
 					buf.Reset()
@@ -503,7 +499,7 @@ func (f *roPseudoFile) Truncate(size int64) error {
 type aoPseudoFile struct {
 	pseudoFileInfo
 	m          *renter.MetaFile
-	ds         *DownloaderSet
+	hs         *HostSet
 	shards     []*renter.Shard
 	chunkIndex int64
 	mu         sync.Mutex
@@ -519,17 +515,17 @@ func (f *aoPseudoFile) readChunkAt(p []byte, off int64) error {
 
 	hosts := make([]*renter.ShardDownloader, len(f.m.Hosts))
 	for i, hostKey := range f.m.Hosts {
-		d, ok := f.ds.acquire(hostKey)
-		if !ok {
+		s, err := f.hs.acquire(hostKey)
+		if err != nil {
 			continue
 		}
-		defer f.ds.release(hostKey)
+		defer f.hs.release(hostKey)
 		slices, err := renter.ReadShard(f.m.ShardPath(hostKey))
 		if err != nil {
 			return err
 		}
 		hosts[i] = &renter.ShardDownloader{
-			Downloader: d,
+			Downloader: s,
 			Key:        f.m.MasterKey,
 			Slices:     slices,
 		}
@@ -614,13 +610,13 @@ func (f *aoPseudoFile) Write(p []byte) (int, error) {
 	// acquire uploaders
 	hosts := make([]*renter.ShardUploader, len(f.m.Hosts))
 	for i, hostKey := range f.m.Hosts {
-		d, ok := f.ds.acquire(hostKey)
-		if !ok {
-			continue
+		s, err := f.hs.acquire(hostKey)
+		if err != nil {
+			return 0, err
 		}
-		defer f.ds.release(hostKey)
+		defer f.hs.release(hostKey)
 		hosts[i] = &renter.ShardUploader{
-			Uploader: d,
+			Uploader: s,
 			Shard:    f.shards[i],
 			Key:      f.m.MasterKey,
 		}

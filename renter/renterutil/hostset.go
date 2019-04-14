@@ -11,58 +11,70 @@ import (
 	"github.com/pkg/errors"
 )
 
-type lockedDownloader struct {
-	d  *proto.Session
-	mu *sync.Mutex
+var errNoHost = errors.New("no record of that host")
+
+type lockedHost struct {
+	s   *proto.Session
+	err error
+	mu  *sync.Mutex
 }
 
-// A DownloaderSet groups a set of proto.Downloaders.
-type DownloaderSet struct {
-	downloaders map[hostdb.HostPublicKey]lockedDownloader
+// A HostSet is a collection of renter-host protocol sessions.
+type HostSet struct {
+	sessions map[hostdb.HostPublicKey]lockedHost
 }
 
 // Close closes all of the Downloaders in the set.
-func (set *DownloaderSet) Close() error {
-	for _, ld := range set.downloaders {
-		ld.mu.Lock()
-		ld.d.Close()
+func (set *HostSet) Close() error {
+	for _, ls := range set.sessions {
+		ls.mu.Lock()
+		if ls.s != nil {
+			ls.s.Close()
+		}
 	}
 	return nil
 }
 
-func (set *DownloaderSet) acquire(host hostdb.HostPublicKey) (*proto.Session, bool) {
-	ld, ok := set.downloaders[host]
+func (set *HostSet) acquire(host hostdb.HostPublicKey) (*proto.Session, error) {
+	ls, ok := set.sessions[host]
 	if !ok {
-		return nil, false
+		return nil, errNoHost
 	}
-	ld.mu.Lock()
-	return ld.d, true
+	ls.mu.Lock()
+	if err := ls.err; err != nil {
+		ls.mu.Unlock()
+		return nil, err
+	}
+	return ls.s, nil
 }
 
-func (set *DownloaderSet) release(host hostdb.HostPublicKey) {
-	set.downloaders[host].mu.Unlock()
+func (set *HostSet) release(host hostdb.HostPublicKey) {
+	set.sessions[host].mu.Unlock()
 }
 
-// NewDownloaderSet creates a DownloaderSet composed of one proto.Downloader
-// per contract.
-func NewDownloaderSet(contracts renter.ContractSet, hkr renter.HostKeyResolver) (*DownloaderSet, error) {
-	ds := &DownloaderSet{
-		downloaders: make(map[hostdb.HostPublicKey]lockedDownloader),
+// NewHostSet creates a HostSet composed of one protocol session per contract.
+// If a session cannot be established, that contract is skipped; these errors
+// are exposed via the acquire method.
+func NewHostSet(contracts renter.ContractSet, hkr renter.HostKeyResolver) *HostSet {
+	hs := &HostSet{
+		sessions: make(map[hostdb.HostPublicKey]lockedHost),
 	}
 	for hostKey, contract := range contracts {
 		hostIP, err := hkr.ResolveHostKey(contract.HostKey())
 		if err != nil {
-			// TODO: skip instead?
-			return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
+			err = errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
+			hs.sessions[hostKey] = lockedHost{err: err, mu: new(sync.Mutex)}
+			continue
 		}
-		d, err := proto.NewSession(hostIP, contract, 0)
+		s, err := proto.NewSession(hostIP, contract, 0)
 		if err != nil {
-			// TODO: skip instead?
-			return nil, err
+			err = errors.Wrapf(err, "%v", hostKey.ShortKey())
+			hs.sessions[hostKey] = lockedHost{err: err, mu: new(sync.Mutex)}
+			continue
 		}
-		ds.downloaders[hostKey] = lockedDownloader{d: d, mu: new(sync.Mutex)}
+		hs.sessions[hostKey] = lockedHost{s: s, mu: new(sync.Mutex)}
 	}
-	return ds, nil
+	return hs
 }
 
 // DownloadChunkShards downloads the shards of chunkIndex from hosts in

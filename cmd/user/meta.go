@@ -77,10 +77,7 @@ func uploadmetafile(f *os.File, minShards int, contractDir, metaPath string) err
 	}
 
 	dir, name := filepath.Dir(metaPath), strings.TrimSuffix(filepath.Base(metaPath), ".usa")
-	fs, err := renterutil.NewFileSystem(dir, contracts, c)
-	if err != nil {
-		return err
-	}
+	fs := renterutil.NewFileSystem(dir, contracts, c)
 	defer fs.Close()
 	pf, err := fs.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_TRUNC, stat.Mode(), minShards)
 	if err != nil {
@@ -126,10 +123,7 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 	}
 
 	dir, name := filepath.Dir(metaPath), strings.TrimSuffix(filepath.Base(metaPath), ".usa")
-	fs, err := renterutil.NewFileSystem(dir, contracts, c)
-	if err != nil {
-		return err
-	}
+	fs := renterutil.NewFileSystem(dir, contracts, c)
 	defer fs.Close()
 	pf, err := fs.Open(name)
 	if err != nil {
@@ -178,10 +172,7 @@ func downloadmetafile(f *os.File, contractDir, metaPath string) error {
 	defer contracts.Close()
 
 	dir, name := filepath.Dir(metaPath), strings.TrimSuffix(filepath.Base(metaPath), ".usa")
-	fs, err := renterutil.NewFileSystem(dir, contracts, makeLimitedClient())
-	if err != nil {
-		return err
-	}
+	fs := renterutil.NewFileSystem(dir, contracts, makeLimitedClient())
 	defer fs.Close()
 	pf, err := fs.Open(name)
 	if err != nil {
@@ -202,10 +193,7 @@ func downloadmetastream(w io.Writer, contractDir, metaPath string) error {
 	defer contracts.Close()
 
 	dir, name := filepath.Dir(metaPath), strings.TrimSuffix(filepath.Base(metaPath), ".usa")
-	fs, err := renterutil.NewFileSystem(dir, contracts, makeLimitedClient())
-	if err != nil {
-		return err
-	}
+	fs := renterutil.NewFileSystem(dir, contracts, makeLimitedClient())
 	defer fs.Close()
 	pf, err := fs.Open(name)
 	if err != nil {
@@ -231,10 +219,7 @@ func downloadmetadir(dir, contractDir, metaDir string) error {
 		return errors.Wrap(err, "could not load contracts")
 	}
 	defer contracts.Close()
-	fs, err := renterutil.NewFileSystem(metaDir, contracts, makeLimitedClient())
-	if err != nil {
-		return err
-	}
+	fs := renterutil.NewFileSystem(metaDir, contracts, makeLimitedClient())
 	defer fs.Close()
 
 	return filepath.Walk(metaDir, func(metaPath string, info os.FileInfo, err error) error {
