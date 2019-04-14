@@ -133,14 +133,22 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 			hs:             fs.hosts,
 			shardBufs:      make([]bytes.Buffer, len(shards)),
 		}, nil
-	} else if flag == os.O_APPEND|os.O_CREATE|os.O_TRUNC {
-		// NewMetaFile expects a map of contracts, so fake one.
-		// TODO: find a better way.
-		contracts := make(renter.ContractSet)
-		for hostKey := range fs.downloaders.downloaders {
-			contracts[hostKey] = nil
+	} else if flag&os.O_APPEND != 0 {
+		var m *renter.MetaFile
+		var err error
+		if flag == os.O_APPEND|os.O_CREATE|os.O_TRUNC {
+			// NewMetaFile expects a map of contracts, so fake one.
+			// TODO: find a better way.
+			contracts := make(renter.ContractSet)
+			for hostKey := range fs.hosts.sessions {
+				contracts[hostKey] = nil
+			}
+			m, err = renter.NewMetaFile(path, perm, 0, contracts, minShards)
+		} else if flag == os.O_APPEND {
+			m, err = renter.OpenMetaFile(path)
+		} else {
+			return nil, errors.New("unsupported flag combination")
 		}
-		m, err := renter.NewMetaFile(path, perm, 0, contracts, minShards)
 		if err != nil {
 			return nil, errors.Wrapf(err, "open %v", name)
 		}
@@ -152,11 +160,18 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 			}
 			shards[i] = sf
 		}
+		// determine chunkIndex
+		slices, err := renter.ReadShard(m.ShardPath(m.Hosts[0]))
+		if err != nil {
+			return nil, errors.Wrapf(err, "open %v", name)
+		}
+		chunkIndex := int64(len(slices))
 		return &aoPseudoFile{
 			pseudoFileInfo: pseudoFileInfo{name, m.MetaIndex},
 			m:              m,
 			shards:         shards,
 			hs:             fs.hosts,
+			chunkIndex:     chunkIndex,
 		}, nil
 	} else {
 		return nil, errors.New("unsupported flag combination")
