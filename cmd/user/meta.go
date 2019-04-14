@@ -160,9 +160,15 @@ func resumedownload(f *os.File, metaPath string, pf renterutil.PseudoFile) error
 			return errors.Wrap(err, "could not resize file")
 		}
 	}
-
-	// TODO: if file is already partially downloaded, pick up where we left off
-	return trackDownload(f, pf, 0)
+	// resume at end of file
+	offset := stat.Size()
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := pf.Seek(offset, io.SeekStart); err != nil {
+		return err
+	}
+	return trackDownload(f, pf, offset)
 }
 
 func downloadmetafile(f *os.File, contractDir, metaPath string) error {
