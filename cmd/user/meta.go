@@ -24,13 +24,17 @@ func metainfo(m renter.MetaIndex, shards [][]renter.SectorSlice) {
 			uploaded += int64(s.NumSegments * merkle.SegmentSize)
 		}
 	}
-	redundantSize := m.Filesize * int64(len(m.Hosts)) / int64(m.MinShards)
+	redundancy := float64(len(m.Hosts)) / float64(m.MinShards)
+	pctFullRedundancy := 100 * float64(uploaded) / (float64(m.Filesize) * redundancy)
+	if m.Filesize == 0 || pctFullRedundancy > 100 {
+		pctFullRedundancy = 100
+	}
 
 	fmt.Printf(`Filesize:   %v
 Redundancy: %v-of-%v (%0.2gx replication)
 Uploaded:   %v (%0.2f%% of full redundancy)
-`, filesizeUnits(m.Filesize), m.MinShards, len(m.Hosts), float64(len(m.Hosts))/float64(m.MinShards),
-		filesizeUnits(uploaded), 100*float64(uploaded)/float64(redundantSize))
+`, filesizeUnits(m.Filesize), m.MinShards, len(m.Hosts), redundancy,
+		filesizeUnits(uploaded), pctFullRedundancy)
 	fmt.Println("Hosts:")
 	for _, hostKey := range m.Hosts {
 		fmt.Printf("    %v\n", hostKey)
