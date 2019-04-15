@@ -21,87 +21,6 @@ import (
 	"github.com/klauspost/cpuid"
 )
 
-// Encoder is an interface to encode Reed-Salomon parity sets for your data.
-type Encoder interface {
-	// Encodes parity for a set of data shards.
-	// Input is 'shards' containing data shards followed by parity shards.
-	// The number of shards must match the number given to New().
-	// Each shard is a byte array, and they must all be the same size.
-	// The parity shards will always be overwritten and the data shards
-	// will remain the same, so it is safe for you to read from the
-	// data shards while this is running.
-	Encode(shards [][]byte) error
-
-	// Verify returns true if the parity shards contain correct data.
-	// The data is the same format as Encode. No data is modified, so
-	// you are allowed to read from data while this is running.
-	Verify(shards [][]byte) (bool, error)
-
-	// Reconstruct will recreate the missing shards if possible.
-	//
-	// Given a list of shards, some of which contain data, fills in the
-	// ones that don't have data.
-	//
-	// The length of the array must be equal to the total number of shards.
-	// You indicate that a shard is missing by setting it to nil or zero-length.
-	// If a shard is zero-length but has sufficient capacity, that memory will
-	// be used, otherwise a new []byte will be allocated.
-	//
-	// If there are too few shards to reconstruct the missing
-	// ones, ErrTooFewShards will be returned.
-	//
-	// The reconstructed shard set is complete, but integrity is not verified.
-	// Use the Verify function to check if data set is ok.
-	Reconstruct(shards [][]byte) error
-
-	// ReconstructData will recreate any missing data shards, if possible.
-	//
-	// Given a list of shards, some of which contain data, fills in the
-	// data shards that don't have data.
-	//
-	// The length of the array must be equal to Shards.
-	// You indicate that a shard is missing by setting it to nil or zero-length.
-	// If a shard is zero-length but has sufficient capacity, that memory will
-	// be used, otherwise a new []byte will be allocated.
-	//
-	// If there are too few shards to reconstruct the missing
-	// ones, ErrTooFewShards will be returned.
-	//
-	// As the reconstructed shard set may contain missing parity shards,
-	// calling the Verify function is likely to fail.
-	ReconstructData(shards [][]byte) error
-
-	// Update parity is use for change a few data shards and update it's parity.
-	// Input 'newDatashards' containing data shards changed.
-	// Input 'shards' containing old data shards (if data shard not changed, it can be nil) and old parity shards.
-	// new parity shards will in shards[DataShards:]
-	// Update is very useful if  DataShards much larger than ParityShards and changed data shards is few. It will
-	// faster than Encode and not need read all data shards to encode.
-	Update(shards [][]byte, newDatashards [][]byte) error
-
-	// Split a data slice into the number of shards given to the encoder,
-	// and create empty parity shards.
-	//
-	// The data will be split into equally sized shards.
-	// If the data size isn't dividable by the number of shards,
-	// the last shard will contain extra zeros.
-	//
-	// There must be at least 1 byte otherwise ErrShortData will be
-	// returned.
-	//
-	// The data will not be copied, except for the last shard, so you
-	// should not modify the data of the input slice afterwards.
-	Split(data []byte) ([][]byte, error)
-
-	// Join the shards and write the data segment to dst.
-	//
-	// Only the data shards are considered.
-	// You must supply the exact output size you want.
-	// If there are to few shards given, ErrTooFewShards will be returned.
-	// If the total data size is less than outSize, ErrShortData will be returned.
-	Join(dst io.Writer, shards [][]byte, outSize int) error
-}
-
 // ReedSolomon contains a matrix for a specific
 // distribution of datashards and parity shards.
 // Construct if using New()
@@ -749,6 +668,127 @@ func (r *ReedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
 	return nil
 }
 
+// ReconstructMulti reconstructs shards in blocks of subsize bytes.
+func (r *ReedSolomon) ReconstructMulti(shards [][]byte, subsize int) error {
+	return r.reconstructMulti(shards, subsize, false)
+}
+
+// ReconstructDataMulti reconstructs data shards in blocks of subsize bytes.
+func (r *ReedSolomon) ReconstructDataMulti(shards [][]byte, subsize int) error {
+	return r.reconstructMulti(shards, subsize, true)
+}
+
+func (r *ReedSolomon) reconstructMulti(shards [][]byte, subsize int, dataOnly bool) error {
+	if len(shards) != r.Shards {
+		return ErrTooFewShards
+	}
+	err := checkShards(shards, true)
+	if err != nil {
+		return err
+	}
+	shardSize := shardSize(shards)
+
+	numberPresent := 0
+	for i := range shards {
+		if len(shards[i]) != 0 {
+			numberPresent++
+		}
+	}
+	if numberPresent < r.DataShards {
+		return ErrTooFewShards
+	} else if numberPresent == r.Shards {
+		return nil // nothing to do
+	}
+
+	// construct decode matrix
+	invalidIndices := make([]int, 0, 256)
+	for i := range shards {
+		if len(shards[i]) == 0 {
+			invalidIndices = append(invalidIndices, i)
+		}
+	}
+	dataDecodeMatrix := r.tree.GetInvertedMatrix(invalidIndices)
+	if dataDecodeMatrix == nil {
+		subMatrix, _ := newMatrix(r.DataShards, r.DataShards)
+		subMatrixRow := 0
+		for validIndex := 0; validIndex < r.Shards && subMatrixRow < r.DataShards; validIndex++ {
+			if len(shards[validIndex]) != 0 {
+				for c := 0; c < r.DataShards; c++ {
+					subMatrix[subMatrixRow][c] = r.m[validIndex][c]
+				}
+				subMatrixRow++
+			}
+		}
+		dataDecodeMatrix, err = subMatrix.Invert()
+		if err != nil {
+			return err
+		}
+		err = r.tree.InsertInvertedMatrix(invalidIndices, dataDecodeMatrix, r.Shards)
+		if err != nil {
+			return err
+		}
+	}
+
+	// initialize input/output buffers
+	subShards := make([][]byte, 256)[:r.DataShards]
+	outputs := make([][]byte, 256)[:r.ParityShards]
+	subShardMapping := make([]int, 0, 256)
+	dataMapping := make([]int, 0, 256)
+	parityMapping := make([]int, 0, 256)
+	for i := range shards {
+		if len(shards[i]) == 0 {
+			if i < r.DataShards {
+				dataMapping = append(dataMapping, i)
+			} else {
+				parityMapping = append(parityMapping, i)
+			}
+		} else if len(subShardMapping) < r.DataShards {
+			subShardMapping = append(subShardMapping, i)
+		}
+	}
+	dataMatrixRows := make([][]byte, 256)[:r.ParityShards]
+	for i, j := range dataMapping {
+		dataMatrixRows[i] = dataDecodeMatrix[j]
+	}
+	parityMatrixRows := make([][]byte, 256)[:r.ParityShards]
+	for i, j := range parityMapping {
+		parityMatrixRows[i] = r.parity[j-r.DataShards]
+	}
+
+	for i := range shards {
+		shards[i] = shards[i][:shardSize]
+	}
+	multishards := make([][]byte, 256)[:r.Shards]
+	for off := 0; off < shardSize; off += subsize {
+		// advance to next block
+		for i := range shards {
+			multishards[i] = shards[i][off:][:subsize]
+		}
+
+		// collect present shards
+		for i, j := range subShardMapping {
+			subShards[i] = multishards[j]
+		}
+
+		// compute missing data shards
+		for i, j := range dataMapping {
+			outputs[i] = multishards[j]
+		}
+		r.codeSomeShards(dataMatrixRows, subShards, outputs[:len(dataMapping)], len(dataMapping), 0)
+
+		if dataOnly {
+			continue
+		}
+
+		// compute missing parity shards
+		for i, j := range parityMapping {
+			outputs[i] = multishards[j]
+		}
+		r.codeSomeShards(parityMatrixRows, multishards[:r.DataShards], outputs[:len(parityMapping)], len(parityMapping), 0)
+	}
+	return nil
+}
+
 // ErrShortData will be returned by Split(), if there isn't enough data
 // to fill the number of shards.
 var ErrShortData = errors.New("not enough data to fill the number of requested shards")
@@ -841,6 +881,48 @@ func (r *ReedSolomon) Join(dst io.Writer, shards [][]byte, outSize int) error {
 			return err
 		}
 		write -= n
+	}
+	return nil
+}
+
+// JoinMulti joins the supplied multi-block shards, writing them to dst.
+func (r *ReedSolomon) JoinMulti(dst io.Writer, shards [][]byte, subsize int, outSize int) error {
+	// Do we have enough shards?
+	if len(shards) < r.DataShards {
+		return ErrTooFewShards
+	}
+	shards = shards[:r.DataShards]
+
+	// Do we have enough data?
+	size := 0
+	for _, shard := range shards {
+		if len(shard) == 0 {
+			return ErrReconstructRequired
+		}
+		size += len(shard)
+		if size >= outSize {
+			break
+		}
+	}
+	if size < outSize {
+		return ErrShortData
+	}
+
+	// Copy data to dst
+	write := outSize
+
+	for off := 0; write > 0; off += subsize {
+		for _, shard := range shards {
+			shard = shard[off:][:subsize]
+			if write < len(shard) {
+				shard = shard[:write]
+			}
+			n, err := dst.Write(shard)
+			if err != nil {
+				return err
+			}
+			write -= n
+		}
 	}
 	return nil
 }

@@ -45,6 +45,11 @@ func checkShards(shards [][]byte, n int) (shardSize int) {
 			}
 		}
 	}
+	for i := range shards {
+		if cap(shards[i]) < shardSize {
+			panic("each shard must have capacity of at least len(data)/m")
+		}
+	}
 	if shardSize%merkle.SegmentSize != 0 {
 		panic("shard size must be a multiple of SegmentSize")
 	}
@@ -86,54 +91,15 @@ func (rsc rsCode) Encode(data []byte, shards [][]byte) {
 }
 
 func (rsc rsCode) Reconstruct(shards [][]byte) error {
-	shardSize := checkShards(shards, rsc.n)
-
-	subshards := make([][]byte, 256)[:rsc.n]
-	for off := 0; off < shardSize; off += merkle.SegmentSize {
-		for i := range shards {
-			if len(shards[i]) == 0 {
-				subshards[i] = shards[i][:shardSize][off:][:0]
-			} else {
-				subshards[i] = shards[i][off:][:merkle.SegmentSize]
-			}
-		}
-		if err := rsc.enc.Reconstruct(subshards); err != nil {
-			return err
-		}
-	}
-
-	for i := range shards {
-		shards[i] = shards[i][:shardSize]
-	}
-	return nil
+	return rsc.enc.ReconstructMulti(shards, merkle.SegmentSize)
 }
 
 func (rsc rsCode) Recover(w io.Writer, shards [][]byte, n int) error {
 	checkShards(shards, rsc.n)
-
-	subshards := make([][]byte, 256)[:rsc.n]
-	rem := n
-	for off := 0; rem > 0; off += merkle.SegmentSize {
-		for i := range shards {
-			if len(shards[i]) == 0 {
-				subshards[i] = shards[i] // allow for use of extra capacity
-			} else {
-				subshards[i] = shards[i][off:][:merkle.SegmentSize]
-			}
-		}
-		if err := rsc.enc.ReconstructData(subshards); err != nil {
-			return err
-		}
-		writeLen := rsc.m * merkle.SegmentSize
-		if writeLen > rem {
-			writeLen = rem
-		}
-		if err := rsc.enc.Join(w, subshards, writeLen); err != nil {
-			return err
-		}
-		rem -= writeLen
+	if err := rsc.enc.ReconstructDataMulti(shards, merkle.SegmentSize); err != nil {
+		return err
 	}
-	return nil
+	return rsc.enc.JoinMulti(w, shards, merkle.SegmentSize, n)
 }
 
 // NewRSCode returns an m-of-n ErasureCoder. It panics if m <= 0 or n < m.

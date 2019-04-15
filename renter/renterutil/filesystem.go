@@ -379,8 +379,15 @@ func (f *roPseudoFile) downloadShards(offset int64, n int) ([][]byte, error) {
 		return nil, errors.New("too many hosts did not supply their shard:\n" + strings.Join(errStrings, "\n"))
 	}
 	shards := make([][]byte, len(hosts))
+	var shardLen int
 	for _, r := range goodRes {
 		shards[r.shardIndex] = r.shard
+		shardLen = len(r.shard)
+	}
+	for i := range shards {
+		if len(shards[i]) == 0 {
+			shards[i] = make([]byte, 0, shardLen)
+		}
 	}
 	return shards, nil
 }
@@ -561,6 +568,11 @@ func (f *aoPseudoFile) readChunkAt(p []byte, off int64) error {
 			if nShards++; nShards >= f.m.MinShards {
 				break
 			}
+		}
+	}
+	for i := range shards {
+		if len(shards[i]) == 0 {
+			shards[i] = make([]byte, 0, merkle.SegmentSize)
 		}
 	}
 

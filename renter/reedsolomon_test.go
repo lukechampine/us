@@ -39,12 +39,15 @@ func TestReedSolomon(t *testing.T) {
 	// 3-of-10 code
 	rsc := NewRSCode(3, 10)
 	chunkSize := 3 * merkle.SegmentSize
-	data := fastrand.Bytes(chunkSize * 1)
+	data := fastrand.Bytes(chunkSize * 4)
 	shards := encodeAlloc(rsc, data)
-	// delete 3 random shards
-	partialShards := append([][]byte(nil), shards...)
-	for _, i := range fastrand.Perm(len(partialShards))[:3] {
-		partialShards[i] = partialShards[i][:0]
+	// delete 7 random shards
+	partialShards := make([][]byte, len(shards))
+	for i := range partialShards {
+		partialShards[i] = append([]byte(nil), shards[i]...)
+	}
+	for _, i := range fastrand.Perm(len(partialShards))[:7] {
+		partialShards[i] = make([]byte, 0, len(partialShards[i]))
 	}
 	// reconstruct
 	if err := rsc.Reconstruct(partialShards); err != nil {
@@ -54,9 +57,9 @@ func TestReedSolomon(t *testing.T) {
 		t.Error("failed to reconstruct shards")
 	}
 
-	// delete 3 random shards
-	for i := 0; i < 3; i++ {
-		partialShards[fastrand.Intn(len(partialShards))] = nil
+	// delete 7 random shards
+	for _, i := range fastrand.Perm(len(partialShards))[:7] {
+		partialShards[i] = make([]byte, 0, len(partialShards[i]))
 	}
 	// recover
 	if !checkRecover(rsc, partialShards, data) {
@@ -95,6 +98,9 @@ func TestReedSolomonPartial(t *testing.T) {
 	// pick a random segment from three shards
 	segIndex := fastrand.Intn(len(shards[0]) / merkle.SegmentSize)
 	partialShards := make([][]byte, len(shards))
+	for i := range partialShards {
+		partialShards[i] = make([]byte, 0, merkle.SegmentSize)
+	}
 	for _, i := range fastrand.Perm(len(partialShards))[:3] {
 		partialShards[i] = shards[i][segIndex*merkle.SegmentSize:][:merkle.SegmentSize]
 	}
