@@ -657,6 +657,7 @@ func fillRandom(p []byte) {
 }
 
 func benchmarkEncode(b *testing.B, dataShards, parityShards, shardSize int) {
+	b.SkipNow()
 	r, err := New(dataShards, parityShards, WithAutoGoroutines(shardSize))
 	if err != nil {
 		b.Fatal(err)
@@ -725,6 +726,7 @@ func BenchmarkEncode17x3x16M(b *testing.B) {
 }
 
 func benchmarkVerify(b *testing.B, dataShards, parityShards, shardSize int) {
+	b.SkipNow()
 	r, err := New(dataShards, parityShards, WithAutoGoroutines(shardSize))
 	if err != nil {
 		b.Fatal(err)
@@ -797,6 +799,7 @@ func corruptRandom(shards [][]byte, dataShards, parityShards int) {
 }
 
 func benchmarkReconstruct(b *testing.B, dataShards, parityShards, shardSize int) {
+	b.SkipNow()
 	r, err := New(dataShards, parityShards, WithAutoGoroutines(shardSize))
 	if err != nil {
 		b.Fatal(err)
@@ -878,6 +881,7 @@ func corruptRandomData(shards [][]byte, dataShards, parityShards int) {
 }
 
 func benchmarkReconstructData(b *testing.B, dataShards, parityShards, shardSize int) {
+	b.SkipNow()
 	r, err := New(dataShards, parityShards, WithAutoGoroutines(shardSize))
 	if err != nil {
 		b.Fatal(err)
@@ -945,6 +949,7 @@ func BenchmarkReconstructData10x4x16M(b *testing.B) {
 }
 
 func benchmarkReconstructP(b *testing.B, dataShards, parityShards, shardSize int) {
+	b.SkipNow()
 	r, err := New(dataShards, parityShards, WithAutoGoroutines(shardSize))
 	if err != nil {
 		b.Fatal(err)

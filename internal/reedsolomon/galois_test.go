@@ -222,6 +222,7 @@ func TestSliceGalADD(t *testing.T) {
 }
 
 func benchmarkGalois(b *testing.B, size int) {
+	b.SkipNow()
 	in := make([]byte, size)
 	out := make([]byte, size)
 
@@ -241,6 +242,7 @@ func BenchmarkGalois1M(b *testing.B) {
 }
 
 func benchmarkGaloisXor(b *testing.B, size int) {
+	b.SkipNow()
 	in := make([]byte, size)
 	out := make([]byte, size)
 
