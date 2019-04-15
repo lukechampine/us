@@ -13,13 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"lukechampine.com/us/hostdb"
-	"lukechampine.com/us/merkle"
-	"lukechampine.com/us/renterhost"
-
 	"github.com/aead/chacha20/chacha"
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/merkle"
+	"lukechampine.com/us/renterhost"
 )
 
 const (

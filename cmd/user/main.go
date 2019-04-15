@@ -12,13 +12,12 @@ import (
 	"strings"
 	"syscall"
 
-	"lukechampine.com/us/renter"
-	"lukechampine.com/us/renter/renterutil"
-
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/build"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/flagg"
+	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/renterutil"
 )
 
 var (

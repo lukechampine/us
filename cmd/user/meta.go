@@ -9,12 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/pkg/errors"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/renterutil"
 	"lukechampine.com/us/renterhost"
-
-	"github.com/pkg/errors"
 )
 
 func metainfo(m renter.MetaIndex, shards [][]renter.SectorSlice) {

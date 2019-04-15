@@ -13,7 +13,6 @@ import (
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
-
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/internal/ed25519"
 	"lukechampine.com/us/renter"

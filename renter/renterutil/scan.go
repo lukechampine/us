@@ -7,14 +7,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/modules"
+	"gitlab.com/NebulousLabs/fastrand"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renterhost"
-
-	"github.com/pkg/errors"
-	"gitlab.com/NebulousLabs/Sia/modules"
-	"gitlab.com/NebulousLabs/fastrand"
 )
 
 // A CheckupResult contains the result of a host checkup.

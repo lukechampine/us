@@ -11,7 +11,6 @@ import (
 	"github.com/aead/chacha20/chacha"
 	"gitlab.com/NebulousLabs/fastrand"
 	"golang.org/x/crypto/xts"
-
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
 )

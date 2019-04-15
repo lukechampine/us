@@ -7,10 +7,9 @@ import (
 	"os"
 	"os/signal"
 
-	"lukechampine.com/us/renter/renterutil"
-
 	"github.com/pkg/errors"
 	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/renterutil"
 )
 
 func serve(contractDir, metaDir, addr string) error {

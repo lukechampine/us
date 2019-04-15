@@ -4,13 +4,12 @@ package proto // import "lukechampine.com/us/renter/proto"
 import (
 	"time"
 
+	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/internal/ed25519"
-
-	"github.com/pkg/errors"
 )
 
 type (

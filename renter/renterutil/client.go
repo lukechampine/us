@@ -12,13 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"lukechampine.com/us/hostdb"
-
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/node/api/client"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/us/hostdb"
 )
 
 var errNoHostAnnouncement = errors.New("host announcement not found")

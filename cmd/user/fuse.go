@@ -6,13 +6,12 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/pkg/errors"
-	"lukechampine.com/us/renter"
-	"lukechampine.com/us/renter/renterutil"
-
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"github.com/hanwen/go-fuse/fuse/pathfs"
+	"github.com/pkg/errors"
+	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/renterutil"
 )
 
 func mount(contractDir, metaDir, mountDir string) error {

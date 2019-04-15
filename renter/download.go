@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"io"
 
+	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/modules"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renterhost"
-
-	"github.com/pkg/errors"
-	"gitlab.com/NebulousLabs/Sia/modules"
 )
 
 // ErrBadChecksum indicates that a piece of sector data failed checksum

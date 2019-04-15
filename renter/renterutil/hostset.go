@@ -4,11 +4,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pkg/errors"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
-
-	"github.com/pkg/errors"
 )
 
 var errNoHost = errors.New("no record of that host")

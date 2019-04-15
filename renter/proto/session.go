@@ -6,14 +6,13 @@ import (
 	"net"
 	"time"
 
-	"lukechampine.com/us/hostdb"
-	"lukechampine.com/us/merkle"
-	"lukechampine.com/us/renterhost"
-
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/merkle"
+	"lukechampine.com/us/renterhost"
 )
 
 // ErrInvalidMerkleProof is returned by various RPCs when the host supplies an

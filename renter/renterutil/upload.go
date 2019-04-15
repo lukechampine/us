@@ -6,12 +6,11 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renterhost"
-
-	"github.com/pkg/errors"
-	"gitlab.com/NebulousLabs/Sia/types"
 )
 
 // UploadDir uploads files in a directory, producing a set of metafiles whose

@@ -9,11 +9,10 @@ import (
 	"runtime"
 	"strconv"
 
+	"github.com/julienschmidt/httprouter"
 	"gitlab.com/NebulousLabs/Sia/build"
 	"gitlab.com/NebulousLabs/Sia/modules/consensus"
 	"gitlab.com/NebulousLabs/Sia/modules/gateway"
-
-	"github.com/julienschmidt/httprouter"
 )
 
 type server struct {

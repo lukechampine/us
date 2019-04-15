@@ -8,13 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renterhost"
-
-	"github.com/pkg/errors"
-	"gitlab.com/NebulousLabs/Sia/types"
 )
 
 // MigrateFile uploads file shards to a new set of hosts. The shards are
