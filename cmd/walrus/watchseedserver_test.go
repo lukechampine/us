@@ -94,10 +94,12 @@ func TestWatchSeedServer(t *testing.T) {
 	} else if len(txnHistory) != 1 {
 		t.Fatal("transaction should appear in history")
 	}
-	var htx types.Transaction
-	if err := httpGet(ss, "/transactions/"+txnHistory[0].String(), &htx); err != nil {
+	var rtid ResponseTransactionsID
+	if err := httpGet(ss, "/transactions/"+txnHistory[0].String(), &rtid); err != nil {
 		t.Fatal(err)
-	} else if len(htx.SiacoinOutputs) != 2 {
+	}
+	htx := rtid.Transaction
+	if len(htx.SiacoinOutputs) != 2 {
 		t.Fatal("transaction should have two outputs")
 	}
 

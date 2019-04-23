@@ -223,7 +223,25 @@ func (s *watchSeedServer) transactionsidHandler(w http.ResponseWriter, req *http
 		http.Error(w, "Transaction not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, (*encodedTransaction)(unsafe.Pointer(&txn)))
+	// calculate inflow/outflow/fee
+	var inflow, outflow, fee types.Currency
+	for _, sco := range txn.SiacoinOutputs {
+		if s.w.OwnsAddress(sco.UnlockHash) {
+			inflow = inflow.Add(sco.Value)
+		} else {
+			outflow = outflow.Add(sco.Value)
+		}
+	}
+	for _, c := range txn.MinerFees {
+		fee = fee.Add(c)
+	}
+	outflow = outflow.Add(fee)
+	writeJSON(w, ResponseTransactionsID{
+		Transaction: *(*encodedTransaction)(unsafe.Pointer(&txn)),
+		Inflow:      inflow,
+		Outflow:     outflow,
+		FeePerByte:  fee.Div64(uint64(txn.MarshalSiaSize())),
+	})
 }
 
 // A SeedUTXO is an unspent transaction output, ready to be used as a SiacoinInput.
