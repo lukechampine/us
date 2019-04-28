@@ -22,7 +22,11 @@ func mount(contractDir, metaDir, mountDir string) error {
 	defer contracts.Close()
 
 	c := makeLimitedClient()
-	pfs := renterutil.NewFileSystem(metaDir, contracts, c)
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return err
+	}
+	pfs := renterutil.NewFileSystem(metaDir, contracts, c, currentHeight)
 	nfs := pathfs.NewPathNodeFs(fileSystem(pfs), nil)
 	server, _, err := nodefs.MountRoot(mountDir, nfs.Root(), nil)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
@@ -54,7 +55,7 @@ func (set *HostSet) release(host hostdb.HostPublicKey) {
 // NewHostSet creates a HostSet composed of one protocol session per contract.
 // If a session cannot be established, that contract is skipped; these errors
 // are exposed via the acquire method.
-func NewHostSet(contracts renter.ContractSet, hkr renter.HostKeyResolver) *HostSet {
+func NewHostSet(contracts renter.ContractSet, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) *HostSet {
 	hs := &HostSet{
 		sessions: make(map[hostdb.HostPublicKey]lockedHost),
 	}
@@ -65,7 +66,7 @@ func NewHostSet(contracts renter.ContractSet, hkr renter.HostKeyResolver) *HostS
 			hs.sessions[hostKey] = lockedHost{err: err, mu: new(sync.Mutex)}
 			continue
 		}
-		s, err := proto.NewSession(hostIP, contract, 0)
+		s, err := proto.NewSession(hostIP, contract, currentHeight)
 		if err != nil {
 			err = errors.Wrapf(err, "%v", hostKey.ShortKey())
 			hs.sessions[hostKey] = lockedHost{err: err, mu: new(sync.Mutex)}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renterhost"
@@ -239,10 +240,10 @@ func (fs *PseudoFS) Close() error {
 
 // NewFileSystem returns a new pseudo-filesystem rooted at root, which must be a
 // directory containing only metafiles and other directories.
-func NewFileSystem(root string, contracts renter.ContractSet, hkr renter.HostKeyResolver) *PseudoFS {
+func NewFileSystem(root string, contracts renter.ContractSet, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) *PseudoFS {
 	return &PseudoFS{
 		root:  root,
-		hosts: NewHostSet(contracts, hkr),
+		hosts: NewHostSet(contracts, hkr, currentHeight),
 	}
 }
 

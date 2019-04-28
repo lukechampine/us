@@ -20,7 +20,11 @@ func serve(contractDir, metaDir, addr string) error {
 	defer contracts.Close()
 
 	c := makeLimitedClient()
-	pfs := renterutil.NewFileSystem(metaDir, contracts, c)
+	currentHeight, err := c.ChainHeight()
+	if err != nil {
+		return errors.Wrap(err, "could not determine current height")
+	}
+	pfs := renterutil.NewFileSystem(metaDir, contracts, c, currentHeight)
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: http.FileServer(&httpFS{pfs}),

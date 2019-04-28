@@ -82,7 +82,7 @@ func TestFileSystem(t *testing.T) {
 	}
 
 	// create filesystem
-	fs := NewFileSystem(os.TempDir(), contracts, hkr)
+	fs := NewFileSystem(os.TempDir(), contracts, hkr, 0)
 	defer fs.Close()
 
 	// create metafile
