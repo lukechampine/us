@@ -524,6 +524,7 @@ type aoPseudoFile struct {
 	m          *renter.MetaFile
 	hs         *HostSet
 	shards     []*renter.Shard
+	chunk      []byte
 	chunkIndex int64
 	mu         sync.Mutex
 }
@@ -586,42 +587,39 @@ func (f *aoPseudoFile) readChunkAt(p []byte, off int64) error {
 	return nil
 }
 
-// Write writes len(p) bytes to the File. It returns the number of bytes written
-// and an error, if any. Write returns a non-nil error when n != len(p).
-func (f *aoPseudoFile) Write(p []byte) (int, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+// uncommittedFilesize returns the size that f will be after the next call to
+// flushChunk.
+func (f *aoPseudoFile) uncommittedFilesize() int64 {
+	size := f.m.Filesize
+	if len(f.chunk) > 0 {
+		align := f.m.Filesize % int64(merkle.SegmentSize*f.m.MinShards)
+		size += int64(len(f.chunk)) - align
+	}
+	return size
+}
 
-	rsc := f.m.ErasureCode()
-	shards := make([][]byte, len(f.m.Hosts))
-	for i := range shards {
-		shards[i] = make([]byte, renterhost.SectorSize)
+// flushChunk encodes the current (uncomitted) chunk, uploads the resulting
+// shards to f's hosts, and updates f's Shard files, Filesize, and ModTime to
+// reflect the change. flushChunk always uploads a full sector to each host, so
+// it is wasteful to call it if the current chunk is not full.
+func (f *aoPseudoFile) flushChunk() error {
+	if len(f.chunk) == 0 {
+		return nil
 	}
 
-	// encode p into shards
-	if align := int(f.m.Filesize % int64(merkle.SegmentSize*f.m.MinShards)); align == 0 {
-		// already aligned, no extra work necessary
-		rsc.Encode(p, shards)
-	} else {
+	// if necessary, update previous SectorSlice
+	align := int(f.m.Filesize % int64(merkle.SegmentSize*f.m.MinShards))
+	if align != 0 {
 		// The current offset is unaligned, i.e. the previous write did not
 		// occupy a full chunk, and was thus padded with zeros. We want to fill
 		// those zeros with data from p, but we can't upload less than a chunk.
 		// So we need to download the previous partial chunk, append p to it
 		// (thus overwriting any zeros), and upload the result. We also need to
 		// update the previous write's SectorSlice, or even delete it entirely.
-		chunk := make([]byte, merkle.SegmentSize*f.m.MinShards)
-		err := f.readChunkAt(chunk[:merkle.SegmentSize*f.m.MinShards], f.m.Filesize-int64(align))
-		if err != nil {
-			return 0, err
-		}
-		chunk = append(chunk[:align], p...)
-		rsc.Encode(chunk, shards)
-
-		// trim old SectorSlices
 		for i, hostKey := range f.m.Hosts {
 			slices, err := renter.ReadShard(f.m.ShardPath(hostKey))
 			if err != nil {
-				return 0, err
+				return err
 			}
 			s := slices[len(slices)-1]
 			s.NumSegments--
@@ -629,7 +627,7 @@ func (f *aoPseudoFile) Write(p []byte) (int, error) {
 				f.chunkIndex = int64(len(slices) - 1)
 			} else {
 				if err := f.shards[i].WriteSlice(s, int64(len(slices)-1)); err != nil {
-					return 0, err
+					return err
 				}
 			}
 		}
@@ -640,7 +638,7 @@ func (f *aoPseudoFile) Write(p []byte) (int, error) {
 	for i, hostKey := range f.m.Hosts {
 		s, err := f.hs.acquire(hostKey)
 		if err != nil {
-			return 0, err
+			return err
 		}
 		defer f.hs.release(hostKey)
 		hosts[i] = &renter.ShardUploader{
@@ -650,16 +648,66 @@ func (f *aoPseudoFile) Write(p []byte) (int, error) {
 		}
 	}
 
-	// upload each shard
+	// encode chunk into shards
+	shards := make([][]byte, len(hosts))
 	for i := range shards {
-		_, err := hosts[i].EncryptAndUpload(shards[i], f.chunkIndex)
-		if err != nil {
+		shards[i] = make([]byte, renterhost.SectorSize)
+	}
+	f.m.ErasureCode().Encode(f.chunk, shards)
+
+	// upload each shard
+	for i := range hosts {
+		if _, err := hosts[i].EncryptAndUpload(shards[i], f.chunkIndex); err != nil {
+			return err
+		}
+	}
+
+	// update metadata
+	f.m.Filesize = f.uncommittedFilesize()
+	f.m.ModTime = time.Now()
+	// reset chunk
+	f.chunk = f.chunk[:0]
+	f.chunkIndex++
+	return nil
+}
+
+// Write writes len(p) bytes to the File. It returns the number of bytes written
+// and an error, if any. Write returns a non-nil error when n != len(p).
+func (f *aoPseudoFile) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if len(p) > renterhost.SectorSize*f.m.MinShards {
+		// TODO: handle large writes
+		return 0, errors.New("cannot handle writes larger than chunk size")
+	}
+
+	// if the chunk is full, flush it to hosts before continuing
+	//
+	// TODO: fill remaining space, following heuristic from uploadDir
+	if len(f.chunk)+len(p) > renterhost.SectorSize*f.m.MinShards {
+		if err := f.flushChunk(); err != nil {
 			return 0, err
 		}
 	}
-	f.chunkIndex++
-	f.m.Filesize += int64(len(p))
-	f.m.ModTime = time.Now()
+
+	// if necessary, prefix chunk with previous segment data
+	if align := int(f.m.Filesize % int64(merkle.SegmentSize*f.m.MinShards)); align != 0 && len(f.chunk) == 0 {
+		// The last segment in the file is padded with zeros. We can't overwrite
+		// just those zeros; we have to overwrite at least a full segment. So we
+		// have to download the old segment, overwrite the zeros, and reupload
+		// it. We'll also need to subtract one segment from the last
+		// SectorSlice, so that when we append our new SectorSlice, the new
+		// segment will be used.
+		chunk := make([]byte, merkle.SegmentSize*f.m.MinShards)
+		err := f.readChunkAt(chunk[:merkle.SegmentSize*f.m.MinShards], f.m.Filesize-int64(align))
+		if err != nil {
+			return 0, err
+		}
+		f.chunk = append(f.chunk, chunk[:align]...)
+	}
+
+	f.chunk = append(f.chunk, p...)
 	return len(p), nil
 }
 
@@ -686,14 +734,16 @@ func (f *aoPseudoFile) Name() string {
 func (f *aoPseudoFile) Stat() (os.FileInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.pseudoFileInfo, nil
+	info := f.pseudoFileInfo
+	info.m.Filesize = f.uncommittedFilesize()
+	return info, nil
 }
 
 // Sync commits the current contents of the file to its Sia hosts.
 func (f *aoPseudoFile) Sync() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	panic("unimplemented")
+	return f.flushChunk()
 }
 
 // Truncate changes the size of the file. It does not change the I/O offset.
@@ -704,9 +754,15 @@ func (f *aoPseudoFile) Truncate(size int64) error {
 	if size < 0 {
 		return errors.New("new size cannot be negative")
 	}
-	if size > f.m.Filesize {
+	if size > f.uncommittedFilesize() {
 		return errors.New("new size cannot exceed current size")
+	} else if size >= f.m.Filesize {
+		// we're only truncating uncommitted data
+		f.chunk = f.chunk[:len(f.chunk)-int(f.uncommittedFilesize()-size)]
+		return nil
 	}
+
+	f.chunk = f.chunk[:0]
 	f.m.Filesize = size
 
 	// update shard files
@@ -747,6 +803,9 @@ func (f *aoPseudoFile) Truncate(size int64) error {
 func (f *aoPseudoFile) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.flushChunk(); err != nil {
+		return err
+	}
 	return f.m.Close()
 }
 

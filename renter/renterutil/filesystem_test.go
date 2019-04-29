@@ -96,16 +96,27 @@ func TestFileSystem(t *testing.T) {
 	// being handled
 	sizes := []int{64, 127, 12, 4096, 253}
 	var data []byte
-	for _, size := range sizes {
+	for i, size := range sizes {
 		d := fastrand.Bytes(size)
 		if _, err := pf.Write(d); err != nil {
 			t.Fatal(err)
 		}
 		data = append(data, d...)
+		// flush after every other Write, to test padding
+		if i%2 == 1 {
+			if err := pf.Sync(); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 
-	// truncate
+	// truncate uncommitted data
 	data = data[:len(data)-13]
+	if err := pf.Truncate(int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	// truncate committed data
+	data = data[:len(data)-253]
 	if err := pf.Truncate(int64(len(data))); err != nil {
 		t.Fatal(err)
 	}
