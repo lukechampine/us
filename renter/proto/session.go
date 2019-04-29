@@ -386,9 +386,11 @@ func NewSession(hostIP modules.NetAddress, contract ContractEditor, currentHeigh
 		return nil, err
 	}
 	if err := s.Lock(contract); err != nil {
+		s.Close()
 		return nil, err
 	}
 	if _, err := s.Settings(); err != nil {
+		s.Close()
 		return nil, err
 	}
 	return s, nil
@@ -401,8 +403,10 @@ func NewUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey,
 	if err != nil {
 		return nil, err
 	}
+	conn.SetDeadline(time.Now().Add(60 * time.Second))
 	s, err := renterhost.NewRenterSession(conn, hostKey)
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 	return &Session{
