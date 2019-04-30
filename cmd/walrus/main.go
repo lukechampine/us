@@ -188,11 +188,11 @@ func main() {
 }
 
 func start(seed wallet.Seed, dir string, APIaddr string) error {
-	g, err := gateway.New(":9381", false, filepath.Join(dir, "gateway"))
+	g, err := gateway.New(":9381", true, filepath.Join(dir, "gateway"))
 	if err != nil {
 		return err
 	}
-	cs, err := consensus.New(g, false, filepath.Join(dir, "consensus"))
+	cs, err := consensus.New(g, true, filepath.Join(dir, "consensus"))
 	if err != nil {
 		return err
 	}
@@ -218,11 +218,11 @@ func start(seed wallet.Seed, dir string, APIaddr string) error {
 }
 
 func startWatchOnly(dir string, APIaddr string) error {
-	g, err := gateway.New(":9381", false, filepath.Join(dir, "gateway"))
+	g, err := gateway.New(":9381", true, filepath.Join(dir, "gateway"))
 	if err != nil {
 		return err
 	}
-	cs, err := consensus.New(g, false, filepath.Join(dir, "consensus"))
+	cs, err := consensus.New(g, true, filepath.Join(dir, "consensus"))
 	if err != nil {
 		return err
 	}
