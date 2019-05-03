@@ -229,7 +229,6 @@ func (s *BoltDBStore) SetMemo(txid types.TransactionID, memo []byte) {
 		tx.Bucket(bucketMemos).Put(txid[:], append([]byte(nil), memo...))
 		return nil
 	})
-	return
 }
 
 // Memo implements Store.
