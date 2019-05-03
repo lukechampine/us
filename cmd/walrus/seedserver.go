@@ -1,20 +1,19 @@
 package main
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"reflect"
 	"strconv"
-	"time"
 	"unsafe"
 
 	"github.com/julienschmidt/httprouter"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/us/cmd/walrus/api"
 	"lukechampine.com/us/wallet"
 )
 
@@ -34,15 +33,9 @@ type seedServer struct {
 	tp wallet.TransactionPool
 }
 
-// ResponseAddresses is the response type for the /addresses endpoint.
-type ResponseAddresses []types.UnlockHash
-
 func (s *seedServer) addressesHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	writeJSON(w, s.w.Addresses())
 }
-
-// ResponseAddressesAddr is the response type for the /addresses/:addr endpoint.
-type ResponseAddressesAddr SeedAddressInfo
 
 func (s *seedServer) addressesaddrHandlerGET(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
 	var addr types.UnlockHash
@@ -55,21 +48,15 @@ func (s *seedServer) addressesaddrHandlerGET(w http.ResponseWriter, req *http.Re
 		http.Error(w, "No such entry", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, (*encodedSeedAddressInfo)(unsafe.Pointer(&info)))
+	writeJSON(w, api.ResponseAddressesAddr(info))
 }
-
-// ResponseBalance is the response type for the /balance endpoint.
-type ResponseBalance types.Currency
 
 func (s *seedServer) balanceHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	writeJSON(w, s.w.Balance())
 }
 
-// RequestBroadcast is the request type for the /broadcast endpoint.
-type RequestBroadcast []types.Transaction
-
 func (s *seedServer) broadcastHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var txnSet RequestBroadcast
+	var txnSet api.RequestBroadcast
 	if err := json.NewDecoder(req.Body).Decode(&txnSet); err != nil {
 		http.Error(w, "Could not parse transaction: "+err.Error(), http.StatusBadRequest)
 		return
@@ -100,14 +87,8 @@ func (s *seedServer) broadcastHandler(w http.ResponseWriter, req *http.Request, 
 	}
 }
 
-// ResponseConsensus is the response type for the /consensus endpoint.
-type ResponseConsensus struct {
-	Height types.BlockHeight `json:"height"`
-	CCID   crypto.Hash       `json:"ccid"`
-}
-
 func (s *seedServer) consensusHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	writeJSON(w, ResponseConsensus{
+	writeJSON(w, api.ResponseConsensus{
 		Height: s.w.ChainHeight(),
 		CCID:   crypto.Hash(s.w.ConsensusChangeID()),
 	})
@@ -118,30 +99,8 @@ func (s *seedServer) feeHandler(w http.ResponseWriter, req *http.Request, _ http
 	writeJSON(w, median)
 }
 
-// A LimboUTXO is an unspent transaction output that may or may not be
-// spendable.
-type LimboUTXO struct {
-	ID         types.SiacoinOutputID `json:"ID"`
-	Value      types.Currency        `json:"value"`
-	UnlockHash types.UnlockHash      `json:"unlockHash"`
-	LimboSince time.Time             `json:"limboSince"`
-}
-
-// ResponseLimboUTXOs is the response type for the /limbo endpoint.
-type ResponseLimboUTXOs []LimboUTXO
-
 func (s *seedServer) limboHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	outputs := s.w.LimboOutputs()
-	utxos := make(ResponseLimboUTXOs, len(outputs))
-	for i, o := range outputs {
-		utxos[i] = LimboUTXO{
-			ID:         o.ID,
-			Value:      o.Value,
-			UnlockHash: o.UnlockHash,
-			LimboSince: o.LimboSince,
-		}
-	}
-	writeJSON(w, *(*ResponseLimboUTXOs)(unsafe.Pointer(&utxos)))
+	writeJSON(w, api.ResponseLimboUTXOs(s.w.LimboOutputs()))
 }
 
 func (s *seedServer) limboHandlerPUT(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
@@ -185,31 +144,16 @@ func (s *seedServer) memosHandlerGET(w http.ResponseWriter, req *http.Request, p
 	w.Write(s.w.Memo(types.TransactionID(txid)))
 }
 
-// ResponseNextAddress is the response type for the /nextaddress endpoint.
-type ResponseNextAddress types.UnlockHash
-
 func (s *seedServer) nextaddressHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	writeJSON(w, s.w.NextAddress())
 }
-
-// ResponseSeedIndex is the response type for the /seedindex endpoint.
-type ResponseSeedIndex uint64
 
 func (s *seedServer) seedindexHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	writeJSON(w, s.w.SeedIndex())
 }
 
-// RequestSign is the request type for the /sign endpoint.
-type RequestSign struct {
-	Transaction types.Transaction `json:"transaction"`
-	ToSign      []int             `json:"toSign"`
-}
-
-// ResponseSign is the response type for the /sign endpoint.
-type ResponseSign encodedTransaction
-
 func (s *seedServer) signHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var rs RequestSign
+	var rs api.RequestSign
 	if err := json.NewDecoder(req.Body).Decode(&rs); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -217,11 +161,8 @@ func (s *seedServer) signHandler(w http.ResponseWriter, req *http.Request, _ htt
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, (*ResponseSign)(unsafe.Pointer(&rs.Transaction)))
+	writeJSON(w, (*api.ResponseSign)(unsafe.Pointer(&rs.Transaction)))
 }
-
-// ResponseTransactions is the response type for the /transactions endpoint.
-type ResponseTransactions []types.TransactionID
 
 func (s *seedServer) transactionsHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	max := -1 // all txns
@@ -234,7 +175,7 @@ func (s *seedServer) transactionsHandler(w http.ResponseWriter, req *http.Reques
 		}
 	}
 
-	var resp ResponseTransactions
+	var resp api.ResponseTransactions
 	if req.FormValue("addr") != "" {
 		var addr types.UnlockHash
 		if err := addr.LoadString(req.FormValue("addr")); err != nil {
@@ -246,100 +187,6 @@ func (s *seedServer) transactionsHandler(w http.ResponseWriter, req *http.Reques
 		resp = s.w.Transactions(max)
 	}
 	writeJSON(w, resp)
-}
-
-// ResponseTransactionsID is the response type for the /transactions/:id
-// endpoint.
-type ResponseTransactionsID struct {
-	Transaction encodedTransaction `json:"transaction"`
-	Inflow      types.Currency     `json:"inflow"`
-	Outflow     types.Currency     `json:"outflow"`
-	FeePerByte  types.Currency     `json:"feePerByte"`
-}
-
-// override transaction marshalling to use camelCase and stringified pubkeys and
-// omit empty fields
-type encodedSiacoinOutput struct {
-	Value      types.Currency   `json:"value"`
-	UnlockHash types.UnlockHash `json:"unlockHash"`
-}
-
-type encodedPubKey struct {
-	Algorithm types.Specifier
-	Key       []byte
-}
-
-func (pk encodedPubKey) MarshalJSON() ([]byte, error) {
-	return []byte(strconv.Quote(pk.Algorithm.String() + ":" + hex.EncodeToString(pk.Key))), nil
-}
-
-type encodedUnlockConditions struct {
-	Timelock           types.BlockHeight `json:"timelock,omitempty"`
-	PublicKeys         []encodedPubKey   `json:"publicKeys"`
-	SignaturesRequired uint64            `json:"signaturesRequired"`
-}
-
-type encodedTransaction struct {
-	SiacoinInputs []struct {
-		ParentID         types.SiacoinOutputID   `json:"parentID"`
-		UnlockConditions encodedUnlockConditions `json:"unlockConditions"`
-	} `json:"siacoinInputs,omitempty"`
-	SiacoinOutputs []encodedSiacoinOutput `json:"siacoinOutputs,omitempty"`
-	FileContracts  []struct {
-		FileSize           uint64                 `json:"fileSize"`
-		FileMerkleRoot     crypto.Hash            `json:"fileMerkleRoot"`
-		WindowStart        types.BlockHeight      `json:"windowStart"`
-		WindowEnd          types.BlockHeight      `json:"windowEnd"`
-		Payout             types.Currency         `json:"payout"`
-		ValidProofOutputs  []encodedSiacoinOutput `json:"validProofOutputs"`
-		MissedProofOutputs []encodedSiacoinOutput `json:"missedProofOutputs"`
-		UnlockHash         types.UnlockHash       `json:"unlockHash"`
-		RevisionNumber     uint64                 `json:"revisionNumber"`
-	} `json:"fileContracts,omitempty"`
-	FileContractRevisions []struct {
-		ParentID              types.FileContractID    `json:"parentID"`
-		UnlockConditions      encodedUnlockConditions `json:"unlockConditions"`
-		NewRevisionNumber     uint64                  `json:"newRevisionNumber"`
-		NewFileSize           uint64                  `json:"newFileSize"`
-		NewFileMerkleRoot     crypto.Hash             `json:"newFileMerkleRoot"`
-		NewWindowStart        types.BlockHeight       `json:"newWindowStart"`
-		NewWindowEnd          types.BlockHeight       `json:"newWindowEnd"`
-		NewValidProofOutputs  []encodedSiacoinOutput  `json:"newValidProofOutputs"`
-		NewMissedProofOutputs []encodedSiacoinOutput  `json:"newMissedProofOutputs"`
-		NewUnlockHash         types.UnlockHash        `json:"newUnlockHash"`
-	} `json:"fileContractRevisions,omitempty"`
-	StorageProofs []types.StorageProof `json:"storageProofs,omitempty"`
-	SiafundInputs []struct {
-		ParentID         types.SiafundOutputID   `json:"parentID"`
-		UnlockConditions encodedUnlockConditions `json:"unlockConditions"`
-		ClaimUnlockHash  types.UnlockHash        `json:"claimUnlockHash"`
-	} `json:"siafundInputs,omitempty"`
-	SiafundOutputs []struct {
-		Value      types.Currency   `json:"value"`
-		UnlockHash types.UnlockHash `json:"unlockHash"`
-		ClaimStart types.Currency   `json:"-"` // internal, must always be 0
-	} `json:"siafundOutputs,omitempty"`
-	MinerFees             []types.Currency `json:"minerFees,omitempty"`
-	ArbitraryData         [][]byte         `json:"arbitraryData,omitempty"`
-	TransactionSignatures []struct {
-		ParentID       crypto.Hash       `json:"parentID"`
-		PublicKeyIndex uint64            `json:"publicKeyIndex"`
-		Timelock       types.BlockHeight `json:"timelock,omitempty"`
-		CoveredFields  struct {
-			WholeTransaction      bool     `json:"wholeTransaction,omitempty"`
-			SiacoinInputs         []uint64 `json:"siacoinInputs,omitempty"`
-			SiacoinOutputs        []uint64 `json:"siacoinOutputs,omitempty"`
-			FileContracts         []uint64 `json:"fileContracts,omitempty"`
-			FileContractRevisions []uint64 `json:"fileContractRevisions,omitempty"`
-			StorageProofs         []uint64 `json:"storageProofs,omitempty"`
-			SiafundInputs         []uint64 `json:"siafundInputs,omitempty"`
-			SiafundOutputs        []uint64 `json:"siafundOutputs,omitempty"`
-			MinerFees             []uint64 `json:"minerFees,omitempty"`
-			ArbitraryData         []uint64 `json:"arbitraryData,omitempty"`
-			TransactionSignatures []uint64 `json:"transactionSignatures,omitempty"`
-		} `json:"coveredFields"`
-		Signature []byte `json:"signature"`
-	} `json:"transactionSignatures,omitempty"`
 }
 
 func (s *seedServer) transactionsidHandler(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
@@ -366,44 +213,26 @@ func (s *seedServer) transactionsidHandler(w http.ResponseWriter, req *http.Requ
 		fee = fee.Add(c)
 	}
 	outflow = outflow.Add(fee)
-	writeJSON(w, ResponseTransactionsID{
-		Transaction: *(*encodedTransaction)(unsafe.Pointer(&txn)),
+	writeJSON(w, api.ResponseTransactionsID{
+		Transaction: txn,
 		Inflow:      inflow,
 		Outflow:     outflow,
 		FeePerByte:  fee.Div64(uint64(txn.MarshalSiaSize())),
 	})
 }
 
-// A UTXO is an unspent transaction output, ready to be used as a SiacoinInput.
-type UTXO struct {
-	ID               types.SiacoinOutputID  `json:"ID"`
-	Value            types.Currency         `json:"value"`
-	UnlockConditions types.UnlockConditions `json:"unlockConditions"`
-	UnlockHash       types.UnlockHash       `json:"unlockHash"`
-}
-
-// ResponseUTXOs is the response type for the /utxos endpoint.
-type ResponseUTXOs []UTXO
-
-type encodedUTXOs []struct {
-	ID               types.SiacoinOutputID   `json:"ID"`
-	Value            types.Currency          `json:"value"`
-	UnlockConditions encodedUnlockConditions `json:"unlockConditions"`
-	UnlockHash       types.UnlockHash        `json:"unlockHash"`
-}
-
 func (s *seedServer) utxosHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	inputs := s.w.ValuedInputs()
-	utxos := make(ResponseUTXOs, len(inputs))
+	utxos := make(api.ResponseUTXOs, len(inputs))
 	for i, vi := range inputs {
-		utxos[i] = UTXO{
+		utxos[i] = api.UTXO{
 			ID:               vi.ParentID,
 			Value:            vi.Value,
 			UnlockConditions: vi.UnlockConditions,
 			UnlockHash:       vi.UnlockConditions.UnlockHash(),
 		}
 	}
-	writeJSON(w, *(*encodedUTXOs)(unsafe.Pointer(&utxos)))
+	writeJSON(w, utxos)
 }
 
 // NewSeedServer returns an HTTP handler that serves the seed wallet API.

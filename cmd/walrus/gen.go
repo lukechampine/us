@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"unsafe"
 
 	"github.com/pkg/errors"
+	"lukechampine.com/us/cmd/walrus/api"
 	"lukechampine.com/us/wallet"
 )
 
@@ -15,13 +15,12 @@ func gen(seed wallet.Seed, indexStr string) error {
 	if err != nil {
 		return errors.Wrap(err, "invalid key index")
 	}
-	uc := wallet.StandardUnlockConditions(seed.PublicKey(index))
-	euc := *(*encodedUnlockConditions)(unsafe.Pointer(&uc))
-	js, _ := json.MarshalIndent(struct {
-		UnlockConditions encodedUnlockConditions `json:"unlockConditions"`
-		KeyIndex         uint64                  `json:"keyIndex"`
-	}{euc, index}, "", "\t")
-	fmt.Println(uc.UnlockHash())
+	info := wallet.SeedAddressInfo{
+		UnlockConditions: wallet.StandardUnlockConditions(seed.PublicKey(index)),
+		KeyIndex:         index,
+	}
+	js, _ := json.MarshalIndent(api.ResponseAddressesAddr(info), "", "\t")
+	fmt.Println(info.UnlockConditions.UnlockHash())
 	fmt.Println(string(js))
 	return nil
 }

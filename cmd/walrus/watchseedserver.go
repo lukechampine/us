@@ -5,39 +5,27 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strconv"
-	"unsafe"
 
 	"github.com/julienschmidt/httprouter"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/us/cmd/walrus/api"
 	"lukechampine.com/us/wallet"
 )
-
-// A SeedAddressInfo contains the unlock conditions and key index for an
-// address derived from a seed.
-type SeedAddressInfo struct {
-	UnlockConditions types.UnlockConditions
-	KeyIndex         uint64
-}
-
-type encodedSeedAddressInfo struct {
-	UnlockConditions encodedUnlockConditions `json:"unlockConditions"`
-	KeyIndex         uint64                  `json:"keyIndex"`
-}
 
 type watchSeedServer struct {
 	w  *wallet.WatchOnlyWallet
 	tp wallet.TransactionPool
 }
 
-func (s *watchSeedServer) getInfo(addr types.UnlockHash) (SeedAddressInfo, bool) {
+func (s *watchSeedServer) getInfo(addr types.UnlockHash) (wallet.SeedAddressInfo, bool) {
 	info := s.w.AddressInfo(addr)
 	if info == nil {
-		return SeedAddressInfo{}, false
+		return wallet.SeedAddressInfo{}, false
 	}
-	var entry SeedAddressInfo
+	var entry wallet.SeedAddressInfo
 	if err := encoding.Unmarshal(info, &entry); err != nil {
 		panic(err)
 	}
@@ -49,7 +37,7 @@ func (s *watchSeedServer) addressesHandlerGET(w http.ResponseWriter, req *http.R
 }
 
 func (s *watchSeedServer) addressesHandlerPOST(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
-	var info SeedAddressInfo
+	var info api.RequestAddresses
 	if err := json.NewDecoder(req.Body).Decode(&info); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -70,7 +58,7 @@ func (s *watchSeedServer) addressesaddrHandlerGET(w http.ResponseWriter, req *ht
 		http.Error(w, "No such entry", http.StatusNoContent)
 		return
 	}
-	writeJSON(w, (*encodedSeedAddressInfo)(unsafe.Pointer(&info)))
+	writeJSON(w, info)
 }
 
 func (s *watchSeedServer) addressesaddrHandlerDELETE(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
@@ -87,7 +75,7 @@ func (s *watchSeedServer) balanceHandler(w http.ResponseWriter, req *http.Reques
 }
 
 func (s *watchSeedServer) broadcastHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var txnSet RequestBroadcast
+	var txnSet api.RequestBroadcast
 	if err := json.NewDecoder(req.Body).Decode(&txnSet); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -117,7 +105,7 @@ func (s *watchSeedServer) broadcastHandler(w http.ResponseWriter, req *http.Requ
 }
 
 func (s *watchSeedServer) consensusHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	writeJSON(w, ResponseConsensus{
+	writeJSON(w, api.ResponseConsensus{
 		Height: s.w.ChainHeight(),
 		CCID:   crypto.Hash(s.w.ConsensusChangeID()),
 	})
@@ -129,17 +117,7 @@ func (s *watchSeedServer) feeHandler(w http.ResponseWriter, req *http.Request, _
 }
 
 func (s *watchSeedServer) limboHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	outputs := s.w.LimboOutputs()
-	utxos := make(ResponseLimboUTXOs, len(outputs))
-	for i, o := range outputs {
-		utxos[i] = LimboUTXO{
-			ID:         o.ID,
-			Value:      o.Value,
-			UnlockHash: o.UnlockHash,
-			LimboSince: o.LimboSince,
-		}
-	}
-	writeJSON(w, outputs)
+	writeJSON(w, api.ResponseLimboUTXOs(s.w.LimboOutputs()))
 }
 
 func (s *watchSeedServer) limboHandlerPUT(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
@@ -194,7 +172,7 @@ func (s *watchSeedServer) transactionsHandler(w http.ResponseWriter, req *http.R
 		}
 	}
 
-	var resp ResponseTransactions
+	var resp api.ResponseTransactions
 	if req.FormValue("addr") != "" {
 		var addr types.UnlockHash
 		if err := addr.LoadString(req.FormValue("addr")); err != nil {
@@ -204,9 +182,6 @@ func (s *watchSeedServer) transactionsHandler(w http.ResponseWriter, req *http.R
 		resp = s.w.TransactionsByAddress(addr, max)
 	} else {
 		resp = s.w.Transactions(max)
-	}
-	if resp == nil {
-		resp = ResponseTransactions{}
 	}
 	writeJSON(w, resp)
 }
@@ -236,51 +211,33 @@ func (s *watchSeedServer) transactionsidHandler(w http.ResponseWriter, req *http
 		fee = fee.Add(c)
 	}
 	outflow = outflow.Add(fee)
-	writeJSON(w, ResponseTransactionsID{
-		Transaction: *(*encodedTransaction)(unsafe.Pointer(&txn)),
+	writeJSON(w, api.ResponseTransactionsID{
+		Transaction: txn,
 		Inflow:      inflow,
 		Outflow:     outflow,
 		FeePerByte:  fee.Div64(uint64(txn.MarshalSiaSize())),
 	})
 }
 
-// A SeedUTXO is an unspent transaction output, ready to be used as a SiacoinInput.
-type SeedUTXO struct {
-	ID               types.SiacoinOutputID  `json:"ID"`
-	Value            types.Currency         `json:"value"`
-	UnlockConditions types.UnlockConditions `json:"unlockConditions"`
-	UnlockHash       types.UnlockHash       `json:"unlockHash"`
-	KeyIndex         uint64                 `json:"keyIndex"`
-}
-
-// ResponseSeedUTXOs is the response type for the /utxos endpoint.
-type ResponseSeedUTXOs []SeedUTXO
-
-type encodedSeedUTXOs []struct {
-	ID               types.SiacoinOutputID   `json:"ID"`
-	Value            types.Currency          `json:"value"`
-	UnlockConditions encodedUnlockConditions `json:"unlockConditions"`
-	UnlockHash       types.UnlockHash        `json:"unlockHash"`
-	KeyIndex         uint64                  `json:"keyIndex"`
-}
-
 func (s *watchSeedServer) utxosHandler(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	outputs := s.w.UnspentOutputs()
-	utxos := make(ResponseSeedUTXOs, len(outputs))
+	utxos := make(api.ResponseSeedUTXOs, len(outputs))
 	for i, o := range outputs {
 		info, ok := s.getInfo(o.UnlockHash)
 		if !ok {
 			panic("missing info for " + o.UnlockHash.String())
 		}
-		utxos[i] = SeedUTXO{
-			ID:               o.ID,
-			Value:            o.Value,
-			UnlockConditions: info.UnlockConditions,
-			UnlockHash:       o.UnlockHash,
-			KeyIndex:         info.KeyIndex,
+		utxos[i] = api.SeedUTXO{
+			UTXO: api.UTXO{
+				ID:               o.ID,
+				Value:            o.Value,
+				UnlockConditions: info.UnlockConditions,
+				UnlockHash:       o.UnlockHash,
+			},
+			KeyIndex: info.KeyIndex,
 		}
 	}
-	writeJSON(w, *(*encodedSeedUTXOs)(unsafe.Pointer(&utxos)))
+	writeJSON(w, utxos)
 }
 
 // NewWatchSeedServer returns an HTTP handler that serves the watch-only

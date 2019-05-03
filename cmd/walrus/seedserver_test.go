@@ -18,6 +18,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/us/cmd/walrus/api"
 	"lukechampine.com/us/wallet"
 )
 
@@ -173,7 +174,7 @@ func TestSeedServer(t *testing.T) {
 	}
 
 	// shouldn't have any transactions yet
-	var txnHistory ResponseTransactions
+	var txnHistory api.ResponseTransactions
 	if err := httpGet(ss, "/transactions", &txnHistory); err != nil {
 		t.Fatal(err)
 	} else if len(txnHistory) != 0 {
@@ -181,7 +182,7 @@ func TestSeedServer(t *testing.T) {
 	}
 
 	// shouldn't have any addresses yet
-	var addresses ResponseAddresses
+	var addresses api.ResponseAddresses
 	if err := httpGet(ss, "/addresses", &addresses); err != nil {
 		t.Fatal(err)
 	} else if len(addresses) != 0 {
@@ -195,7 +196,7 @@ func TestSeedServer(t *testing.T) {
 	}
 
 	// seed index should be incremented to 1
-	var seedIndex ResponseSeedIndex
+	var seedIndex api.ResponseSeedIndex
 	if err := httpGet(ss, "/seedindex", &seedIndex); err != nil {
 		t.Fatal(err)
 	} else if seedIndex != 1 {
@@ -210,14 +211,14 @@ func TestSeedServer(t *testing.T) {
 	}
 
 	// address info should be present
-	var addrInfo SeedAddressInfo
+	var addrInfo api.ResponseAddressesAddr
 	if err := httpGet(ss, "/addresses/"+addr.String(), &addrInfo); err != nil {
 		t.Fatal(err)
 	} else if addrInfo.KeyIndex != 0 || addrInfo.UnlockConditions.UnlockHash() != addr {
 		t.Fatal("address info is inaccurate")
 	}
 
-	var oldConsensus ResponseConsensus
+	var oldConsensus api.ResponseConsensus
 	if err := httpGet(ss, "/consensus", &oldConsensus); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +232,7 @@ func TestSeedServer(t *testing.T) {
 	})
 
 	// CCID should have changed
-	var newConsensus ResponseConsensus
+	var newConsensus api.ResponseConsensus
 	if err := httpGet(ss, "/consensus", &newConsensus); err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +255,7 @@ func TestSeedServer(t *testing.T) {
 	} else if len(txnHistory) != 1 {
 		t.Fatal("transaction should appear in history")
 	}
-	var htx ResponseTransactionsID
+	var htx api.ResponseTransactionsID
 	if err := httpGet(ss, "/transactions/"+txnHistory[0].String(), &htx); err != nil {
 		t.Fatal(err)
 	} else if len(htx.Transaction.SiacoinOutputs) != 2 {
@@ -262,7 +263,7 @@ func TestSeedServer(t *testing.T) {
 	}
 
 	// create an unsigned transaction using available outputs
-	var outputs ResponseUTXOs
+	var outputs api.ResponseUTXOs
 	if err := httpGet(ss, "/utxos", &outputs); err != nil {
 		t.Fatal(err)
 	} else if len(outputs) != 2 {
@@ -288,7 +289,7 @@ func TestSeedServer(t *testing.T) {
 	}
 
 	// sign and broadcast the transaction
-	signReq := RequestSign{Transaction: txn}
+	signReq := api.RequestSign{Transaction: txn}
 	if err := httpPost(ss, "/sign", signReq, &txn); err != nil {
 		t.Fatal(err)
 	} else if err := txn.StandaloneValid(types.ASICHardforkHeight + 1); err != nil {
@@ -355,10 +356,10 @@ func TestSeedServerThreadSafety(t *testing.T) {
 	// concurrently
 	funcs := []func(){
 		func() { cs.sendTxn(txn) },
-		func() { httpGet(ss, "/balance", new(ResponseBalance)) },
-		func() { httpPost(ss, "/nextaddress", nil, new(ResponseNextAddress)) },
-		func() { httpGet(ss, "/addresses", new(ResponseAddresses)) },
-		func() { httpGet(ss, "/transactions?max=2&addr="+addr.String(), new(ResponseTransactions)) },
+		func() { httpGet(ss, "/balance", new(api.ResponseBalance)) },
+		func() { httpPost(ss, "/nextaddress", nil, new(api.ResponseNextAddress)) },
+		func() { httpGet(ss, "/addresses", new(api.ResponseAddresses)) },
+		func() { httpGet(ss, "/transactions?max=2&addr="+addr.String(), new(api.ResponseTransactions)) },
 	}
 	var wg sync.WaitGroup
 	wg.Add(len(funcs))

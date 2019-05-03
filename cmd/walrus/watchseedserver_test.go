@@ -11,6 +11,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/us/cmd/walrus/api"
 	"lukechampine.com/us/wallet"
 )
 
@@ -40,7 +41,7 @@ func TestWatchSeedServer(t *testing.T) {
 	}
 
 	// shouldn't have any transactions yet
-	var txnHistory ResponseTransactions
+	var txnHistory api.ResponseTransactions
 	if err := httpGet(ss, "/transactions", &txnHistory); err != nil {
 		t.Fatal(err)
 	} else if len(txnHistory) != 0 {
@@ -48,7 +49,7 @@ func TestWatchSeedServer(t *testing.T) {
 	}
 
 	// shouldn't have any addresses yet
-	var addresses ResponseAddresses
+	var addresses api.ResponseAddresses
 	if err := httpGet(ss, "/addresses", &addresses); err != nil {
 		t.Fatal(err)
 	} else if len(addresses) != 0 {
@@ -57,7 +58,7 @@ func TestWatchSeedServer(t *testing.T) {
 
 	// create and add an address
 	seed := wallet.NewSeed()
-	addrInfo := SeedAddressInfo{
+	addrInfo := api.RequestAddresses{
 		UnlockConditions: wallet.StandardUnlockConditions(seed.PublicKey(0)),
 		KeyIndex:         0,
 	}
@@ -94,7 +95,7 @@ func TestWatchSeedServer(t *testing.T) {
 	} else if len(txnHistory) != 1 {
 		t.Fatal("transaction should appear in history")
 	}
-	var rtid ResponseTransactionsID
+	var rtid api.ResponseTransactionsID
 	if err := httpGet(ss, "/transactions/"+txnHistory[0].String(), &rtid); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +105,7 @@ func TestWatchSeedServer(t *testing.T) {
 	}
 
 	// create an unsigned transaction using available outputs
-	var outputs ResponseUTXOs
+	var outputs api.ResponseUTXOs
 	if err := httpGet(ss, "/utxos", &outputs); err != nil {
 		t.Fatal(err)
 	} else if len(outputs) != 2 {
@@ -177,7 +178,7 @@ func TestWatchServerThreadSafety(t *testing.T) {
 	cs.ConsensusSetSubscribe(w, store.ConsensusChangeID(), nil)
 	ss := NewWatchSeedServer(w, stubTpool{})
 
-	randomAddr := func() (info SeedAddressInfo) {
+	randomAddr := func() (info wallet.SeedAddressInfo) {
 		info.UnlockConditions = wallet.StandardUnlockConditions(wallet.NewSeed().PublicKey(0))
 		return
 	}
@@ -194,11 +195,11 @@ func TestWatchServerThreadSafety(t *testing.T) {
 	// concurrently
 	funcs := []func(){
 		func() { cs.sendTxn(txn) },
-		func() { httpGet(ss, "/balance", new(ResponseBalance)) },
-		func() { httpPost(ss, "/addresses", randomAddr(), new(types.UnlockHash)) },
+		func() { httpGet(ss, "/balance", new(api.ResponseBalance)) },
+		func() { httpPost(ss, "/addresses", api.RequestAddresses(randomAddr()), new(types.UnlockHash)) },
 		func() { httpDelete(ss, "/addresses/"+randomAddr().UnlockConditions.UnlockHash().String()) },
-		func() { httpGet(ss, "/addresses", new(ResponseAddresses)) },
-		func() { httpGet(ss, "/transactions?max=2&addr="+addr.String(), new(ResponseTransactions)) },
+		func() { httpGet(ss, "/addresses", new(api.ResponseAddresses)) },
+		func() { httpGet(ss, "/transactions?max=2&addr="+addr.String(), new(api.ResponseTransactions)) },
 	}
 	var wg sync.WaitGroup
 	wg.Add(len(funcs))
