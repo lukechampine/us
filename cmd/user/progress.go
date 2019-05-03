@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,11 +14,6 @@ import (
 	"lukechampine.com/us/renter/renterutil"
 	"lukechampine.com/us/renterhost"
 )
-
-func writeUpdate(w io.Writer, u interface{}, typ string) {
-	js, _ := json.Marshal(u)
-	fmt.Fprintf(w, `{"type":%q,"data":%s}`+"\n", typ, js)
-}
 
 type trackWriter struct {
 	w                io.Writer
@@ -106,56 +100,6 @@ func trackUpload(pf renterutil.PseudoFile, f *os.File) error {
 	}
 	fmt.Println()
 	return err
-}
-
-func trackUploadDir(op *renterutil.Operation, log io.Writer) error {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGPIPE)
-
-	var queue []renterutil.DirQueueUpdate
-	var uploadStart time.Time
-	var newQueue bool
-	for {
-		select {
-		case u, ok := <-op.Updates():
-			if !ok {
-				// TODO: don't print 100% if there was an error
-				printUploadDirFinished(queue, uploadStart)
-				return op.Err()
-			}
-			switch u := u.(type) {
-			case renterutil.DirQueueUpdate:
-				// don't add duplicate elements to the queue
-				if len(queue) > 0 && u == queue[len(queue)-1] {
-					continue
-				}
-				if newQueue {
-					printUploadDirFinished(queue, uploadStart)
-					queue = queue[:0]
-					newQueue = false
-				}
-				queue = append(queue, u)
-				uploadStart = time.Now()
-			case renterutil.TransferProgressUpdate:
-				newQueue = true
-				printUploadDirProgress(queue, u, uploadStart)
-
-			case renterutil.DialStatsUpdate:
-				writeUpdate(log, u, "dial")
-			case renterutil.UploadStatsUpdate:
-				writeUpdate(log, u, "upload")
-			}
-		case <-sigChan:
-			fmt.Println("\nStopping...")
-			op.Cancel()
-			for range op.Updates() {
-			}
-			if op.Err() != renterutil.ErrCanceled {
-				return op.Err()
-			}
-			return nil
-		}
-	}
 }
 
 func trackMigrateFile(filename string, op *renterutil.Operation) error {
@@ -277,48 +221,4 @@ func printAlreadyFinished(filename string, total int64) {
 
 func printOperationProgress(filename string, u renterutil.TransferProgressUpdate, elapsed time.Duration) {
 	printSimpleProgress(filename, u.Start, u.Transferred, u.Total, elapsed)
-}
-
-func printUploadDirProgress(queue []renterutil.DirQueueUpdate, u renterutil.TransferProgressUpdate, start time.Time) {
-	termWidth := getWidth()
-	elapsed := time.Since(start)
-	bytesPerSec := int64(float64(u.Transferred) / elapsed.Seconds())
-	pct := (100 * (u.Start + u.Transferred)) / u.Total
-	metrics := fmt.Sprintf("%4v%%   %8s  %9s/s    ", pct, filesizeUnits(u.Total), filesizeUnits(bytesPerSec))
-	var name string
-	if len(queue) == 1 {
-		name = formatFilename(queue[0].Filename, termWidth-len(metrics)-4)
-	} else {
-		more := fmt.Sprintf("(+%d more)", len(queue)-1)
-		maxLen := termWidth - len(metrics) - len(more) - 4
-		name = fmt.Sprintf("%s %s", formatFilename(queue[0].Filename, maxLen), more)
-	}
-
-	buf := makeBuf(termWidth)
-	copy(buf, []rune(name))
-	copy(buf[len(buf)-len(metrics):], []rune(metrics))
-	fmt.Printf("\r%s", string(buf))
-}
-
-func printUploadDirFinished(queue []renterutil.DirQueueUpdate, start time.Time) {
-	if len(queue) == 0 {
-		return
-	}
-	termWidth := getWidth()
-	elapsed := time.Since(start)
-	var totalSize int64
-	for _, f := range queue {
-		totalSize += f.Filesize
-	}
-	bytesPerSec := int64(float64(totalSize) / elapsed.Seconds())
-	fmt.Printf("\r")
-	for _, f := range queue {
-		metrics := fmt.Sprintf("100%%   %8s  %9s/s    ", filesizeUnits(f.Filesize), filesizeUnits(bytesPerSec))
-		name := formatFilename(f.Filename, termWidth-len(metrics)-4)
-
-		buf := makeBuf(termWidth)
-		copy(buf, []rune(name))
-		copy(buf[len(buf)-len(metrics):], []rune(metrics))
-		fmt.Printf("%s\n", string(buf))
-	}
 }

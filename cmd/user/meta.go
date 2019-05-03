@@ -105,11 +105,26 @@ func uploadmetadir(dir, metaDir, contractDir string, minShards int) error {
 	if err != nil {
 		return errors.Wrap(err, "could not determine current height")
 	}
-	log, cleanup := openLog()
-	defer cleanup()
-	fileIter := renterutil.NewRecursiveFileIter(dir, metaDir)
-	op := renterutil.UploadDir(fileIter, contracts, minShards, c, currentHeight)
-	return trackUploadDir(op, log)
+	fs := renterutil.NewFileSystem(dir, contracts, c, currentHeight)
+	defer fs.Close()
+
+	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if info.IsDir() || err != nil {
+			return nil
+		}
+		fs.MkdirAll(path, 0700)
+		pf, err := fs.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_TRUNC, info.Mode(), minShards)
+		if err != nil {
+			return err
+		}
+		defer pf.Close()
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		return trackUpload(pf, f)
+	})
 }
 
 func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {

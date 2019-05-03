@@ -15,7 +15,6 @@ var config struct {
 	ContractsAvailable string `toml:"contracts_available"`
 	ContractsEnabled   string `toml:"contracts_enabled"`
 	MinShards          int    `toml:"min_shards"`
-	LogFile            string `toml:"log_file"`
 }
 
 func loadConfig() error {

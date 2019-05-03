@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -276,16 +274,6 @@ func makeLimitedClient() limitedClient {
 		return makeClient()
 	}
 	return renterutil.NewSHARDClient(config.SHARDAddr)
-}
-
-func openLog() (io.Writer, func()) {
-	if config.LogFile != "" {
-		f, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-		check("Could not open log file:", err)
-		bw := bufio.NewWriter(f)
-		return bw, func() { bw.Flush(); f.Close() }
-	}
-	return ioutil.Discard, func() {}
 }
 
 func main() {
