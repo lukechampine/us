@@ -315,9 +315,9 @@ func (f *roPseudoFile) downloadShards(offset int64, n int) ([][]byte, error) {
 		}
 	}
 	// compute per-shard offset + length, padding to segment size
-	start := (offset / int64(f.m.MinShards*merkle.SegmentSize)) * merkle.SegmentSize
-	end := ((offset + int64(n)) / int64(f.m.MinShards*merkle.SegmentSize)) * merkle.SegmentSize
-	if (offset+int64(n))%int64(f.m.MinShards*merkle.SegmentSize) != 0 {
+	start := (offset / f.m.MinChunkSize()) * merkle.SegmentSize
+	end := ((offset + int64(n)) / f.m.MinChunkSize()) * merkle.SegmentSize
+	if (offset+int64(n))%f.m.MinChunkSize() != 0 {
 		end += merkle.SegmentSize
 	}
 	offset, length := start, end-start
@@ -412,7 +412,7 @@ func (f *roPseudoFile) Read(p []byte) (int, error) {
 	}
 
 	// recover data shards directly into p
-	skip := int(f.offset % (int64(f.m.MinShards) * merkle.SegmentSize))
+	skip := int(f.offset % f.m.MinChunkSize())
 	w := &skipWriter{p, skip}
 	err = f.m.ErasureCode().Recover(w, shards, skip+len(p))
 	if err != nil {
@@ -530,7 +530,7 @@ type aoPseudoFile struct {
 }
 
 func (f *aoPseudoFile) readChunkAt(p []byte, off int64) error {
-	if len(p)%f.m.MinShards*merkle.SegmentSize != 0 {
+	if int64(len(p))%f.m.MinChunkSize() != 0 {
 		panic("illegal chunk size")
 	}
 	if off >= f.m.Filesize {
@@ -554,7 +554,7 @@ func (f *aoPseudoFile) readChunkAt(p []byte, off int64) error {
 			Slices:     slices,
 		}
 	}
-	start := (off / int64(f.m.MinShards*merkle.SegmentSize)) * merkle.SegmentSize
+	start := (off / f.m.MinChunkSize()) * merkle.SegmentSize
 	offset, length := start, int64(merkle.SegmentSize)
 
 	shards := make([][]byte, len(hosts))
@@ -592,13 +592,13 @@ func (f *aoPseudoFile) readChunkAt(p []byte, off int64) error {
 func (f *aoPseudoFile) uncommittedFilesize() int64 {
 	size := f.m.Filesize
 	if len(f.chunk) > 0 {
-		align := f.m.Filesize % int64(merkle.SegmentSize*f.m.MinShards)
+		align := f.m.Filesize % f.m.MinChunkSize()
 		size += int64(len(f.chunk)) - align
 	}
 	return size
 }
 
-// flushChunk encodes the current (uncomitted) chunk, uploads the resulting
+// flushChunk encodes the current (uncommitted) chunk, uploads the resulting
 // shards to f's hosts, and updates f's Shard files, Filesize, and ModTime to
 // reflect the change. flushChunk always uploads a full sector to each host, so
 // it is wasteful to call it if the current chunk is not full.
@@ -608,7 +608,7 @@ func (f *aoPseudoFile) flushChunk() error {
 	}
 
 	// if necessary, update previous SectorSlice
-	align := int(f.m.Filesize % int64(merkle.SegmentSize*f.m.MinShards))
+	align := int(f.m.Filesize % f.m.MinChunkSize())
 	if align != 0 {
 		// The current offset is unaligned, i.e. the previous write did not
 		// occupy a full chunk, and was thus padded with zeros. We want to fill
@@ -692,15 +692,15 @@ func (f *aoPseudoFile) Write(p []byte) (int, error) {
 	}
 
 	// if necessary, prefix chunk with previous segment data
-	if align := int(f.m.Filesize % int64(merkle.SegmentSize*f.m.MinShards)); align != 0 && len(f.chunk) == 0 {
+	if align := int(f.m.Filesize % f.m.MinChunkSize()); align != 0 && len(f.chunk) == 0 {
 		// The last segment in the file is padded with zeros. We can't overwrite
 		// just those zeros; we have to overwrite at least a full segment. So we
 		// have to download the old segment, overwrite the zeros, and reupload
 		// it. We'll also need to subtract one segment from the last
 		// SectorSlice, so that when we append our new SectorSlice, the new
 		// segment will be used.
-		chunk := make([]byte, merkle.SegmentSize*f.m.MinShards)
-		err := f.readChunkAt(chunk[:merkle.SegmentSize*f.m.MinShards], f.m.Filesize-int64(align))
+		chunk := make([]byte, f.m.MinChunkSize())
+		err := f.readChunkAt(chunk[:f.m.MinChunkSize()], f.m.Filesize-int64(align))
 		if err != nil {
 			return 0, err
 		}
@@ -773,10 +773,10 @@ func (f *aoPseudoFile) Truncate(size int64) error {
 		}
 		var n int64
 		for i, s := range slices {
-			sliceSize := int64(s.NumSegments) * merkle.SegmentSize * int64(f.m.MinShards)
+			sliceSize := int64(s.NumSegments) * f.m.MinChunkSize()
 			if n+sliceSize > f.m.Filesize {
 				// trim number of segments
-				s.NumSegments -= uint32(n+sliceSize-f.m.Filesize) / uint32(merkle.SegmentSize*f.m.MinShards)
+				s.NumSegments -= uint32(n+sliceSize-f.m.Filesize) / uint32(f.m.MinChunkSize())
 				if s.NumSegments == 0 {
 					slices = slices[:i]
 				} else {

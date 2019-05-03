@@ -98,6 +98,13 @@ func (m *MetaIndex) MaxChunkSize() int64 {
 	return renterhost.SectorSize * int64(m.MinShards)
 }
 
+// MinChunkSize is the size of the smallest possible chunk. When this chunk is
+// erasure-encoded into shards, each shard will have a length of
+// merkle.SegmentSize.
+func (m *MetaIndex) MinChunkSize() int64 {
+	return merkle.SegmentSize * int64(m.MinShards)
+}
+
 // MinChunks returns the minimum number of chunks required to fully upload the
 // file. It assumes that each SectorSlice will reference a full sector
 // (renterhost.SectorSize bytes).
