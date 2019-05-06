@@ -153,9 +153,6 @@ func (m *MetaFile) Archive(filename string) error {
 	zip := gzip.NewWriter(f)
 	tw := tar.NewWriter(zip)
 
-	// set ModTime
-	m.ModTime = time.Now()
-
 	// write index
 	index, _ := json.Marshal(m.MetaIndex)
 	err = tw.WriteHeader(&tar.Header{
