@@ -36,7 +36,7 @@ func (tw *trackWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func trackDownload(f *os.File, pf renterutil.PseudoFile, off int64) error {
+func trackDownload(f *os.File, pf *renterutil.PseudoFile, off int64) error {
 	stat, err := pf.Stat()
 	if err != nil {
 		return err
@@ -67,7 +67,7 @@ func trackDownload(f *os.File, pf renterutil.PseudoFile, off int64) error {
 	return err
 }
 
-func trackUpload(pf renterutil.PseudoFile, f *os.File) error {
+func trackUpload(pf *renterutil.PseudoFile, f *os.File) error {
 	stat, err := f.Stat()
 	if err != nil {
 		return err

@@ -119,7 +119,7 @@ func fileSystem(pfs *renterutil.PseudoFS) *fuseFS {
 
 type metaFSFile struct {
 	nodefs.File
-	pf renterutil.PseudoFile
+	pf *renterutil.PseudoFile
 }
 
 func (f *metaFSFile) Read(p []byte, off int64) (fuse.ReadResult, fuse.Status) {

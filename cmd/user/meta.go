@@ -82,7 +82,7 @@ func uploadmetafile(f *os.File, minShards int, contractDir, metaPath string) err
 	dir, name := filepath.Dir(metaPath), strings.TrimSuffix(filepath.Base(metaPath), ".usa")
 	fs := renterutil.NewFileSystem(dir, contracts, c, currentHeight)
 	defer fs.Close()
-	pf, err := fs.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_TRUNC, stat.Mode(), minShards)
+	pf, err := fs.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY|os.O_APPEND, stat.Mode(), minShards)
 	if err != nil {
 		return err
 	}
@@ -105,15 +105,14 @@ func uploadmetadir(dir, metaDir, contractDir string, minShards int) error {
 	if err != nil {
 		return errors.Wrap(err, "could not determine current height")
 	}
-	fs := renterutil.NewFileSystem(dir, contracts, c, currentHeight)
+	fs := renterutil.NewFileSystem(metaDir, contracts, c, currentHeight)
 	defer fs.Close()
 
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() || err != nil {
-			return nil
+			return fs.MkdirAll(path, 0700)
 		}
-		fs.MkdirAll(path, 0700)
-		pf, err := fs.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_TRUNC, info.Mode(), minShards)
+		pf, err := fs.Create(path, minShards)
 		if err != nil {
 			return err
 		}
@@ -158,7 +157,7 @@ func resumeuploadmetafile(f *os.File, contractDir, metaPath string) error {
 	return trackUpload(pf, f)
 }
 
-func resumedownload(f *os.File, metaPath string, pf renterutil.PseudoFile) error {
+func resumedownload(f *os.File, metaPath string, pf *renterutil.PseudoFile) error {
 	if ok, err := renter.MetaFileCanDownload(metaPath); err == nil && !ok {
 		return errors.New("file is not sufficiently uploaded")
 	}

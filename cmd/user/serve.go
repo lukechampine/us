@@ -47,7 +47,7 @@ func serve(contractDir, metaDir, addr string) error {
 // A bufferedFile wraps a renterutil.PseudoFile in a bufio.Reader for better
 // performance.
 type bufferedFile struct {
-	renterutil.PseudoFile
+	*renterutil.PseudoFile
 	br *bufio.Reader
 }
 

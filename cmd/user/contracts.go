@@ -315,7 +315,7 @@ func checkupContract(contractPath string) error {
 	}
 	defer contract.Close()
 
-	c := makeClient()
+	c := makeLimitedClient()
 	r := renterutil.CheckupContract(contract, c)
 	if r.Error != nil {
 		fmt.Printf("FAIL Host %v:\n\t%v\n", r.Host.ShortKey(), r.Error)

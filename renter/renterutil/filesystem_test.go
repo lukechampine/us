@@ -17,6 +17,7 @@ import (
 	"lukechampine.com/us/internal/ghost"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
+	"lukechampine.com/us/renterhost"
 )
 
 type stubWallet struct{}
@@ -65,25 +66,34 @@ func createHostWithContract(tb testing.TB) (*ghost.Host, *renter.Contract) {
 	return host, contract
 }
 
-func TestFileSystem(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
-	// create three hosts and form contracts with each of them
+func createTestingFS(tb testing.TB) (*PseudoFS, func()) {
 	hosts := make([]*ghost.Host, 3)
 	contracts := make(renter.ContractSet)
 	hkr := make(testHKR)
 	for i := range hosts {
-		h, c := createHostWithContract(t)
+		h, c := createHostWithContract(tb)
 		hosts[i] = h
 		contracts[h.PublicKey()] = c
 		hkr[h.PublicKey()] = h.Settings().NetAddress
 	}
 
-	// create filesystem
 	fs := NewFileSystem(os.TempDir(), contracts, hkr, 0)
-	defer fs.Close()
+	cleanup := func() {
+		fs.Close()
+		for _, h := range hosts {
+			h.Close()
+		}
+	}
+	return fs, cleanup
+}
+
+func TestFileSystemBasic(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	fs, cleanup := createTestingFS(t)
+	defer cleanup()
 
 	// create metafile
 	metaName := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
@@ -91,6 +101,7 @@ func TestFileSystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	// fill file with random data, using lots of small, weird SectorSlices
 	// (instead of uniform SectorSize-sized ones) to test that edge cases are
 	// being handled
@@ -176,7 +187,13 @@ func TestFileSystem(t *testing.T) {
 		if n, err := pf.Read(p[:len(d)]); err != nil {
 			t.Fatal(err)
 		} else if !bytes.Equal(p[:n], d) {
-			t.Fatal("data from Read does not match actual data")
+			for i := 0; i < n; i++ {
+				if p[i] != d[i] {
+					t.Log(i)
+					break
+				}
+			}
+			t.Error("data from Read does not match actual data")
 		}
 	}
 	checkRead(data[:10])
@@ -212,6 +229,171 @@ func TestFileSystem(t *testing.T) {
 	} else if n != 500 {
 		t.Fatalf("expected to read 500 bytes, got %v", n)
 	}
+
+	// remove file
+	if err := pf.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.Remove(pf.Name()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFileSystemUploadDir(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	fs, cleanup := createTestingFS(t)
+	defer cleanup()
+
+	check := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// create three metafiles
+	metaName1 := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	pf1, err := fs.Create(metaName1, 2)
+	check(err)
+	data1 := fastrand.Bytes(renterhost.SectorSize - 256)
+	_, err = pf1.Write(data1)
+	check(err)
+
+	metaName2 := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	pf2, err := fs.Create(metaName2, 2)
+	check(err)
+	data2 := fastrand.Bytes(renterhost.SectorSize - 256)
+	_, err = pf2.Write(data2)
+	check(err)
+
+	metaName3 := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	pf3, err := fs.Create(metaName3, 2)
+	check(err)
+	data3 := fastrand.Bytes(renterhost.SectorSize - 256)
+	_, err = pf3.Write(data3)
+	check(err)
+
+	// sync and close all files
+	check(pf1.Sync())
+	check(pf1.Close())
+	check(pf2.Sync())
+	check(pf2.Close())
+	check(pf3.Sync())
+	check(pf3.Close())
+
+	// open files for reading and verify contents
+	checkContents := func(name string, data []byte) {
+		t.Helper()
+		pf, err := fs.Open(name)
+		check(err)
+		p := make([]byte, len(data))
+		_, err = pf.ReadAt(p, 0)
+		check(err)
+		if !bytes.Equal(p, data) {
+			t.Error("contents do not match data")
+		}
+		check(pf.Close())
+	}
+	checkContents(metaName1, data1)
+	checkContents(metaName2, data2)
+	checkContents(metaName3, data3)
+
+	// remove files
+	if err := fs.Remove(metaName1); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.Remove(metaName2); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.Remove(metaName3); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFileSystemRandomAccess(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+	t.Skip("WriteAt not implemented")
+
+	fs, cleanup := createTestingFS(t)
+	defer cleanup()
+
+	// create metafile
+	metaName := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	pf, err := fs.Create(metaName, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// perform three overlapping writes
+	data1 := fastrand.Bytes(256)
+	data2 := fastrand.Bytes(256)
+	data3 := fastrand.Bytes(256)
+	if _, err := pf.WriteAt(data1, 0); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.WriteAt(data2, 250); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.WriteAt(data3, 129); err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, 506)
+	copy(data, data1)
+	copy(data[250:], data2)
+	copy(data[129:], data3)
+
+	// truncate
+	data = data[:len(data)-13]
+	if err := pf.Truncate(int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+
+	// close file
+	if err := pf.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// stat file
+	stat, err := fs.Stat(metaName)
+	if err != nil {
+		t.Fatal(err)
+	} else if stat.Name() != metaName {
+		t.Error("incorrect name")
+	} else if stat.Size() != int64(len(data)) {
+		t.Error("incorrect size")
+	} else if stat.Mode() != 0666 {
+		t.Error("incorrect mode")
+	}
+
+	// open file for reading
+	pf, err = fs.Open("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pf.Close()
+
+	// read and seek within file
+	p := make([]byte, stat.Size())
+	checkRead := func(d []byte) {
+		t.Helper()
+		if n, err := pf.Read(p[:len(d)]); err != nil {
+			t.Fatal(err)
+		} else if !bytes.Equal(p[:n], d) {
+			if n > 50 {
+				n = 50
+			}
+			t.Log(p[:n])
+			t.Log(d[:n])
+			t.Error("data from Read does not match actual data")
+		}
+	}
+	checkRead(data[:10])
+	checkRead(data[10:150])
+	checkRead(data[150:256])
+	checkRead(data[256:506])
 
 	// remove file
 	if err := pf.Close(); err != nil {
