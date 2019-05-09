@@ -70,7 +70,7 @@ func scan(hostKeyPrefix string, bytes uint64, duration types.BlockHeight, downlo
 	}
 
 	start := time.Now()
-	host, err := c.Scan(hostKey)
+	host, err := scanHost(c, hostKey)
 	scanTime := time.Since(start)
 	if err != nil {
 		return errors.Wrap(err, "could not scan host")

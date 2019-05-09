@@ -144,7 +144,7 @@ func form(hostKeyPrefix string, funds types.Currency, end string, filename strin
 	if err != nil {
 		return errors.Wrap(err, "could not lookup host")
 	}
-	host, err := c.Scan(hostKey)
+	host, err := scanHost(c, hostKey)
 	if err != nil {
 		return errors.Wrap(err, "could not scan host")
 	}
@@ -218,7 +218,7 @@ func renew(contractPath string, funds types.Currency, end string, filename strin
 		return err
 	}
 
-	host, err := c.Scan(uc.HostKey())
+	host, err := scanHost(c, uc.HostKey())
 	if err != nil {
 		return errors.Wrap(err, "could not scan host")
 	}

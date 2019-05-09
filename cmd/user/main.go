@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io/ioutil"
 	"log"
 	"os"
@@ -9,12 +10,15 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/build"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/flagg"
+	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renter/renterutil"
 )
 
@@ -251,7 +255,34 @@ func check(ctx string, err error) {
 	}
 }
 
-func makeClient() *renterutil.SiadClient {
+type limitedClient interface {
+	Synced() (bool, error)
+	ChainHeight() (types.BlockHeight, error)
+	renter.HostKeyResolver
+}
+
+type fullClient interface {
+	limitedClient
+	proto.Wallet
+	proto.TransactionPool
+	Hosts() ([]hostdb.HostPublicKey, error)
+}
+
+type walrusSHARD struct {
+	*renterutil.WalrusClient
+	*renterutil.SHARDClient
+}
+
+// TODO: add truncated host key lookup to SHARD
+func (walrusSHARD) Hosts() ([]hostdb.HostPublicKey, error) {
+	return nil, errors.New("SHARD requires full-length host public keys")
+}
+
+func makeClient() fullClient {
+	// fullClient can be implemented by either siad or SHARD+walrus
+	if config.SHARDAddr != "" && config.WalrusAddr != "" {
+		return walrusSHARD{renterutil.NewWalrusClient(config.WalrusAddr), renterutil.NewSHARDClient(config.SHARDAddr)}
+	}
 	if config.SiadPassword == "" {
 		// attempt to read the standard siad password file
 		user, err := user.Current()
@@ -263,17 +294,21 @@ func makeClient() *renterutil.SiadClient {
 	return renterutil.NewSiadClient(config.SiadAddr, config.SiadPassword)
 }
 
-type limitedClient interface {
-	Synced() (bool, error)
-	ChainHeight() (types.BlockHeight, error)
-	renter.HostKeyResolver
-}
-
 func makeLimitedClient() limitedClient {
 	if config.SHARDAddr == "" {
 		return makeClient()
 	}
 	return renterutil.NewSHARDClient(config.SHARDAddr)
+}
+
+func scanHost(hkr renter.HostKeyResolver, pubkey hostdb.HostPublicKey) (hostdb.ScannedHost, error) {
+	addr, err := hkr.ResolveHostKey(pubkey)
+	if err != nil {
+		return hostdb.ScannedHost{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return hostdb.Scan(ctx, addr, pubkey)
 }
 
 func main() {
