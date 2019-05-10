@@ -28,8 +28,18 @@ func (s *server) handlerHeight(w http.ResponseWriter, req *http.Request, _ httpr
 }
 
 func (s *server) handlerHost(w http.ResponseWriter, req *http.Request, ps httprouter.Params) {
-	ann, ok := s.shard.HostAnnouncement(ps.ByName("pubkey"))
+	pubkey, unique := s.shard.Host(ps.ByName("prefix"))
+	if pubkey == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	} else if !unique {
+		http.Error(w, "ambiguous pubkey", http.StatusGone)
+		return
+	}
+	ann, ok := s.shard.HostAnnouncement(pubkey)
 	if !ok {
+		// unlikely, but possible if an announcement is reverted after the call
+		// to Host
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -41,7 +51,7 @@ func newServer(shard *SHARD) http.Handler {
 	mux := httprouter.New()
 	mux.GET("/synced", srv.handlerSynced)
 	mux.GET("/height", srv.handlerHeight)
-	mux.GET("/host/:pubkey", srv.handlerHost)
+	mux.GET("/host/:prefix", srv.handlerHost)
 	return mux
 }
 

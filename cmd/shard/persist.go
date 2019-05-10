@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"sort"
 
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/persist"
@@ -39,6 +40,10 @@ func (s *SHARD) load() error {
 	s.height = data.Height
 	s.hosts = data.Hosts
 	s.lastChange = data.LastChange
+	for pk := range s.hosts {
+		s.hostKeys = append(s.hostKeys, pk)
+	}
+	sort.Strings(s.hostKeys)
 	return nil
 }
 

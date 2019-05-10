@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+	"sort"
+	"strings"
 	"sync"
 
 	"gitlab.com/NebulousLabs/Sia/modules"
@@ -16,6 +18,7 @@ type consensusSet interface {
 type SHARD struct {
 	height     types.BlockHeight
 	hosts      map[string][]byte // pubkey -> announcement
+	hostKeys   []string          // sorted
 	lastChange modules.ConsensusChangeID
 	queuedSave bool
 	cs         consensusSet
@@ -32,6 +35,27 @@ func (s *SHARD) Height() types.BlockHeight {
 	height := s.height
 	s.mu.Unlock()
 	return height
+}
+
+func (s *SHARD) Host(prefix string) (pk string, unique bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.hosts[prefix]; ok {
+		return prefix, true
+	}
+	i := sort.Search(len(s.hostKeys), func(i int) bool {
+		hk := s.hostKeys[i]
+		if len(prefix) > len(hk) {
+			return hk[:len(prefix)] >= prefix
+		}
+		return hk[:len(prefix)] >= prefix
+	})
+	if i == len(s.hostKeys) || !strings.HasPrefix(s.hostKeys[i], prefix) {
+		return "", false
+	}
+	pk = s.hostKeys[i]
+	unique = i+1 == len(s.hostKeys) || !strings.HasPrefix(s.hostKeys[i+1], prefix)
+	return
 }
 
 func (s *SHARD) HostAnnouncement(pubkey string) ([]byte, bool) {

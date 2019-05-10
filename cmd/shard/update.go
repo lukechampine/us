@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"time"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
@@ -58,7 +59,9 @@ func (s *SHARD) ProcessConsensusChange(cc modules.ConsensusChange) {
 	// add host announcements
 	for pk, ann := range newhosts {
 		s.hosts[pk] = ann
+		s.hostKeys = append(s.hostKeys, pk)
 	}
+	sort.Strings(s.hostKeys)
 
 	// mark this set of blocks as processed
 	s.lastChange = cc.ID
@@ -66,7 +69,7 @@ func (s *SHARD) ProcessConsensusChange(cc modules.ConsensusChange) {
 	// Queue a save in the near future. If there is already a queued save, do
 	// nothing. This strategy ensures that we eventually save new hosts, but
 	// avoids saving after every block.
-	if !s.queuedSave {
+	if len(newhosts) > 0 && !s.queuedSave {
 		s.queuedSave = true
 		time.AfterFunc(2*time.Minute, func() {
 			s.mu.Lock()
