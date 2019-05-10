@@ -58,6 +58,7 @@ type openMetaFile struct {
 	shards        [][]renter.SectorSlice
 	pendingWrites []pendingWrite
 	offset        int64
+	closed        bool
 }
 
 type pendingWrite struct {
@@ -183,11 +184,18 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 		return nil, errors.New("unsupported flag combination")
 	}
 
-	fs.files[fs.curFD] = &openMetaFile{
+	f := &openMetaFile{
 		name:   name,
 		m:      index,
 		shards: shards,
 	}
+	// if the file is already open under another FD, inherit its pending writes
+	for _, of := range fs.files {
+		if of.name == name {
+			f.pendingWrites = of.pendingWrites
+		}
+	}
+	fs.files[fs.curFD] = f
 	fs.curFD++
 	return &PseudoFile{
 		name:  name,
@@ -225,6 +233,18 @@ func (fs *PseudoFS) RemoveAll(path string) error {
 // not a directory, Rename replaces it. OS-specific restrictions may apply when
 // oldpath and newpath are in different directories.
 func (fs *PseudoFS) Rename(oldname, newname string) error {
+	// if there is an open file with oldname, we must sync its contents first
+	fs.mu.Lock()
+	for _, f := range fs.files {
+		if f.name == oldname && len(f.pendingWrites) > 0 {
+			if err := fs.flushSectors(); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	fs.mu.Unlock()
+
 	// TODO: how does this interact with open files?
 	oldpath, newpath := fs.path(oldname), fs.path(newname)
 	if !isDir(oldpath) {
@@ -238,6 +258,17 @@ func (fs *PseudoFS) Rename(oldname, newname string) error {
 
 // Stat returns the FileInfo structure describing file.
 func (fs *PseudoFS) Stat(name string) (os.FileInfo, error) {
+	fs.mu.Lock()
+	for _, f := range fs.files {
+		if f.name == name {
+			info := pseudoFileInfo{name: f.name, m: f.m}
+			info.m.Filesize = f.filesize()
+			fs.mu.Unlock()
+			return info, nil
+		}
+	}
+	fs.mu.Unlock()
+
 	path := fs.path(name)
 	if isDir(path) {
 		return os.Stat(path)
@@ -383,19 +414,21 @@ func (fs *PseudoFS) flushSectors() error {
 	}
 
 	// update files
-	for _, f := range fs.files {
-		fs.applyPendingWrites(f)
+	for fd, f := range fs.files {
+		applyPendingWrites(f, fs.sectors)
 		if err := fs.commitChanges(f); err != nil {
 			return err
 		}
 		f.pendingWrites = f.pendingWrites[:0]
+		if f.closed {
+			delete(fs.files, fd)
+		}
 	}
-
 	fs.lastCommitTime = time.Now()
 	return nil
 }
 
-func (fs *PseudoFS) applyPendingWrites(f *openMetaFile) {
+func applyPendingWrites(f *openMetaFile, sectors map[hostdb.HostPublicKey]*renter.SectorBuilder) {
 	if len(f.pendingWrites) == 0 {
 		return
 	}
@@ -419,7 +452,7 @@ nextChunk:
 			// |    old    |
 			case pw.offset == offset && pwEnd == oldEnd:
 				for shardIndex, hostKey := range f.m.Hosts {
-					pending := fs.sectors[hostKey].Slices()[pw.sliceIndex]
+					pending := sectors[hostKey].Slices()[pw.sliceIndex]
 					newShards[shardIndex] = append(newShards[shardIndex], pending)
 				}
 				offset = oldEnd
@@ -432,7 +465,7 @@ nextChunk:
 					old := f.shards[shardIndex][chunkIndex]
 					old.SegmentIndex += uint32(int64(len(pw.data)) / merkle.SegmentSize)
 					old.NumSegments -= uint32(int64(len(pw.data)) / merkle.SegmentSize)
-					pending := fs.sectors[hostKey].Slices()[pw.sliceIndex]
+					pending := sectors[hostKey].Slices()[pw.sliceIndex]
 					newShards[shardIndex] = append(newShards[shardIndex], old, pending)
 				}
 				offset = oldEnd
@@ -444,7 +477,7 @@ nextChunk:
 				for shardIndex, hostKey := range f.m.Hosts {
 					old := f.shards[shardIndex][chunkIndex]
 					old.NumSegments -= uint32((pwEnd - pw.offset) / merkle.SegmentSize)
-					pending := fs.sectors[hostKey].Slices()[pw.sliceIndex]
+					pending := sectors[hostKey].Slices()[pw.sliceIndex]
 					newShards[shardIndex] = append(newShards[shardIndex], old, pending)
 				}
 				offset = oldEnd
@@ -459,7 +492,7 @@ nextChunk:
 					oldLeft.NumSegments -= uint32((oldEnd - pw.offset) / merkle.SegmentSize)
 					oldRight.SegmentIndex += uint32((pwEnd - offset) / merkle.SegmentSize)
 					oldRight.NumSegments -= uint32((pwEnd - offset) / merkle.SegmentSize)
-					pending := fs.sectors[hostKey].Slices()[pw.sliceIndex]
+					pending := sectors[hostKey].Slices()[pw.sliceIndex]
 					newShards[shardIndex] = append(newShards[shardIndex], oldLeft, pending, oldRight)
 				}
 				offset = oldEnd
@@ -473,7 +506,7 @@ nextChunk:
 					for shardIndex, hostKey := range f.m.Hosts {
 						old := f.shards[shardIndex][chunkIndex]
 						old.NumSegments = uint32((pw.offset - offset) / f.m.MinChunkSize())
-						pending := fs.sectors[hostKey].Slices()[pw.sliceIndex]
+						pending := sectors[hostKey].Slices()[pw.sliceIndex]
 						if old.NumSegments > 0 {
 							newShards[shardIndex] = append(newShards[shardIndex], old)
 						}
@@ -488,7 +521,7 @@ nextChunk:
 						old.NumSegments -= uint32((oldEnd - pw.offset) / merkle.SegmentSize)
 						next.SegmentIndex += uint32((pwEnd - oldEnd) / merkle.SegmentSize)
 						next.NumSegments -= uint32((pwEnd - oldEnd) / merkle.SegmentSize)
-						pending := fs.sectors[hostKey].Slices()[pw.sliceIndex]
+						pending := sectors[hostKey].Slices()[pw.sliceIndex]
 						newShards[shardIndex] = append(newShards[shardIndex], old, pending, next)
 					}
 					// skip next slice
@@ -508,18 +541,26 @@ nextChunk:
 	for _, pw := range f.pendingWrites {
 		if pw.offset == offset {
 			for shardIndex, hostKey := range f.m.Hosts {
-				pending := fs.sectors[hostKey].Slices()[pw.sliceIndex]
+				pending := sectors[hostKey].Slices()[pw.sliceIndex]
 				newShards[shardIndex] = append(newShards[shardIndex], pending)
 			}
 			offset += int64(len(pw.data))
 		}
 	}
 	f.shards = newShards
+	f.m.Filesize = f.filesize()
 }
 
 func (fs *PseudoFS) readAt(f *openMetaFile, p []byte, off int64) error {
-	if off >= f.m.Filesize {
+	if off >= f.filesize() {
 		return io.EOF
+	} else if off >= f.m.Filesize {
+		for _, pw := range f.pendingWrites {
+			if pw.offset <= off && off < pw.end() {
+				copy(p, pw.data[off-pw.offset:])
+				return nil
+			}
+		}
 	}
 
 	hosts := make([]*renter.ShardDownloader, len(f.m.Hosts))
@@ -586,7 +627,11 @@ func (fs *PseudoFS) readAt(f *openMetaFile, p []byte, off int64) error {
 }
 
 func (fs *PseudoFS) lookupFD(fd int) (file *openMetaFile, dir *os.File) {
-	return fs.files[fd], fs.dirs[fd]
+	file = fs.files[fd]
+	if file != nil && file.closed {
+		file = nil
+	}
+	return file, fs.dirs[fd]
 }
 
 func (fs *PseudoFS) fdRead(fd int, p []byte) (int, error) {
@@ -599,11 +644,11 @@ func (fs *PseudoFS) fdRead(fd int, p []byte) (int, error) {
 		return d.Read(p)
 	}
 
-	if f.offset >= f.m.Filesize {
+	if size := f.filesize(); f.offset >= size {
 		return 0, io.EOF
-	} else if int64(len(p)) > f.m.Filesize-f.offset {
+	} else if int64(len(p)) > size-f.offset {
 		// partial read at EOF
-		p = p[:f.m.Filesize-f.offset]
+		p = p[:size-f.offset]
 	} else if int64(len(p)) > f.m.MaxChunkSize() {
 		// never download more than SectorSize bytes from each host
 		p = p[:f.m.MaxChunkSize()]
@@ -615,6 +660,16 @@ func (fs *PseudoFS) fdRead(fd int, p []byte) (int, error) {
 	}
 	f.offset += int64(len(p))
 	return len(p), err
+}
+
+func (f *openMetaFile) filesize() int64 {
+	size := f.m.Filesize
+	for _, pw := range f.pendingWrites {
+		if pw.end() > size {
+			size = pw.end()
+		}
+	}
+	return size
 }
 
 func (f *openMetaFile) calcShardSize(offset int64, n int) int {
@@ -701,9 +756,6 @@ func (fs *PseudoFS) fdWrite(fd int, p []byte) (int, error) {
 
 	// update metadata
 	f.offset += int64(len(p))
-	if f.offset > f.m.Filesize {
-		f.m.Filesize = f.offset
-	}
 	f.m.ModTime = time.Now()
 
 	return len(p), nil
@@ -726,7 +778,7 @@ func (fs *PseudoFS) fdSeek(fd int, offset int64, whence int) (int64, error) {
 	case io.SeekCurrent:
 		newOffset += offset
 	case io.SeekEnd:
-		newOffset = f.m.Filesize - offset
+		newOffset = f.filesize() - offset
 	}
 	if newOffset < 0 {
 		return 0, errors.New("seek position cannot be negative")
@@ -746,10 +798,10 @@ func (fs *PseudoFS) fdReadAt(fd int, p []byte, off int64) (int, error) {
 	}
 
 	partial := false
-	if off >= f.m.Filesize {
+	if size := f.filesize(); off >= size {
 		return 0, io.EOF
-	} else if off+int64(len(p)) > f.m.Filesize {
-		p = p[:f.m.Filesize-off]
+	} else if off+int64(len(p)) > size {
+		p = p[:size-off]
 		partial = true
 	}
 
@@ -821,7 +873,7 @@ func (fs *PseudoFS) fdTruncate(fd int, size int64) error {
 	}
 
 	f.m.ModTime = time.Now()
-	return nil
+	return fs.flushSectors() // TODO: avoid this
 }
 
 func (fs *PseudoFS) fdSync(fd int) error {
@@ -833,8 +885,10 @@ func (fs *PseudoFS) fdSync(fd int) error {
 	} else if d != nil {
 		return d.Sync()
 	}
-	// TODO: only call flushSectors if the sectors contain data from this file
-	return fs.flushSectors()
+	if len(f.pendingWrites) > 0 {
+		return fs.flushSectors()
+	}
+	return nil
 }
 
 func (fs *PseudoFS) fdStat(fd int) (os.FileInfo, error) {
@@ -846,7 +900,9 @@ func (fs *PseudoFS) fdStat(fd int) (os.FileInfo, error) {
 	} else if d != nil {
 		return d.Stat()
 	}
-	return pseudoFileInfo{name: f.name, m: f.m}, nil
+	info := pseudoFileInfo{name: f.name, m: f.m}
+	info.m.Filesize = f.filesize()
+	return info, nil
 }
 
 func (fs *PseudoFS) fdClose(fd int) error {
@@ -859,11 +915,12 @@ func (fs *PseudoFS) fdClose(fd int) error {
 		delete(fs.dirs, fd)
 		return d.Close()
 	}
-	// TODO: actually leave open if sectors are uncommitted
-	if err := fs.flushSectors(); err != nil {
-		return err
+	f.closed = true
+	// f is only truly deleted if it has no pending writes; otherwise, it sticks
+	// around until the next flush
+	if len(f.pendingWrites) == 0 {
+		delete(fs.files, fd)
 	}
-	delete(fs.files, fd)
 	return nil
 }
 

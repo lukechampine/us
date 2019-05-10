@@ -144,7 +144,7 @@ func TestFileSystemBasic(t *testing.T) {
 	} else if stat.Name() != metaName {
 		t.Error("incorrect name")
 	} else if stat.Size() != int64(len(data)) {
-		t.Error("incorrect size")
+		t.Error("incorrect size", stat.Size(), len(data))
 	} else if stat.Mode() != 0666 {
 		t.Error("incorrect mode")
 	}
@@ -175,7 +175,7 @@ func TestFileSystemBasic(t *testing.T) {
 	} else if stat.Name() != "foo" || stat.Name() != pf.Name() {
 		t.Error("incorrect name")
 	} else if stat.Size() != int64(len(data)) {
-		t.Error("incorrect size")
+		t.Error("incorrect size", stat.Size(), len(data))
 	} else if stat.Mode() != 0676 {
 		t.Error("incorrect mode")
 	}
@@ -276,12 +276,9 @@ func TestFileSystemUploadDir(t *testing.T) {
 	_, err = pf3.Write(data3)
 	check(err)
 
-	// sync and close all files
-	check(pf1.Sync())
+	// close all files
 	check(pf1.Close())
-	check(pf2.Sync())
 	check(pf2.Close())
-	check(pf3.Sync())
 	check(pf3.Close())
 
 	// open files for reading and verify contents
