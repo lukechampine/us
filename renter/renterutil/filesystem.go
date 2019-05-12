@@ -57,17 +57,23 @@ type openMetaFile struct {
 	m             renter.MetaIndex
 	shards        [][]renter.SectorSlice
 	pendingWrites []pendingWrite
+	pendingChunks []pendingChunk
 	offset        int64
 	closed        bool
 }
 
 type pendingWrite struct {
-	data       []byte
-	offset     int64
-	sliceIndex int // index within (SectorBuilder).Slices()
+	data   []byte
+	offset int64
 }
 
 func (pw pendingWrite) end() int64 { return pw.offset + int64(len(pw.data)) }
+
+type pendingChunk struct {
+	offset     int64 // in segments
+	length     int64 // in segments
+	sliceIndex int   // index within (SectorBuilder).Slices()
+}
 
 // PseudoFS implements a filesystem by downloading data from Sia hosts.
 type PseudoFS struct {
@@ -112,10 +118,10 @@ func (fs *PseudoFS) Chmod(name string, mode os.FileMode) error {
 }
 
 // Create creates the named file with the specified redundancy and mode 0666
-// (before umask), truncating it if it already exists. The returned file only
-// supports Write calls at the end of the file.
+// (before umask), truncating it if it already exists. The returned file has
+// mode O_RDWR.
 func (fs *PseudoFS) Create(name string, minShards int) (*PseudoFile, error) {
-	return fs.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY|os.O_APPEND, 0666, minShards)
+	return fs.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0666, minShards)
 }
 
 // Mkdir creates a new directory with the specified name and permission bits
@@ -162,7 +168,7 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 
 	var index renter.MetaIndex
 	var shards [][]renter.SectorSlice
-	if flag == os.O_CREATE|os.O_TRUNC|os.O_WRONLY|os.O_APPEND {
+	if flag == os.O_CREATE|os.O_TRUNC|os.O_RDWR {
 		index = renter.MetaIndex{
 			Version:   renter.MetaFileVersion,
 			Mode:      perm,
@@ -338,6 +344,139 @@ func (fs *PseudoFS) commitChanges(f *openMetaFile) error {
 	return nil
 }
 
+// fill shared sectors with encoded chunks from pending writes; creates
+// pendingChunks from pendingWrites
+func (fs *PseudoFS) fillSectors(f *openMetaFile) error {
+	f.pendingChunks = nil
+	if len(f.pendingWrites) == 0 {
+		return nil
+	}
+
+	shards := make([][]byte, len(f.m.Hosts))
+	for i := range shards {
+		shards[i] = make([]byte, 0, renterhost.SectorSize)
+	}
+
+	// extend each pendingWrite with its unaligned segments, merging writes as appropriate
+	for i := 0; i < len(f.pendingWrites); i++ {
+		pw := f.pendingWrites[i]
+		// if the write begins in the middle of a segment, we must download
+		// that segment
+		if align := pw.offset % f.m.MinChunkSize(); align != 0 {
+			chunk := make([]byte, f.m.MinChunkSize())
+			err := fs.readAt(f, chunk, pw.offset-align)
+			if err != nil {
+				return err
+			}
+			pw.offset -= align
+			pw.data = append(chunk[:align], pw.data...)
+		}
+		// if the write ends in the middle of a segment, we must download
+		// that segment
+		if align := pw.end() % f.m.MinChunkSize(); align != 0 && pw.end() < f.m.Filesize {
+			chunk := make([]byte, f.m.MinChunkSize())
+			err := fs.readAt(f, chunk, pw.end()-align)
+			if err != nil {
+				return err
+			}
+			pw.data = append(pw.data, chunk[align:]...)
+		}
+		// merge with subsequent writes, if applicable
+		for i+1 < len(f.pendingWrites) && pw.end() >= f.pendingWrites[i+1].offset {
+			next := f.pendingWrites[i+1]
+			if pw.end() >= next.end() {
+				// full overwrite; only happens if both writes are within same MinChunk
+				copy(pw.data[next.offset-pw.offset:], next.data)
+			} else {
+				pw.data = append(pw.data[:next.offset-pw.offset], next.data...)
+			}
+			i++
+		}
+		// encode the chunk
+		f.m.ErasureCode().Encode(pw.data, shards)
+
+		// append the shards to each sector
+		pc := pendingChunk{
+			offset: pw.offset / f.m.MinChunkSize(),
+			length: int64(len(shards[0])),
+		}
+		for shardIndex, hostKey := range f.m.Hosts {
+			fs.sectors[hostKey].Append(shards[shardIndex], f.m.MasterKey)
+			pc.sliceIndex = len(fs.sectors[hostKey].Slices()) - 1
+			// TODO: may need a separate sliceIndex for each sector...
+		}
+		f.pendingChunks = append(f.pendingChunks, pc)
+	}
+
+	return nil
+}
+
+// use f.pendingChunks to lookup new slices for each shard, and overwrite f's
+// shards with these
+func commitPendingSlices(f *openMetaFile, sectors map[hostdb.HostPublicKey]*renter.SectorBuilder) {
+	if len(f.pendingChunks) == 0 {
+		return
+	}
+
+	newShards := make([][]renter.SectorSlice, len(f.shards))
+	oldShards := f.shards
+	pending := f.pendingChunks
+	var offset int64
+	for len(oldShards[0])+len(pending) > 0 {
+		// mergesort-style merging of old and new slices, consuming from
+		// whichever has priority
+		switch {
+		// consume a pending chunk
+		case len(pending) > 0 && pending[0].offset == offset:
+			pc := pending[0]
+			pending = pending[1:]
+			for i, hostKey := range f.m.Hosts {
+				ss := sectors[hostKey].Slices()[pc.sliceIndex]
+				newShards[i] = append(newShards[i], ss)
+			}
+			offset += pc.length
+			// consume old slices that we overwrote
+			overlap := pc.length
+			for len(oldShards[0]) > 0 && overlap > 0 {
+				ss := oldShards[0][0]
+				if int64(ss.NumSegments) <= overlap {
+					for i := range oldShards {
+						oldShards[i] = oldShards[i][1:]
+					}
+					overlap -= int64(ss.NumSegments)
+				} else {
+					// trim the beginning of this chunk
+					delta := ss.NumSegments - uint32(overlap)
+					for i := range oldShards {
+						oldShards[i][0].SegmentIndex += delta
+						oldShards[i][0].NumSegments -= delta
+					}
+					break
+				}
+			}
+
+		// consume an old slice
+		case len(oldShards[0]) > 0:
+			numSegments := int64(oldShards[0][0].NumSegments)
+			for i := range oldShards {
+				newShards[i] = append(newShards[i], oldShards[i][0])
+				oldShards[i] = oldShards[i][1:]
+			}
+			// truncate if we would overlap a pending chunk
+			if len(pending) > 0 && offset+numSegments > pending[0].offset {
+				numSegments = pending[0].offset - offset
+				for i := range newShards {
+					newShards[i][len(newShards[i])-1].NumSegments = uint32(numSegments)
+				}
+			}
+			offset += numSegments
+		}
+	}
+
+	f.shards = newShards
+	f.m.Filesize = f.filesize()
+}
+
 // flushSectors uploads any non-empty sectors to their respective hosts, and
 // updates any metafiles with pending changes.
 func (fs *PseudoFS) flushSectors() error {
@@ -348,48 +487,8 @@ func (fs *PseudoFS) flushSectors() error {
 
 	// construct sectors by concatenating uncommitted writes in all files
 	for _, f := range fs.files {
-		if len(f.pendingWrites) == 0 {
-			continue
-		}
-
-		shards := make([][]byte, len(f.m.Hosts))
-		for i := range shards {
-			shards[i] = make([]byte, 0, renterhost.SectorSize)
-		}
-
-		for i := range f.pendingWrites {
-			pw := &f.pendingWrites[i]
-			// if the write begins in the middle of a segment, we must download
-			// that segment
-			if align := pw.offset % f.m.MinChunkSize(); align != 0 {
-				chunk := make([]byte, f.m.MinChunkSize())
-				err := fs.readAt(f, chunk, pw.offset-align)
-				if err != nil {
-					return err
-				}
-				pw.offset -= align
-				pw.data = append(chunk[:align], pw.data...)
-			}
-			// if the write ends in the middle of a segment, we must download
-			// that segment
-			pwEnd := pw.end()
-			if align := pwEnd % f.m.MinChunkSize(); align != 0 && pwEnd < f.m.Filesize {
-				chunk := make([]byte, f.m.MinChunkSize())
-				err := fs.readAt(f, chunk, pwEnd-align)
-				if err != nil {
-					return err
-				}
-				pw.data = append(pw.data, chunk[f.m.MinChunkSize()-align:]...)
-			}
-			// encode the chunk
-			f.m.ErasureCode().Encode(pw.data, shards)
-
-			// append the shards to each sector
-			for shardIndex, hostKey := range f.m.Hosts {
-				fs.sectors[hostKey].Append(shards[shardIndex], f.m.MasterKey)
-				pw.sliceIndex = len(fs.sectors[hostKey].Slices()) - 1
-				// TODO: may need a separate sliceIndex for each sector...
-			}
+		if err := fs.fillSectors(f); err != nil {
+			return err
 		}
 	}
 
@@ -432,7 +531,7 @@ func (fs *PseudoFS) flushSectors() error {
 
 	// update files
 	for fd, f := range fs.files {
-		applyPendingWrites(f, fs.sectors)
+		commitPendingSlices(f, fs.sectors)
 		if err := fs.commitChanges(f); err != nil {
 			return err
 		}
@@ -445,138 +544,13 @@ func (fs *PseudoFS) flushSectors() error {
 	return nil
 }
 
-func applyPendingWrites(f *openMetaFile, sectors map[hostdb.HostPublicKey]*renter.SectorBuilder) {
-	if len(f.pendingWrites) == 0 {
-		return
-	}
-
-	newShards := make([][]renter.SectorSlice, len(f.shards))
-	for i := range newShards {
-		newShards[i] = f.shards[i][:0]
-	}
-	var offset int64
-nextChunk:
-	for chunkIndex := 0; chunkIndex < len(f.shards[0]); chunkIndex++ {
-		oldEnd := offset + int64(f.shards[0][chunkIndex].NumSegments)*f.m.MinChunkSize()
-		if oldEnd > f.m.Filesize {
-			oldEnd = f.m.Filesize
-		}
-
-		for _, pw := range f.pendingWrites {
-			pwEnd := pw.end()
-			switch {
-			// |  pending  |
-			// |    old    |
-			case pw.offset == offset && pwEnd == oldEnd:
-				for shardIndex, hostKey := range f.m.Hosts {
-					pending := sectors[hostKey].Slices()[pw.sliceIndex]
-					newShards[shardIndex] = append(newShards[shardIndex], pending)
-				}
-				offset = oldEnd
-				continue nextChunk
-
-			// | pending |
-			// |    old    |
-			case pw.offset == offset && pwEnd < oldEnd:
-				for shardIndex, hostKey := range f.m.Hosts {
-					old := f.shards[shardIndex][chunkIndex]
-					old.SegmentIndex += uint32(int64(len(pw.data)) / merkle.SegmentSize)
-					old.NumSegments -= uint32(int64(len(pw.data)) / merkle.SegmentSize)
-					pending := sectors[hostKey].Slices()[pw.sliceIndex]
-					newShards[shardIndex] = append(newShards[shardIndex], old, pending)
-				}
-				offset = oldEnd
-				continue nextChunk
-
-			//   | pending |
-			// |    old    |
-			case offset < pw.offset && pwEnd == oldEnd:
-				for shardIndex, hostKey := range f.m.Hosts {
-					old := f.shards[shardIndex][chunkIndex]
-					old.NumSegments -= uint32((pwEnd - pw.offset) / merkle.SegmentSize)
-					pending := sectors[hostKey].Slices()[pw.sliceIndex]
-					newShards[shardIndex] = append(newShards[shardIndex], old, pending)
-				}
-				offset = oldEnd
-				continue nextChunk
-
-			//   |pending|
-			// |    old    |
-			case offset < pw.offset && pwEnd < oldEnd:
-				for shardIndex, hostKey := range f.m.Hosts {
-					old := f.shards[shardIndex][chunkIndex]
-					oldLeft, oldRight := old, old // split old in two
-					oldLeft.NumSegments -= uint32((oldEnd - pw.offset) / merkle.SegmentSize)
-					oldRight.SegmentIndex += uint32((pwEnd - offset) / merkle.SegmentSize)
-					oldRight.NumSegments -= uint32((pwEnd - offset) / merkle.SegmentSize)
-					pending := sectors[hostKey].Slices()[pw.sliceIndex]
-					newShards[shardIndex] = append(newShards[shardIndex], oldLeft, pending, oldRight)
-				}
-				offset = oldEnd
-				continue nextChunk
-
-			//       |  pending  |
-			// |    old    |    next    |
-			case pw.offset < oldEnd && oldEnd < pwEnd:
-				if chunkIndex == len(f.shards[0])-1 {
-					// last SectorSlice
-					for shardIndex, hostKey := range f.m.Hosts {
-						old := f.shards[shardIndex][chunkIndex]
-						old.NumSegments = uint32((pw.offset - offset) / f.m.MinChunkSize())
-						pending := sectors[hostKey].Slices()[pw.sliceIndex]
-						if old.NumSegments > 0 {
-							newShards[shardIndex] = append(newShards[shardIndex], old)
-						}
-						newShards[shardIndex] = append(newShards[shardIndex], pending)
-					}
-					offset = pwEnd
-					continue nextChunk
-				} else {
-					for shardIndex, hostKey := range f.m.Hosts {
-						old := f.shards[shardIndex][chunkIndex]
-						next := f.shards[shardIndex][chunkIndex+1]
-						old.NumSegments -= uint32((oldEnd - pw.offset) / merkle.SegmentSize)
-						next.SegmentIndex += uint32((pwEnd - oldEnd) / merkle.SegmentSize)
-						next.NumSegments -= uint32((pwEnd - oldEnd) / merkle.SegmentSize)
-						pending := sectors[hostKey].Slices()[pw.sliceIndex]
-						newShards[shardIndex] = append(newShards[shardIndex], old, pending, next)
-					}
-					// skip next slice
-					chunkIndex++
-					offset = oldEnd + int64(f.shards[0][chunkIndex].NumSegments)*f.m.MinChunkSize()
-					continue nextChunk
-				}
-			}
-		}
-		// no overlap with pending writes
-		for j := range f.shards {
-			newShards[j] = append(newShards[j], f.shards[j][chunkIndex])
-		}
-		offset = oldEnd
-	}
-	// add trailing writes
-	for _, pw := range f.pendingWrites {
-		if pw.offset == offset {
-			for shardIndex, hostKey := range f.m.Hosts {
-				pending := sectors[hostKey].Slices()[pw.sliceIndex]
-				newShards[shardIndex] = append(newShards[shardIndex], pending)
-			}
-			offset += int64(len(pw.data))
-		}
-	}
-	f.shards = newShards
-	f.m.Filesize = f.filesize()
-}
-
+// readAt reads len(p) bytes from f starting at off.
 func (fs *PseudoFS) readAt(f *openMetaFile, p []byte, off int64) error {
-	if off >= f.filesize() {
-		return io.EOF
-	} else if off >= f.m.Filesize {
-		for _, pw := range f.pendingWrites {
-			if pw.offset <= off && off < pw.end() {
-				copy(p, pw.data[off-pw.offset:])
-				return nil
-			}
+	// check for a pending write that fully overlaps p
+	for _, pw := range f.pendingWrites {
+		if pw.offset <= off && off+int64(len(p)) <= pw.end() {
+			copy(p, pw.data[off-pw.offset:])
+			return nil
 		}
 	}
 
@@ -718,10 +692,14 @@ func (f *openMetaFile) filesize() int64 {
 }
 
 func (f *openMetaFile) calcShardSize(offset int64, n int) int {
-	shardSize := (n / int(f.m.MinChunkSize())) * merkle.SegmentSize
-	// assume misaligned start and end
-	// TODO: calculate precisely
-	return shardSize + merkle.SegmentSize + merkle.SegmentSize
+	numSegments := n / int(f.m.MinChunkSize())
+	if offset%f.m.MinChunkSize() != 0 {
+		numSegments++
+	}
+	if (offset+int64(n))%f.m.MinChunkSize() != 0 {
+		numSegments++
+	}
+	return numSegments * merkle.SegmentSize
 }
 
 func (fs *PseudoFS) canFit(f *openMetaFile, shardSize int) bool {
@@ -745,6 +723,37 @@ func (fs *PseudoFS) canFit(f *openMetaFile, shardSize int) bool {
 	return true
 }
 
+func mergePendingWrites(pendingWrites []pendingWrite, pw pendingWrite) []pendingWrite {
+	// seek to overlap
+	var i int
+	for i < len(pendingWrites) && pendingWrites[i].end() < pw.offset {
+		i++
+	}
+	newPending := pendingWrites[:i]
+
+	// combine writes that overlap with pw into a single write; p overwrites
+	// the data in existing writes
+	for i < len(pendingWrites) && pendingWrites[i].offset < pw.end() {
+		if w := pendingWrites[i]; w.offset < pw.offset {
+			// this should only happen once
+			pw = pendingWrite{
+				data:   append(w.data[:pw.offset-w.offset], pw.data...),
+				offset: w.offset,
+			}
+			if w.end() > pw.end() {
+				pw.data = pw.data[:len(w.data)]
+			}
+		} else if w.end() > pw.end() {
+			pw.data = append(pw.data, w.data[pw.end()-w.offset:]...)
+		}
+		i++
+	}
+	newPending = append(newPending, pw)
+
+	// add later writes
+	return append(newPending, pendingWrites[i:]...)
+}
+
 func (fs *PseudoFS) fdWrite(fd int, p []byte) (int, error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -762,42 +771,17 @@ func (fs *PseudoFS) fdWrite(fd int, p []byte) (int, error) {
 
 	// if appending p would overflow the uncommitted sectors, flush them to
 	// hosts before continuing
-	if !fs.canFit(f, f.calcShardSize(f.offset, len(p))) {
+	if shardSize := f.calcShardSize(f.offset, len(p)); !fs.canFit(f, shardSize) {
 		if err := fs.flushSectors(); err != nil {
 			return 0, err
 		}
 	}
 
 	// merge this write with the other pending writes
-
-	// seek to overlap
-	var i int
-	for i < len(f.pendingWrites) && f.pendingWrites[i].end() < f.offset {
-		i++
-	}
-	newPending := f.pendingWrites[:i]
-
-	pw := pendingWrite{
+	f.pendingWrites = mergePendingWrites(f.pendingWrites, pendingWrite{
 		data:   append([]byte(nil), p...),
 		offset: f.offset,
-	}
-	// combine writes that overlap with pw into a single write; p overwrites
-	// the data in existing writes
-	for i < len(f.pendingWrites) && f.pendingWrites[i].offset < pw.end() {
-		if w := f.pendingWrites[i]; w.offset < pw.offset {
-			pw = pendingWrite{
-				data:   append(w.data[:pw.offset-w.offset], pw.data...),
-				offset: w.offset,
-			}
-		} else if w.end() > pw.end() {
-			pw.data = append(pw.data, w.data[pw.end()-w.offset:]...)
-		}
-		i++
-	}
-	newPending = append(newPending, pw)
-
-	// add later writes
-	f.pendingWrites = append(newPending, f.pendingWrites[i:]...)
+	})
 
 	// update metadata
 	f.offset += int64(len(p))
@@ -868,8 +852,30 @@ func (fs *PseudoFS) fdWriteAt(fd int, p []byte, off int64) (int, error) {
 	} else if d != nil {
 		return d.WriteAt(p, off)
 	}
+
+	if int64(len(p)) > f.m.MaxChunkSize() {
+		// TODO: handle large writes
+		return 0, errors.New("cannot handle writes larger than max chunk size")
+	}
+
+	// TODO: we use the same overflow calculation as Write, which is wasteful;
+	// if we overwrite another pendingWrite, we might not overflow.
+	if shardSize := f.calcShardSize(off, len(p)); !fs.canFit(f, shardSize) {
+		if err := fs.flushSectors(); err != nil {
+			return 0, err
+		}
+	}
+
+	// merge this write with the other pending writes
+	f.pendingWrites = mergePendingWrites(f.pendingWrites, pendingWrite{
+		data:   append([]byte(nil), p...),
+		offset: off,
+	})
+
+	// update metadata
 	f.m.ModTime = time.Now()
-	panic("unimplemented")
+
+	return len(p), nil
 }
 
 func (fs *PseudoFS) fdTruncate(fd int, size int64) error {
@@ -880,41 +886,44 @@ func (fs *PseudoFS) fdTruncate(fd int, size int64) error {
 		return errors.New("invalid file descriptor")
 	} else if d != nil {
 		return d.Truncate(size)
+	} else if size > f.filesize() {
+		return errors.New("new size must not exceed current size")
 	}
-
-	f.m.Filesize = size
 
 	// trim any pending writes
 	newPending := f.pendingWrites[:0]
 	for _, pw := range f.pendingWrites {
-		if pw.offset >= f.m.Filesize {
+		if pw.offset >= size {
 			continue // remove
-		} else if pw.offset+int64(len(pw.data)) > f.m.Filesize {
-			pw.data = pw.data[:f.m.Filesize-pw.offset]
+		} else if pw.offset+int64(len(pw.data)) > size {
+			pw.data = pw.data[:size-pw.offset]
 		}
 		newPending = append(newPending, pw)
 	}
 	f.pendingWrites = newPending
 
-	// update shards
-	for shardIndex, slices := range f.shards {
-		var n int64
-		for i, s := range slices {
-			sliceSize := int64(s.NumSegments) * f.m.MinChunkSize()
-			if n+sliceSize > f.m.Filesize {
-				// trim number of segments
-				s.NumSegments -= uint32(n+sliceSize-f.m.Filesize) / uint32(f.m.MinChunkSize())
-				if s.NumSegments == 0 {
-					slices = slices[:i]
-				} else {
-					slices[i] = s
-					slices = slices[:i+1]
+	if size < f.m.Filesize {
+		f.m.Filesize = size
+		// update shards
+		for shardIndex, slices := range f.shards {
+			var n int64
+			for i, s := range slices {
+				sliceSize := int64(s.NumSegments) * f.m.MinChunkSize()
+				if n+sliceSize > f.m.Filesize {
+					// trim number of segments
+					s.NumSegments -= uint32(n+sliceSize-f.m.Filesize) / uint32(f.m.MinChunkSize())
+					if s.NumSegments == 0 {
+						slices = slices[:i]
+					} else {
+						slices[i] = s
+						slices = slices[:i+1]
+					}
+					break
 				}
-				break
+				n += sliceSize
 			}
-			n += sliceSize
+			f.shards[shardIndex] = slices
 		}
-		f.shards[shardIndex] = slices
 	}
 
 	f.m.ModTime = time.Now()
@@ -1092,11 +1101,11 @@ func (pf PseudoFile) WriteAt(p []byte, off int64) (int, error) {
 }
 
 // Seek implements io.Seeker.
-func (pf PseudoFile) Seek(o int64, w int) (int64, error) {
+func (pf PseudoFile) Seek(offset int64, whence int) (int64, error) {
 	if pf.appendOnly() {
 		return 0, ErrAppendOnly
 	}
-	return pf.fs.fdSeek(pf.fd, o, w)
+	return pf.fs.fdSeek(pf.fd, offset, whence)
 }
 
 // Name returns the file's name, as passed to OpenFile.

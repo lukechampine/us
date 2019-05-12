@@ -314,7 +314,6 @@ func TestFileSystemRandomAccess(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
-	t.Skip("WriteAt not implemented")
 
 	fs, cleanup := createTestingFS(t)
 	defer cleanup()
@@ -326,71 +325,56 @@ func TestFileSystemRandomAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// perform three overlapping writes
-	data1 := fastrand.Bytes(256)
-	data2 := fastrand.Bytes(256)
-	data3 := fastrand.Bytes(256)
-	if _, err := pf.WriteAt(data1, 0); err != nil {
-		t.Fatal(err)
-	} else if _, err := pf.WriteAt(data2, 250); err != nil {
-		t.Fatal(err)
-	} else if _, err := pf.WriteAt(data3, 129); err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, 506)
-	copy(data, data1)
-	copy(data[250:], data2)
-	copy(data[129:], data3)
-
-	// truncate
-	data = data[:len(data)-13]
-	if err := pf.Truncate(int64(len(data))); err != nil {
-		t.Fatal(err)
-	}
-
-	// close file
-	if err := pf.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	// stat file
-	stat, err := fs.Stat(metaName)
-	if err != nil {
-		t.Fatal(err)
-	} else if stat.Name() != metaName {
-		t.Error("incorrect name")
-	} else if stat.Size() != int64(len(data)) {
-		t.Error("incorrect size")
-	} else if stat.Mode() != 0666 {
-		t.Error("incorrect mode")
-	}
-
-	// open file for reading
-	pf, err = fs.Open("foo")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pf.Close()
-
-	// read and seek within file
-	p := make([]byte, stat.Size())
-	checkRead := func(d []byte) {
+	checkContents := func(str string) {
 		t.Helper()
-		if n, err := pf.Read(p[:len(d)]); err != nil {
+		p := make([]byte, len(str))
+		if _, err := pf.ReadAt(p, 0); err != nil {
 			t.Fatal(err)
-		} else if !bytes.Equal(p[:n], d) {
-			if n > 50 {
-				n = 50
-			}
-			t.Log(p[:n])
-			t.Log(d[:n])
-			t.Error("data from Read does not match actual data")
+		} else if string(p) != str {
+			t.Errorf("expected %q, got %q", str, string(p))
 		}
 	}
-	checkRead(data[:10])
-	checkRead(data[10:150])
-	checkRead(data[150:256])
-	checkRead(data[256:506])
+
+	// perform initial write
+	if _, err := pf.Write([]byte("one two three four five")); err != nil {
+		t.Fatal(err)
+	} else if err := pf.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	checkContents("one two three four five")
+
+	// overwrite every other word
+	if _, err := pf.WriteAt([]byte("ten"), 0); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.WriteAt([]byte("seven"), 8); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.WriteAt([]byte("nine"), 19); err != nil {
+		t.Fatal(err)
+	}
+	checkContents("ten two seven four nine")
+
+	// sync and check again
+	if err := pf.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	checkContents("ten two seven four nine")
+
+	// write a full chunk, then a few more overlapping writes, using Seek
+	// instead of WriteAt
+	data := fastrand.Bytes(renterhost.SectorSize * 2)
+	if _, err := pf.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.Write(data); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.Seek(renterhost.SectorSize, io.SeekStart); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.Write(data[:1024]); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.Seek(-10000, io.SeekCurrent); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.Write(data[:20000]); err != nil {
+		t.Fatal(err)
+	}
 
 	// remove file
 	if err := pf.Close(); err != nil {
