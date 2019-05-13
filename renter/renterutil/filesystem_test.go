@@ -310,6 +310,109 @@ func TestFileSystemUploadDir(t *testing.T) {
 	}
 }
 
+func TestFileSystemLargeWrite(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	fs, cleanup := createTestingFS(t)
+	defer cleanup()
+
+	// create metafile
+	metaName := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	pf, err := fs.Create(metaName, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// write just over 1 sector
+	data := fastrand.Bytes(renterhost.SectorSize + 1)
+	if _, err = pf.Write(data); err != nil {
+		t.Fatal(err)
+	}
+
+	// check contents
+	p := make([]byte, len(data))
+	if _, err := pf.ReadAt(p, 0); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(p, data) {
+		t.Error("contents do not match data")
+	}
+
+	// sync and check again
+	if err := pf.Sync(); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.ReadAt(p, 0); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(p, data) {
+		t.Error("contents do not match data")
+	}
+
+	// close and cleanup
+	if err := pf.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.Remove(metaName); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFileSystemTruncate(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	fs, cleanup := createTestingFS(t)
+	defer cleanup()
+
+	// create metafile
+	metaName := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	pf, err := fs.Create(metaName, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// write some data
+	if _, err := pf.Write([]byte("one two three four five")); err != nil {
+		t.Fatal(err)
+	}
+	// extend with zeros via Truncate
+	if err := pf.Truncate(1000); err != nil {
+		t.Fatal(err)
+	}
+	// check size via Stat
+	if stat, err := pf.Stat(); err != nil {
+		t.Fatal(err)
+	} else if stat.Size() != 1000 {
+		t.Error("incorrect size")
+	}
+
+	// check contents
+	data := make([]byte, 1000)
+	copy(data, "one two three four five")
+	p := make([]byte, len(data))
+	if _, err := pf.ReadAt(p, 0); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(p, data) {
+		t.Error("contents do not match data")
+	}
+
+	// sync and check again
+	if err := pf.Sync(); err != nil {
+		t.Fatal(err)
+	} else if _, err := pf.ReadAt(p, 0); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(p, data) {
+		t.Error("contents do not match data")
+	}
+
+	// close and cleanup
+	if err := pf.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.Remove(metaName); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFileSystemRandomAccess(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
