@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"io"
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
@@ -142,13 +144,25 @@ func fileSystem(pfs *renterutil.PseudoFS, minShards int) *fuseFS {
 type metaFSFile struct {
 	nodefs.File
 	pf *renterutil.PseudoFile
+
+	mu      sync.Mutex
+	br      *bufio.Reader
+	lastOff int64
 }
 
 func (f *metaFSFile) Read(p []byte, off int64) (fuse.ReadResult, fuse.Status) {
-	n, err := f.pf.ReadAt(p, off)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.br == nil || off != f.lastOff {
+		stat, _ := f.pf.Stat()
+		sr := io.NewSectionReader(f.pf, off, stat.Size()-off)
+		f.br = bufio.NewReaderSize(sr, 1<<20) // 1 MB
+	}
+	n, err := f.br.Read(p)
 	if err != nil && err != io.EOF {
 		return nil, fuse.ENOENT
 	}
+	f.lastOff = off + int64(n)
 	return fuse.ReadResultData(p[:n]), fuse.OK
 }
 
