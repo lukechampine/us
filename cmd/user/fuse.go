@@ -14,7 +14,7 @@ import (
 	"lukechampine.com/us/renter/renterutil"
 )
 
-func mount(contractDir, metaDir, mountDir string) error {
+func mount(contractDir, metaDir, mountDir string, minShards int) error {
 	contracts, err := renter.LoadContracts(contractDir)
 	if err != nil {
 		return errors.Wrap(err, "could not load contracts")
@@ -27,7 +27,7 @@ func mount(contractDir, metaDir, mountDir string) error {
 		return err
 	}
 	pfs := renterutil.NewFileSystem(metaDir, contracts, c, currentHeight)
-	nfs := pathfs.NewPathNodeFs(fileSystem(pfs), nil)
+	nfs := pathfs.NewPathNodeFs(fileSystem(pfs, minShards), nil)
 	server, _, err := nodefs.MountRoot(mountDir, nfs.Root(), nil)
 	if err != nil {
 		return errors.Wrap(err, "could not mount")
@@ -39,12 +39,16 @@ func mount(contractDir, metaDir, mountDir string) error {
 	signal.Notify(sigChan, os.Interrupt)
 	<-sigChan
 	log.Println("Unmounting...")
+	if err := pfs.Close(); err != nil {
+		log.Println("Error during close:", err)
+	}
 	return server.Unmount()
 }
 
 type fuseFS struct {
 	pathfs.FileSystem
-	pfs *renterutil.PseudoFS
+	pfs       *renterutil.PseudoFS
+	minShards int
 }
 
 // GetAttr implements the GetAttr method of pathfs.FileSystem.
@@ -67,7 +71,7 @@ func (fs *fuseFS) GetAttr(name string, _ *fuse.Context) (*fuse.Attr, fuse.Status
 }
 
 // OpenDir implements the OpenDir method of pathfs.FileSystem.
-func (fs *fuseFS) OpenDir(name string, context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
+func (fs *fuseFS) OpenDir(name string, _ *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	dir, err := fs.pfs.Open(name)
 	if err != nil {
 		return nil, fuse.ENOENT
@@ -94,13 +98,10 @@ func (fs *fuseFS) OpenDir(name string, context *fuse.Context) ([]fuse.DirEntry, 
 	return entries, fuse.OK
 }
 
-// Open implements the Open method of pathfs.FileSystem.
-func (fs *fuseFS) Open(name string, flags uint32, context *fuse.Context) (file nodefs.File, code fuse.Status) {
-	if flags&fuse.O_ANYWRITE != 0 {
-		return nil, fuse.EPERM
-	}
-
-	pf, err := fs.pfs.Open(name)
+// Open implements pathfs.FileSystem.
+func (fs *fuseFS) Open(name string, flags uint32, _ *fuse.Context) (file nodefs.File, code fuse.Status) {
+	flags &= fuse.O_ANYWRITE | uint32(os.O_APPEND)
+	pf, err := fs.pfs.OpenFile(name, int(flags), 0, fs.minShards)
 	if err != nil {
 		return nil, fuse.ENOENT
 	}
@@ -110,10 +111,31 @@ func (fs *fuseFS) Open(name string, flags uint32, context *fuse.Context) (file n
 	}, fuse.OK
 }
 
-func fileSystem(pfs *renterutil.PseudoFS) *fuseFS {
+// Create implements pathfs.FileSystem.
+func (fs *fuseFS) Create(name string, flags uint32, mode uint32, _ *fuse.Context) (file nodefs.File, code fuse.Status) {
+	pf, err := fs.pfs.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_RDWR, os.FileMode(mode), fs.minShards)
+	if err != nil {
+		return nil, fuse.ENOENT
+	}
+	return &metaFSFile{
+		File: nodefs.NewDefaultFile(),
+		pf:   pf,
+	}, fuse.OK
+}
+
+// Unlink implements pathfs.FileSystem.
+func (fs *fuseFS) Unlink(name string, _ *fuse.Context) (code fuse.Status) {
+	if err := fs.pfs.RemoveAll(name); err != nil {
+		return fuse.ENOENT
+	}
+	return fuse.OK
+}
+
+func fileSystem(pfs *renterutil.PseudoFS, minShards int) *fuseFS {
 	return &fuseFS{
 		FileSystem: pathfs.NewDefaultFileSystem(),
 		pfs:        pfs,
+		minShards:  minShards,
 	}
 }
 
@@ -123,12 +145,34 @@ type metaFSFile struct {
 }
 
 func (f *metaFSFile) Read(p []byte, off int64) (fuse.ReadResult, fuse.Status) {
-	if _, err := f.pf.Seek(off, io.SeekStart); err != nil {
-		return nil, fuse.ENOENT
-	}
-	n, err := f.pf.Read(p)
+	n, err := f.pf.ReadAt(p, off)
 	if err != nil && err != io.EOF {
 		return nil, fuse.ENOENT
 	}
 	return fuse.ReadResultData(p[:n]), fuse.OK
+}
+
+func (f *metaFSFile) Write(p []byte, off int64) (written uint32, code fuse.Status) {
+	n, err := f.pf.WriteAt(p, off)
+	if err != nil {
+		return 0, fuse.ENOENT
+	}
+	return uint32(n), fuse.OK
+}
+
+func (f *metaFSFile) Flush() fuse.Status {
+	return fuse.OK
+}
+
+func (f *metaFSFile) Release() {
+	if err := f.pf.Close(); err != nil {
+		println("release:", err)
+	}
+}
+
+func (f *metaFSFile) Fsync(flags int) fuse.Status {
+	if err := f.pf.Sync(); err != nil {
+		return fuse.ENOENT
+	}
+	return fuse.OK
 }

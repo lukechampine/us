@@ -120,6 +120,25 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 	}
 	path += metafileExt
 
+	// first check open files
+	//
+	// TODO: make this much more robust
+	for fd, of := range fs.files {
+		if of.name == name {
+			of.closed = false
+			if flag&os.O_APPEND != 0 {
+				of.offset = of.filesize()
+			}
+			return &PseudoFile{
+				name:  name,
+				flags: flag,
+				fd:    fd,
+				fs:    fs,
+			}, nil
+		}
+	}
+
+	// no open file; create/open a metafile on disk
 	var index renter.MetaIndex
 	var shards [][]renter.SectorSlice
 	if flag == os.O_CREATE|os.O_TRUNC|os.O_RDWR {
@@ -134,6 +153,26 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 			index.Hosts = append(index.Hosts, hostKey)
 		}
 		shards = make([][]renter.SectorSlice, len(index.Hosts))
+	} else if flag == os.O_WRONLY|os.O_APPEND {
+		var err error
+		index, shards, err = renter.ReadMetaFileContents(path)
+		if err != nil {
+			return nil, errors.Wrapf(err, "open %v", name)
+		}
+		fs.files[fs.curFD] = &openMetaFile{
+			name:   name,
+			m:      index,
+			shards: shards,
+			offset: index.Filesize,
+		}
+		fs.curFD++
+		return &PseudoFile{
+			name:  name,
+			flags: flag,
+			fd:    fs.curFD - 1,
+			fs:    fs,
+		}, nil
+
 	} else if flag == os.O_RDONLY {
 		var err error
 		index, shards, err = renter.ReadMetaFileContents(path)
@@ -144,18 +183,11 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 		return nil, errors.New("unsupported flag combination")
 	}
 
-	f := &openMetaFile{
+	fs.files[fs.curFD] = &openMetaFile{
 		name:   name,
 		m:      index,
 		shards: shards,
 	}
-	// if the file is already open under another FD, inherit its pending writes
-	for _, of := range fs.files {
-		if of.name == name {
-			f.pendingWrites = of.pendingWrites
-		}
-	}
-	fs.files[fs.curFD] = f
 	fs.curFD++
 	return &PseudoFile{
 		name:  name,
@@ -244,6 +276,8 @@ func (fs *PseudoFS) Stat(name string) (os.FileInfo, error) {
 // Close closes the filesystem by flushing any uncommitted writes, closing any
 // open files, and terminating all active host sessions.
 func (fs *PseudoFS) Close() error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
 	if err := fs.flushSectors(); err != nil {
 		return err
 	}
@@ -387,8 +421,6 @@ func (pf PseudoFile) ReadAt(p []byte, off int64) (int, error) {
 func (pf PseudoFile) WriteAt(p []byte, off int64) (int, error) {
 	if !pf.writeable() {
 		return 0, ErrNotWriteable
-	} else if pf.appendOnly() {
-		return 0, ErrAppendOnly
 	}
 	pf.fs.mu.Lock()
 	defer pf.fs.mu.Unlock()
@@ -397,6 +429,9 @@ func (pf PseudoFile) WriteAt(p []byte, off int64) (int, error) {
 		return 0, errInvalidFileDescriptor
 	} else if d != nil {
 		return d.WriteAt(p, off)
+	}
+	if pf.appendOnly() && off != f.filesize() {
+		return 0, ErrAppendOnly
 	}
 	return pf.fs.fileWriteAt(f, p, off)
 }
@@ -456,6 +491,13 @@ func (pf PseudoFile) Readdir(n int) ([]os.FileInfo, error) {
 			name: strings.TrimSuffix(files[i].Name(), metafileExt),
 		}
 	}
+	for _, f := range pf.fs.files {
+		if filepath.Dir(filepath.Join(pf.fs.root, f.name)) == d.Name() {
+			info := pseudoFileInfo{name: filepath.Base(f.name), m: f.m}
+			info.m.Filesize = f.filesize()
+			files = append(files, info)
+		}
+	}
 	return files, err
 }
 
@@ -479,7 +521,16 @@ func (pf PseudoFile) Readdirnames(n int) ([]string, error) {
 	} else if d == nil {
 		return nil, errors.New("not a directory")
 	}
-	return d.Readdirnames(n)
+	dirnames, err := d.Readdirnames(n)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range pf.fs.files {
+		if filepath.Dir(filepath.Join(pf.fs.root, f.name)) == d.Name() {
+			dirnames = append(dirnames, filepath.Base(f.name))
+		}
+	}
+	return dirnames, nil
 }
 
 // Stat returns the FileInfo structure describing the file. If the file is a

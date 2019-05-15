@@ -347,6 +347,7 @@ func main() {
 	serveCmd := flagg.New("serve", serveUsage)
 	sAddr := serveCmd.String("addr", ":8080", "HTTP service address")
 	mountCmd := flagg.New("mount", mountUsage)
+	mountCmd.IntVar(&config.MinShards, "m", config.MinShards, "minimum number of shards required to download files")
 	convertCmd := flagg.New("convert", convertUsage)
 
 	cmd := flagg.Parse(flagg.Tree{
@@ -555,7 +556,7 @@ Define min_shards in your config file or supply the -m flag.`)
 			mountCmd.Usage()
 			return
 		}
-		err := mount(config.ContractsEnabled, args[0], args[1])
+		err := mount(config.ContractsEnabled, args[0], args[1], config.MinShards)
 		if err != nil {
 			log.Fatal(err)
 		}
