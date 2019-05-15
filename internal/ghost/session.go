@@ -50,7 +50,7 @@ func (h *Host) handleConn(conn net.Conn) error {
 		// modules.RPCLoopRenewContract: h.managedRPCLoopRenewContract,
 	}
 	for {
-		s.extendDeadline(60 * time.Second)
+		s.extendDeadline(time.Hour)
 		id, err := s.sess.ReadID()
 		if err == renterhost.ErrRenterClosed {
 			return nil
