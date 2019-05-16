@@ -122,11 +122,11 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 
 	// first check open files
 	//
-	// TODO: make this much more robust
+	// TODO: handle more flag combos here
 	for fd, of := range fs.files {
 		if of.name == name {
 			of.closed = false
-			if flag&os.O_APPEND != 0 {
+			if flag&os.O_APPEND == os.O_APPEND {
 				of.offset = of.filesize()
 			}
 			return &PseudoFile{
@@ -141,7 +141,16 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 	// no open file; create/open a metafile on disk
 	var index renter.MetaIndex
 	var shards [][]renter.SectorSlice
-	if flag == os.O_CREATE|os.O_TRUNC|os.O_RDWR {
+	if flag&os.O_CREATE == os.O_CREATE {
+		if flag&os.O_TRUNC == os.O_TRUNC {
+			// remove existing file
+			for fd, f := range fs.files {
+				if f.name == name && f.closed {
+					delete(fs.files, fd)
+					break
+				}
+			}
+		}
 		index = renter.MetaIndex{
 			Version:   renter.MetaFileVersion,
 			Mode:      perm,
@@ -153,41 +162,22 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 			index.Hosts = append(index.Hosts, hostKey)
 		}
 		shards = make([][]renter.SectorSlice, len(index.Hosts))
-	} else if flag == os.O_WRONLY|os.O_APPEND {
-		var err error
-		index, shards, err = renter.ReadMetaFileContents(path)
-		if err != nil {
-			return nil, errors.Wrapf(err, "open %v", name)
-		}
-		fs.files[fs.curFD] = &openMetaFile{
-			name:   name,
-			m:      index,
-			shards: shards,
-			offset: index.Filesize,
-		}
-		fs.curFD++
-		return &PseudoFile{
-			name:  name,
-			flags: flag,
-			fd:    fs.curFD - 1,
-			fs:    fs,
-		}, nil
-
-	} else if flag == os.O_RDONLY {
-		var err error
-		index, shards, err = renter.ReadMetaFileContents(path)
-		if err != nil {
-			return nil, errors.Wrapf(err, "open %v", name)
-		}
 	} else {
-		return nil, errors.New("unsupported flag combination")
+		var err error
+		index, shards, err = renter.ReadMetaFileContents(path)
+		if err != nil {
+			return nil, errors.Wrapf(err, "open %v", name)
+		}
 	}
-
-	fs.files[fs.curFD] = &openMetaFile{
+	of := &openMetaFile{
 		name:   name,
 		m:      index,
 		shards: shards,
 	}
+	if flag&os.O_APPEND == os.O_APPEND {
+		of.offset = index.Filesize
+	}
+	fs.files[fs.curFD] = of
 	fs.curFD++
 	return &PseudoFile{
 		name:  name,
@@ -199,8 +189,17 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 
 // Remove removes the named file or (empty) directory.
 func (fs *PseudoFS) Remove(name string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	// if the file is in fs.files and is closed, delete it
 	// TODO: delete remote sectors?
-	// TODO: how does this interact with open files?
+	for fd, f := range fs.files {
+		if f.name == name && f.closed {
+			delete(fs.files, fd)
+			break
+		}
+	}
+	// delete the directory or metafile on disk
 	path := fs.path(name)
 	if !isDir(path) {
 		path += metafileExt
@@ -212,8 +211,14 @@ func (fs *PseudoFS) Remove(name string) error {
 // can but returns the first error it encounters. If the path does not exist,
 // RemoveAll returns nil (no error).
 func (fs *PseudoFS) RemoveAll(path string) error {
+	// if the remove affects closed files in fs.files, delete them
 	// TODO: delete remote sectors?
-	// TODO: how does this interact with open files?
+	for fd, f := range fs.files {
+		if strings.HasPrefix(f.name, path) && f.closed {
+			delete(fs.files, fd)
+		}
+	}
+	// delete the directories and metafiles on disk
 	path = fs.path(path)
 	if !isDir(path) {
 		path += metafileExt
@@ -491,10 +496,17 @@ func (pf PseudoFile) Readdir(n int) ([]os.FileInfo, error) {
 			name: strings.TrimSuffix(files[i].Name(), metafileExt),
 		}
 	}
+outer:
 	for _, f := range pf.fs.files {
 		if filepath.Dir(filepath.Join(pf.fs.root, f.name)) == d.Name() {
 			info := pseudoFileInfo{name: filepath.Base(f.name), m: f.m}
 			info.m.Filesize = f.filesize()
+			for i := range files {
+				if files[i].Name() == info.Name() {
+					files[i] = info
+					continue outer
+				}
+			}
 			files = append(files, info)
 		}
 	}
