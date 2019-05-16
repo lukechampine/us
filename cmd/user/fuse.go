@@ -156,7 +156,11 @@ func (f *metaFSFile) Read(p []byte, off int64) (fuse.ReadResult, fuse.Status) {
 	if f.br == nil || off != f.lastOff {
 		stat, _ := f.pf.Stat()
 		sr := io.NewSectionReader(f.pf, off, stat.Size()-off)
-		f.br = bufio.NewReaderSize(sr, 1<<20) // 1 MB
+		if f.br == nil {
+			f.br = bufio.NewReaderSize(sr, 1<<20) // 1 MB
+		} else {
+			f.br.Reset(sr)
+		}
 	}
 	n, err := f.br.Read(p)
 	if err != nil && err != io.EOF {

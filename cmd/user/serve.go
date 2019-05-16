@@ -59,8 +59,11 @@ func (f *bufferedFile) Read(p []byte) (int, error) {
 }
 
 func (f *bufferedFile) Seek(offset int64, whence int) (int64, error) {
-	f.br = nil // have to throw away buffer after each seek
-	return f.PseudoFile.Seek(offset, whence)
+	n, err := f.PseudoFile.Seek(offset, whence)
+	if f.br != nil {
+		f.br.Reset(f.PseudoFile)
+	}
+	return n, err
 }
 
 type httpFS struct {
