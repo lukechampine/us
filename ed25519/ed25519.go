@@ -18,7 +18,7 @@ import (
 	"strconv"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"lukechampine.com/us/internal/ed25519/internal/edwards25519"
+	"lukechampine.com/us/ed25519/internal/edwards25519"
 )
 
 const (

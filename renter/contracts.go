@@ -8,8 +8,8 @@ import (
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/hostdb"
-	"lukechampine.com/us/internal/ed25519"
 	"lukechampine.com/us/renter/proto"
 )
 

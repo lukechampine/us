@@ -7,7 +7,7 @@ import (
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/internal/ed25519"
+	"lukechampine.com/us/ed25519"
 )
 
 const (

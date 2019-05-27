@@ -10,7 +10,7 @@ import (
 	mnemonics "gitlab.com/NebulousLabs/entropy-mnemonics"
 	"gitlab.com/NebulousLabs/fastrand"
 	"golang.org/x/crypto/blake2b"
-	"lukechampine.com/us/internal/ed25519"
+	"lukechampine.com/us/ed25519"
 )
 
 // A Seed generates addresses deterministically from some initial entropy.

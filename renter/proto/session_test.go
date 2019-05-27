@@ -10,7 +10,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/fastrand"
-	"lukechampine.com/us/internal/ed25519"
+	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/internal/ghost"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"

@@ -8,8 +8,8 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/hostdb"
-	"lukechampine.com/us/internal/ed25519"
 )
 
 type (
