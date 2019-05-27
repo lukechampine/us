@@ -16,11 +16,12 @@ import (
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/node/api/client"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/cmd/walrus/api"
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/walrus/api"
 )
 
 var errNoHostAnnouncement = errors.New("host announcement not found")
+var errAmbiguousPrefix = errors.New("ambiguous host prefix")
 
 // SiadClient wraps the siad API client. It satisfies the proto.Wallet,
 // proto.TransactionPool, and renter.HostKeyResolver interfaces. The
@@ -91,14 +92,30 @@ func (c *SiadClient) UnlockConditions(addr types.UnlockHash) (types.UnlockCondit
 
 // HostDB
 
-// Hosts returns the public keys of every host that has announced on the blockchain.
-func (c *SiadClient) Hosts() ([]hostdb.HostPublicKey, error) {
-	hdag, err := c.siad.HostDbAllGet()
-	hosts := make([]hostdb.HostPublicKey, len(hdag.Hosts))
-	for i, h := range hdag.Hosts {
-		hosts[i] = hostdb.HostPublicKey(h.PublicKeyString)
+// LookupHost returns the host public key matching the specified prefix.
+func (c *SiadClient) LookupHost(prefix string) (hostdb.HostPublicKey, error) {
+
+	if !strings.HasPrefix(prefix, "ed25519:") {
+		prefix = "ed25519:" + prefix
 	}
-	return hosts, err
+	hdag, err := c.siad.HostDbAllGet()
+	if err != nil {
+		return "", err
+	}
+	var hpk hostdb.HostPublicKey
+	for i := range hdag.Hosts {
+		key := hostdb.HostPublicKey(hdag.Hosts[i].PublicKeyString)
+		if strings.HasPrefix(string(key), prefix) {
+			if hpk != "" {
+				return "", errors.New("ambiguous pubkey")
+			}
+			hpk = key
+		}
+	}
+	if hpk == "" {
+		return "", errors.New("no host with that pubkey")
+	}
+	return hpk, nil
 }
 
 // ResolveHostKey resolves a host public key to that host's most recently
@@ -184,6 +201,22 @@ func (c *SHARDClient) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAd
 	}
 
 	return ha.NetAddress, err
+}
+
+// LookupHost returns the host public key matching the specified prefix.
+func (c *SHARDClient) LookupHost(prefix string) (hostdb.HostPublicKey, error) {
+	var ha modules.HostAnnouncement
+	var sig crypto.Signature
+	err := c.req("/host/"+prefix, func(resp *http.Response) error {
+		if resp.ContentLength == 0 {
+			return errNoHostAnnouncement
+		}
+		return encoding.NewDecoder(resp.Body, encoding.DefaultAllocLimit).DecodeAll(&ha, &sig)
+	})
+	if err != nil {
+		return "", err
+	}
+	return hostdb.HostPublicKey(ha.PublicKey.String()), nil
 }
 
 // NewSHARDClient returns a SHARDClient that communicates with the SHARD

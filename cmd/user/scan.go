@@ -3,12 +3,10 @@ package main
 import (
 	"fmt"
 	"math/big"
-	"strings"
 	"time"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/hostdb"
 )
 
 func currencyUnits(c types.Currency) string {
@@ -31,24 +29,6 @@ func currencyUnits(c types.Currency) string {
 	return fmt.Sprintf("%.4g %s", res, unit)
 }
 
-func lookupHost(prefix string, hosts []hostdb.HostPublicKey) (pubkey hostdb.HostPublicKey, err error) {
-	if !strings.HasPrefix(prefix, "ed25519:") {
-		prefix = "ed25519:" + prefix
-	}
-	for _, key := range hosts {
-		if strings.HasPrefix(string(key), prefix) {
-			if pubkey != "" {
-				return "", errors.New("ambiguous pubkey")
-			}
-			pubkey = key
-		}
-	}
-	if pubkey == "" {
-		return "", errors.New("no host with that pubkey")
-	}
-	return
-}
-
 func scan(hostKeyPrefix string, bytes uint64, duration types.BlockHeight, downloads float64) error {
 	c := makeClient()
 
@@ -60,11 +40,7 @@ func scan(hostKeyPrefix string, bytes uint64, duration types.BlockHeight, downlo
 	if err != nil {
 		return errors.Wrap(err, "could not estimate transaction fee")
 	}
-	hosts, err := c.Hosts()
-	if err != nil {
-		return errors.Wrap(err, "could not lookup host")
-	}
-	hostKey, err := lookupHost(hostKeyPrefix, hosts)
+	hostKey, err := c.LookupHost(hostKeyPrefix)
 	if err != nil {
 		return errors.Wrap(err, "could not lookup host")
 	}

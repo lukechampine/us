@@ -136,11 +136,7 @@ func form(hostKeyPrefix string, funds types.Currency, end string, filename strin
 	if err := checkCreate(filename); err != nil {
 		return err
 	}
-	hosts, err := c.Hosts()
-	if err != nil {
-		return errors.Wrap(err, "could not lookup host")
-	}
-	hostKey, err := lookupHost(hostKeyPrefix, hosts)
+	hostKey, err := c.LookupHost(hostKeyPrefix)
 	if err != nil {
 		return errors.Wrap(err, "could not lookup host")
 	}

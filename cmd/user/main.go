@@ -258,6 +258,7 @@ func check(ctx string, err error) {
 type limitedClient interface {
 	Synced() (bool, error)
 	ChainHeight() (types.BlockHeight, error)
+	LookupHost(prefix string) (hostdb.HostPublicKey, error)
 	renter.HostKeyResolver
 }
 
@@ -265,7 +266,6 @@ type fullClient interface {
 	limitedClient
 	proto.Wallet
 	proto.TransactionPool
-	Hosts() ([]hostdb.HostPublicKey, error)
 }
 
 type walrusSHARD struct {
