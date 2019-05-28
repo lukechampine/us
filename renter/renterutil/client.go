@@ -20,7 +20,6 @@ import (
 )
 
 var errNoHostAnnouncement = errors.New("host announcement not found")
-var errAmbiguousPrefix = errors.New("ambiguous host prefix")
 
 // SiadClient wraps the siad API client. It satisfies the proto.Wallet,
 // proto.TransactionPool, and renter.HostKeyResolver interfaces. The
