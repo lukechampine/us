@@ -179,7 +179,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, contract Contra
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 0,
-		Signature:      contract.Key().SignHash(crypto.HashObject(initRevision)),
+		Signature:      contract.Key().SignHash(renterhost.HashRevision(initRevision)),
 	}
 
 	// Send signatures.

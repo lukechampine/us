@@ -193,7 +193,7 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 0,
-		Signature:      key.SignHash(crypto.HashObject(initRevision)),
+		Signature:      key.SignHash(renterhost.HashRevision(initRevision)),
 	}
 
 	// Send signatures.

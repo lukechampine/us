@@ -78,7 +78,7 @@ func (s *Session) Lock(contract ContractEditor) error {
 	}
 	s.sess.SetChallenge(resp.NewChallenge)
 	// verify claimed revision
-	revHash := crypto.HashObject(resp.Revision)
+	revHash := renterhost.HashRevision(resp.Revision)
 	if !contract.Key().PublicKey().VerifyHash(revHash, resp.Signatures[0].Signature) {
 		return errors.New("renter's signature on claimed revision is invalid")
 	} else if !s.host.PublicKey.VerifyHash(revHash, resp.Signatures[1].Signature) {
@@ -153,7 +153,7 @@ func (s *Session) SectorRoots(offset, n int) ([]crypto.Hash, error) {
 		NewRevisionNumber:    rev.NewRevisionNumber,
 		NewValidProofValues:  newValid,
 		NewMissedProofValues: newMissed,
-		Signature:            s.contract.Key().SignHash(crypto.HashObject(rev)),
+		Signature:            s.contract.Key().SignHash(renterhost.HashRevision(rev)),
 	}
 	var resp renterhost.RPCSectorRootsResponse
 	if err := s.call(renterhost.RPCSectorRootsID, req, &resp); err != nil {
@@ -199,7 +199,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	// construct new revision
 	rev.NewRevisionNumber++
 	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
-	renterSig := s.contract.Key().SignHash(crypto.HashObject(rev))
+	renterSig := s.contract.Key().SignHash(renterhost.HashRevision(rev))
 
 	// send request
 	s.extendDeadline(60*time.Second + time.Duration(bandwidth)/time.Microsecond)
@@ -359,7 +359,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) error {
 	rev.NewFileSize = newFileSize
 	rev.NewFileMerkleRoot = newRoot
 	renterSig := &renterhost.RPCWriteResponse{
-		Signature: s.contract.Key().SignHash(crypto.HashObject(rev)),
+		Signature: s.contract.Key().SignHash(renterhost.HashRevision(rev)),
 	}
 	if err := s.sess.WriteResponse(renterSig, nil); err != nil {
 		return err

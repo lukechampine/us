@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"golang.org/x/crypto/blake2b"
 )
 
 var (
@@ -1213,4 +1214,15 @@ func (resp *loopKeyExchangeResponse) readFrom(r io.Reader) error {
 	resp.Signature = buf[8+32:][:64]
 	copy(resp.Cipher[:], buf[8+32+64:])
 	return nil
+}
+
+// HashRevision hashes a FileContractRevision. This is the hash signed by the
+// renter and host during revision negotiation.
+func HashRevision(rev types.FileContractRevision) crypto.Hash {
+	or := (*objFileContractRevision)(&rev)
+	var b objBuffer
+	b.buf = *bytes.NewBuffer(make([]byte, 0, 1024))
+	b.grow(or.marshalledSize()) // just in case 1024 is too small
+	or.marshalBuffer(&b)
+	return blake2b.Sum256(b.bytes())
 }
