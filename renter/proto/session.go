@@ -77,6 +77,13 @@ func (s *Session) Lock(contract ContractEditor) error {
 		return err
 	}
 	s.sess.SetChallenge(resp.NewChallenge)
+	// verify claimed revision
+	revHash := crypto.HashObject(resp.Revision)
+	if !contract.Key().PublicKey().VerifyHash(revHash, resp.Signatures[0].Signature) {
+		return errors.New("renter's signature on claimed revision is invalid")
+	} else if !s.host.PublicKey.VerifyHash(revHash, resp.Signatures[1].Signature) {
+		return errors.New("host's signature on claimed revision is invalid")
+	}
 	rev := ContractRevision{Revision: resp.Revision}
 	copy(rev.Signatures[:], resp.Signatures)
 	if err := contract.SetRevision(rev); err != nil {
