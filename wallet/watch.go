@@ -124,6 +124,21 @@ func (w *WatchOnlyWallet) BlockRewards(n int) []BlockReward {
 	return w.store.BlockRewards(n)
 }
 
+// FileContracts returns the file contracts tracked by the wallet.
+func (w *WatchOnlyWallet) FileContracts(n int) []FileContract {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.store.FileContracts(n)
+}
+
+// FileContractHistory returns the set of revisions made to the specified
+// contract.
+func (w *WatchOnlyWallet) FileContractHistory(id types.FileContractID) []FileContract {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.store.FileContractHistory(id)
+}
+
 // Transactions returns the IDs of the n most recent transactions in the
 // blockchain that are relevant to the wallet, or fewer if less than n such
 // transactions exist. If n < 0, all such transactions are returned. The IDs are

@@ -36,6 +36,9 @@ var (
 	// bucketBlockRewards contains a list of BlockRewards, sorted by insertion date.
 	bucketBlockRewards = []byte("bucketBlockRewards")
 
+	// bucketFileContracts contains a list of FileContracts, sorted by insertion date.
+	bucketFileContracts = []byte("bucketFileContracts")
+
 	// bucketMemos maps TransactionIDs to memos.
 	bucketMemos = []byte("bucketMemos")
 
@@ -53,6 +56,7 @@ var (
 		bucketAddrs,
 		bucketOutputs,
 		bucketBlockRewards,
+		bucketFileContracts,
 		bucketMemos,
 		bucketTxns,
 		bucketTxnsAddrIndex,
@@ -104,6 +108,19 @@ func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusC
 				}
 			}
 		}
+		if len(reverted.FileContracts) > 0 {
+			for i := range reverted.FileContracts {
+				c := tx.Bucket(bucketFileContracts).Cursor()
+				for k, v := c.Last(); k != nil; k, v = c.Prev() {
+					var fc FileContract
+					encoding.Unmarshal(v, &fc)
+					if fc.ID == reverted.FileContracts[i].ID && fc.RevisionNumber == reverted.FileContracts[i].RevisionNumber {
+						tx.Bucket(bucketFileContracts).Delete(k)
+						break
+					}
+				}
+			}
+		}
 
 		for _, txn := range reverted.Transactions {
 			txid := txn.ID()
@@ -142,6 +159,15 @@ func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusC
 			for _, br := range applied.BlockRewards {
 				binary.BigEndian.PutUint64(seqBytes, seq)
 				tx.Bucket(bucketBlockRewards).Put(seqBytes, encoding.Marshal(br))
+				seq++
+			}
+		}
+		if len(applied.FileContracts) > 0 {
+			seq, _ := tx.Bucket(bucketFileContracts).NextSequence()
+			seqBytes := make([]byte, 8)
+			for _, fc := range applied.FileContracts {
+				binary.BigEndian.PutUint64(seqBytes, seq)
+				tx.Bucket(bucketFileContracts).Put(seqBytes, encoding.Marshal(fc))
 				seq++
 			}
 		}
@@ -213,6 +239,36 @@ func (s *BoltDBStore) BlockRewards(n int) (brs []BlockReward) {
 			var br BlockReward
 			encoding.Unmarshal(v, &br)
 			brs = append(brs, br)
+		}
+		return nil
+	})
+	return
+}
+
+// FileContracts implements Store.
+func (s *BoltDBStore) FileContracts(n int) (fcs []FileContract) {
+	s.view(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketFileContracts).Cursor()
+		for k, v := c.Last(); k != nil && len(fcs) != n; k, v = c.Prev() {
+			var fc FileContract
+			encoding.Unmarshal(v, &fc)
+			fcs = append(fcs, fc)
+		}
+		return nil
+	})
+	return
+}
+
+// FileContractHistory implements Store.
+func (s *BoltDBStore) FileContractHistory(id types.FileContractID) (history []FileContract) {
+	s.view(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketFileContracts).Cursor()
+		for k, v := c.Last(); k != nil; k, v = c.Prev() {
+			var fc FileContract
+			encoding.Unmarshal(v, &fc)
+			if fc.ID == id {
+				history = append(history, fc)
+			}
 		}
 		return nil
 	})

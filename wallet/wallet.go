@@ -41,6 +41,8 @@ type Store interface {
 	BlockRewards(n int) []BlockReward
 	ConsensusChangeID() modules.ConsensusChangeID
 	ChainHeight() types.BlockHeight
+	FileContracts(n int) []FileContract
+	FileContractHistory(id types.FileContractID) []FileContract
 	LimboOutputs() []LimboOutput
 	MarkSpent(id types.SiacoinOutputID, spent bool)
 	Memo(txid types.TransactionID) []byte
@@ -77,6 +79,7 @@ type ProcessedConsensusChange struct {
 	Transactions        []types.Transaction
 	AddressTransactions map[types.UnlockHash][]types.TransactionID
 	BlockRewards        []BlockReward
+	FileContracts       []FileContract
 	BlockCount          int
 	CCID                modules.ConsensusChangeID
 }
@@ -217,4 +220,21 @@ func (br BlockReward) MarshalSia(w io.Writer) error {
 // UnmarshalSia implements encoding.SiaUnmarshaler.
 func (br *BlockReward) UnmarshalSia(r io.Reader) error {
 	return encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&br.UnspentOutput, &br.Timelock)
+}
+
+// A FileContract is an initial or revised file contract.
+type FileContract struct {
+	types.FileContract
+	UnlockConditions types.UnlockConditions
+	ID               types.FileContractID
+}
+
+// MarshalSia implements encoding.SiaMarshaler.
+func (fc FileContract) MarshalSia(w io.Writer) error {
+	return encoding.NewEncoder(w).EncodeAll(fc.FileContract, fc.UnlockConditions, fc.ID)
+}
+
+// UnmarshalSia implements encoding.SiaUnmarshaler.
+func (fc *FileContract) UnmarshalSia(r io.Reader) error {
+	return encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&fc.FileContract, &fc.UnlockConditions, &fc.ID)
 }

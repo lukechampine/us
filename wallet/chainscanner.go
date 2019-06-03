@@ -52,6 +52,49 @@ func (cs ChainScanner) ProcessConsensusChange(cc modules.ConsensusChange) {
 					pcc.AddressTransactions[addr] = append(pcc.AddressTransactions[addr], txid)
 				}
 				pcc.Transactions = append(pcc.Transactions, txn)
+
+				for i, fc := range txn.FileContracts {
+					if cs.relevantFileContract(fc.ValidProofOutputs, fc.MissedProofOutputs) {
+						pcc.FileContracts = append(pcc.FileContracts, FileContract{
+							FileContract:     fc,
+							UnlockConditions: types.UnlockConditions{}, // unknown
+							ID:               txn.FileContractID(uint64(i)),
+						})
+					}
+				}
+				for _, fcr := range txn.FileContractRevisions {
+					if cs.relevantFileContract(fcr.NewValidProofOutputs, fcr.NewMissedProofOutputs) {
+						// locate payout in cc (FileContractRevision doesn't
+						// contain the Payout field)
+						//
+						// NOTE: we don't want to take the entire FileContract
+						// from cc.FileContractDiffs, because it's hard to be
+						// sure that we'd be taking the correct revision (since
+						// the diff aggregates across all blocks in the cc).
+						var payout types.Currency
+						for _, diff := range cc.FileContractDiffs {
+							if diff.ID == fcr.ParentID {
+								payout = diff.FileContract.Payout
+								break
+							}
+						}
+						pcc.FileContracts = append(pcc.FileContracts, FileContract{
+							FileContract: types.FileContract{
+								FileSize:           fcr.NewFileSize,
+								FileMerkleRoot:     fcr.NewFileMerkleRoot,
+								WindowStart:        fcr.NewWindowStart,
+								WindowEnd:          fcr.NewWindowEnd,
+								Payout:             payout,
+								ValidProofOutputs:  fcr.NewValidProofOutputs,
+								MissedProofOutputs: fcr.NewMissedProofOutputs,
+								UnlockHash:         fcr.NewUnlockHash,
+								RevisionNumber:     fcr.NewRevisionNumber,
+							},
+							UnlockConditions: fcr.UnlockConditions,
+							ID:               fcr.ParentID,
+						})
+					}
+				}
 			}
 		}
 	}
@@ -111,11 +154,31 @@ func (cs *ChainScanner) relevantTxn(txn types.Transaction) map[types.UnlockHash]
 		processAddr(txn.SiafundOutputs[i].UnlockHash)
 	}
 	for i := range txn.FileContracts {
-		processAddr(txn.FileContracts[i].UnlockHash)
+		for _, sco := range txn.FileContracts[i].ValidProofOutputs {
+			processAddr(sco.UnlockHash)
+		}
+		for _, sco := range txn.FileContracts[i].MissedProofOutputs {
+			processAddr(sco.UnlockHash)
+		}
 	}
 	for i := range txn.FileContractRevisions {
-		processAddr(txn.FileContractRevisions[i].NewUnlockHash)
-		processAddr(txn.FileContractRevisions[i].UnlockConditions.UnlockHash())
+		for _, sco := range txn.FileContractRevisions[i].NewValidProofOutputs {
+			processAddr(sco.UnlockHash)
+		}
+		for _, sco := range txn.FileContractRevisions[i].NewMissedProofOutputs {
+			processAddr(sco.UnlockHash)
+		}
 	}
 	return addrs
+}
+
+func (cs *ChainScanner) relevantFileContract(valid, missed []types.SiacoinOutput) bool {
+	relevant := false
+	for _, sco := range valid {
+		relevant = relevant || cs.Owner.OwnsAddress(sco.UnlockHash)
+	}
+	for _, sco := range missed {
+		relevant = relevant || cs.Owner.OwnsAddress(sco.UnlockHash)
+	}
+	return relevant
 }

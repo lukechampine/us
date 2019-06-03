@@ -186,6 +186,21 @@ func (w *SeedWallet) BlockRewards(n int) []BlockReward {
 	return w.store.BlockRewards(n)
 }
 
+// FileContracts returns the file contracts tracked by the wallet.
+func (w *SeedWallet) FileContracts(n int) []FileContract {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.store.FileContracts(n)
+}
+
+// FileContractHistory returns the set of revisions made to the specified
+// contract.
+func (w *SeedWallet) FileContractHistory(id types.FileContractID) []FileContract {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.store.FileContractHistory(id)
+}
+
 // Transactions returns the IDs of the n most recent transactions in the
 // blockchain that are relevant to the SeedWallet, or fewer if less than n such
 // transactions exist. If n < 0, all such transactions are returned. The IDs are

@@ -9,8 +9,9 @@ import (
 
 // EphemeralStore implements Store in-memory.
 type EphemeralStore struct {
-	outputs      map[types.SiacoinOutputID]LimboOutput
-	blockrewards []BlockReward
+	outputs       map[types.SiacoinOutputID]LimboOutput
+	blockrewards  []BlockReward
+	filecontracts []FileContract
 
 	txns            map[types.TransactionID]types.Transaction
 	txnsAddrIndex   map[types.UnlockHash][]types.TransactionID
@@ -34,6 +35,15 @@ func (s *EphemeralStore) ApplyConsensusChange(reverted, applied ProcessedConsens
 			}
 		}
 	}
+	for _, fc := range reverted.FileContracts {
+		for i := range s.filecontracts {
+			if s.filecontracts[i].ID == fc.ID && s.filecontracts[i].RevisionNumber == fc.RevisionNumber {
+				s.filecontracts = append(s.filecontracts[:i], s.filecontracts[i+1:]...)
+				break
+			}
+		}
+	}
+
 	for _, txn := range reverted.Transactions {
 		txid := txn.ID()
 		delete(s.txns, txid)
@@ -63,6 +73,7 @@ func (s *EphemeralStore) ApplyConsensusChange(reverted, applied ProcessedConsens
 		}
 	}
 	s.blockrewards = append(s.blockrewards, applied.BlockRewards...)
+	s.filecontracts = append(s.filecontracts, applied.FileContracts...)
 	for _, txn := range applied.Transactions {
 		txid := txn.ID()
 		s.txns[txid] = txn
@@ -143,6 +154,25 @@ func (s *EphemeralStore) BlockRewards(n int) []BlockReward {
 		n = len(s.blockrewards)
 	}
 	return s.blockrewards[len(s.blockrewards)-n:]
+}
+
+// FileContracts implements Store.
+func (s *EphemeralStore) FileContracts(n int) []FileContract {
+	if n > len(s.filecontracts) || n < 0 {
+		n = len(s.filecontracts)
+	}
+	return s.filecontracts[len(s.filecontracts)-n:]
+}
+
+// FileContractHistory implements Store.
+func (s *EphemeralStore) FileContractHistory(id types.FileContractID) []FileContract {
+	var history []FileContract
+	for _, fc := range s.filecontracts {
+		if fc.ID == id {
+			history = append(history, fc)
+		}
+	}
+	return history
 }
 
 // SetMemo implements Store.

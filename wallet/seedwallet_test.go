@@ -14,9 +14,10 @@ import (
 )
 
 type mockCS struct {
-	subscriber modules.ConsensusSetSubscriber
-	dscos      map[types.BlockHeight][]modules.DelayedSiacoinOutputDiff
-	height     types.BlockHeight
+	subscriber    modules.ConsensusSetSubscriber
+	dscos         map[types.BlockHeight][]modules.DelayedSiacoinOutputDiff
+	filecontracts map[types.FileContractID]types.FileContract
+	height        types.BlockHeight
 }
 
 func (m *mockCS) ConsensusSetSubscribe(s modules.ConsensusSetSubscriber, ccid modules.ConsensusChangeID, cancel <-chan struct{}) error {
@@ -77,6 +78,83 @@ func (m *mockCS) mineBlock(fees types.Currency, addr types.UnlockHash) {
 	}
 	dsco := cc.DelayedSiacoinOutputDiffs[0]
 	m.dscos[dsco.MaturityHeight] = append(m.dscos[dsco.MaturityHeight], dsco)
+}
+
+func (m *mockCS) formContract(payout types.Currency, addr types.UnlockHash) {
+	b := types.Block{
+		Transactions: []types.Transaction{{
+			FileContracts: []types.FileContract{{
+				Payout: payout,
+				ValidProofOutputs: []types.SiacoinOutput{
+					{UnlockHash: addr, Value: payout},
+					{},
+				},
+				MissedProofOutputs: []types.SiacoinOutput{
+					{UnlockHash: addr, Value: payout},
+					{},
+				},
+			}},
+		}},
+	}
+	cc := modules.ConsensusChange{
+		AppliedBlocks: []types.Block{b},
+		FileContractDiffs: []modules.FileContractDiff{{
+			FileContract: b.Transactions[0].FileContracts[0],
+			ID:           b.Transactions[0].FileContractID(0),
+			Direction:    modules.DiffApply,
+		}},
+	}
+	fastrand.Read(cc.ID[:])
+	m.subscriber.ProcessConsensusChange(cc)
+	m.height++
+	if m.filecontracts == nil {
+		m.filecontracts = make(map[types.FileContractID]types.FileContract)
+	}
+	m.filecontracts[b.Transactions[0].FileContractID(0)] = b.Transactions[0].FileContracts[0]
+}
+
+func (m *mockCS) reviseContract(id types.FileContractID) {
+	fc := m.filecontracts[id]
+	delta := fc.ValidProofOutputs[0].Value.Div64(2)
+	fc.ValidProofOutputs[0].Value = fc.ValidProofOutputs[0].Value.Sub(delta)
+	fc.ValidProofOutputs[1].Value = fc.ValidProofOutputs[1].Value.Add(delta)
+	fc.MissedProofOutputs[0].Value = fc.MissedProofOutputs[0].Value.Sub(delta)
+	fc.MissedProofOutputs[1].Value = fc.MissedProofOutputs[1].Value.Add(delta)
+	fc.RevisionNumber++
+	b := types.Block{
+		Transactions: []types.Transaction{{
+			FileContractRevisions: []types.FileContractRevision{{
+				ParentID:              id,
+				NewFileSize:           fc.FileSize,
+				NewFileMerkleRoot:     fc.FileMerkleRoot,
+				NewWindowStart:        fc.WindowStart,
+				NewWindowEnd:          fc.WindowEnd,
+				NewValidProofOutputs:  fc.ValidProofOutputs,
+				NewMissedProofOutputs: fc.MissedProofOutputs,
+				NewUnlockHash:         fc.UnlockHash,
+				NewRevisionNumber:     fc.RevisionNumber,
+			}},
+		}},
+	}
+	cc := modules.ConsensusChange{
+		AppliedBlocks: []types.Block{b},
+		FileContractDiffs: []modules.FileContractDiff{
+			{
+				FileContract: m.filecontracts[id],
+				ID:           id,
+				Direction:    modules.DiffRevert,
+			},
+			{
+				FileContract: fc,
+				ID:           id,
+				Direction:    modules.DiffApply,
+			},
+		},
+	}
+	fastrand.Read(cc.ID[:])
+	m.subscriber.ProcessConsensusChange(cc)
+	m.height++
+	m.filecontracts[id] = fc
 }
 
 // sendSiacoins creates an unsigned transaction that sends amount siacoins to
@@ -281,6 +359,21 @@ func TestSeedWallet(t *testing.T) {
 	// reward should now be available as an UTXO
 	if len(w.ValuedInputs()) != 2 {
 		t.Fatal("should have two UTXOs")
+	}
+
+	// form a file contract
+	cs.formContract(types.SiacoinPrecision, addr)
+	fcs := w.FileContracts(-1)
+	if len(fcs) != 1 {
+		t.Fatal("should have one file contract")
+	}
+	if len(w.FileContractHistory(fcs[0].ID)) != 1 {
+		t.Fatal("contract history should contain only initial contract")
+	}
+	// revise the contract
+	cs.reviseContract(fcs[0].ID)
+	if len(w.FileContractHistory(fcs[0].ID)) != 2 {
+		t.Fatal("contract history should contain revision")
 	}
 }
 
