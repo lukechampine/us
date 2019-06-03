@@ -72,7 +72,7 @@ func (s *EphemeralStore) UnspentOutputs() []UnspentOutput {
 	outputs := make([]UnspentOutput, 0, len(s.outputs))
 	for _, o := range s.outputs {
 		// filter out outputs that are in limbo
-		if !o.LimboSince.Equal(notLimboTime) {
+		if o.LimboSince.Equal(notLimboTime) {
 			outputs = append(outputs, o.UnspentOutput)
 		}
 	}
@@ -121,7 +121,7 @@ func (s *EphemeralStore) LimboOutputs() []LimboOutput {
 	outputs := make([]LimboOutput, 0, len(s.outputs))
 	for _, o := range s.outputs {
 		// filter out outputs that are not in limbo
-		if o.LimboSince.Equal(notLimboTime) {
+		if !o.LimboSince.Equal(notLimboTime) {
 			outputs = append(outputs, o)
 		}
 	}
@@ -158,6 +158,7 @@ func NewEphemeralStore() *EphemeralStore {
 		outputs:       make(map[types.SiacoinOutputID]LimboOutput),
 		txns:          make(map[types.TransactionID]types.Transaction),
 		txnsAddrIndex: make(map[types.UnlockHash][]types.TransactionID),
+		memos:         make(map[types.TransactionID][]byte),
 	}
 }
 

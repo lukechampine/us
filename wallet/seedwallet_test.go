@@ -72,16 +72,22 @@ func sendSiacoins(amount types.Currency, dest types.UnlockHash, feePerByte types
 }
 
 func TestSeedWallet(t *testing.T) {
-	dir, err := ioutil.TempDir("", t.Name())
-	if err != nil {
-		t.Fatal(err)
+	// randomly use either the on-disk DB store or the in-memory ephemeral store
+	var store SeedStore
+	if fastrand.Intn(2) == 0 {
+		store = NewEphemeralSeedStore()
+	} else {
+		dir, err := ioutil.TempDir("", t.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		store, err = NewBoltDBStore(filepath.Join(dir, "wallet.db"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer store.(*BoltDBStore).Close()
+		defer os.RemoveAll(dir)
 	}
-	store, err := NewBoltDBStore(filepath.Join(dir, "wallet.db"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	defer os.RemoveAll(dir)
 
 	sm := NewSeedManager(Seed{}, store.SeedIndex())
 	w := NewSeedWallet(sm, store)
