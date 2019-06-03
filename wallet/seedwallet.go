@@ -142,7 +142,15 @@ func (w *SeedWallet) SignTransaction(txn *types.Transaction, toSign []int) error
 	return w.sm.SignTransaction(txn, toSign)
 }
 
-// ValuedInputs returns the spendable outputs tracked by the wallet.
+// UnspentOutputs returns the spendable outputs tracked by the wallet.
+func (w *SeedWallet) UnspentOutputs() []UnspentOutput {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.store.UnspentOutputs()
+}
+
+// ValuedInputs returns the spendable outputs tracked by the wallet along with
+// their UnlockConditions, for immediate use as inputs.
 func (w *SeedWallet) ValuedInputs() []ValuedInput {
 	w.mu.Lock()
 	defer w.mu.Unlock()
