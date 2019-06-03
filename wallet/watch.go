@@ -117,6 +117,13 @@ func (w *WatchOnlyWallet) Memo(txid types.TransactionID) []byte {
 	return w.store.Memo(txid)
 }
 
+// BlockRewards returns the block rewards tracked by the wallet.
+func (w *WatchOnlyWallet) BlockRewards(n int) []BlockReward {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.store.BlockRewards(n)
+}
+
 // Transactions returns the IDs of the n most recent transactions in the
 // blockchain that are relevant to the wallet, or fewer if less than n such
 // transactions exist. If n < 0, all such transactions are returned. The IDs are

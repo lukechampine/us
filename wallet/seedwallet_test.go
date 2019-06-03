@@ -15,6 +15,8 @@ import (
 
 type mockCS struct {
 	subscriber modules.ConsensusSetSubscriber
+	dscos      map[types.BlockHeight][]modules.DelayedSiacoinOutputDiff
+	height     types.BlockHeight
 }
 
 func (m *mockCS) ConsensusSetSubscribe(s modules.ConsensusSetSubscriber, ccid modules.ConsensusChangeID, cancel <-chan struct{}) error {
@@ -39,6 +41,42 @@ func (m *mockCS) sendTxn(txn types.Transaction) {
 	}
 	fastrand.Read(cc.ID[:])
 	m.subscriber.ProcessConsensusChange(cc)
+	m.height++
+}
+
+func (m *mockCS) mineBlock(fees types.Currency, addr types.UnlockHash) {
+	b := types.Block{
+		Transactions: []types.Transaction{{
+			MinerFees: []types.Currency{fees},
+		}},
+		MinerPayouts: []types.SiacoinOutput{
+			{UnlockHash: addr},
+		},
+	}
+	b.MinerPayouts[0].Value = b.CalculateSubsidy(0)
+	cc := modules.ConsensusChange{
+		AppliedBlocks: []types.Block{b},
+		DelayedSiacoinOutputDiffs: []modules.DelayedSiacoinOutputDiff{{
+			SiacoinOutput:  b.MinerPayouts[0],
+			ID:             b.MinerPayoutID(0),
+			MaturityHeight: types.MaturityDelay,
+		}},
+	}
+	for _, dsco := range m.dscos[m.height] {
+		cc.SiacoinOutputDiffs = append(cc.SiacoinOutputDiffs, modules.SiacoinOutputDiff{
+			Direction:     modules.DiffApply,
+			SiacoinOutput: dsco.SiacoinOutput,
+			ID:            dsco.ID,
+		})
+	}
+	fastrand.Read(cc.ID[:])
+	m.subscriber.ProcessConsensusChange(cc)
+	m.height++
+	if m.dscos == nil {
+		m.dscos = make(map[types.BlockHeight][]modules.DelayedSiacoinOutputDiff)
+	}
+	dsco := cc.DelayedSiacoinOutputDiffs[0]
+	m.dscos[dsco.MaturityHeight] = append(m.dscos[dsco.MaturityHeight], dsco)
 }
 
 // sendSiacoins creates an unsigned transaction that sends amount siacoins to
@@ -222,6 +260,27 @@ func TestSeedWallet(t *testing.T) {
 	limbo = w.LimboOutputs()
 	if len(limbo) != 1 {
 		t.Fatal("should have one UTXO in limbo")
+	}
+
+	// mine a block reward
+	cs.mineBlock(types.SiacoinPrecision, addr)
+	rewards := w.BlockRewards(-1)
+	if len(rewards) != 1 {
+		t.Fatal("should have one block reward")
+	} else if rewards[0].Timelock != types.MaturityDelay {
+		t.Fatalf("block reward's timelock should be %v, got %v", types.MaturityDelay, rewards[0].Timelock)
+	}
+	// reward should not be reported as an UTXO yet
+	if len(w.ValuedInputs()) != 1 {
+		t.Fatal("should have one UTXO")
+	}
+	// mine until the reward matures
+	for i := 0; i < int(types.MaturityDelay); i++ {
+		cs.mineBlock(types.ZeroCurrency, types.UnlockHash{})
+	}
+	// reward should now be available as an UTXO
+	if len(w.ValuedInputs()) != 2 {
+		t.Fatal("should have two UTXOs")
 	}
 }
 

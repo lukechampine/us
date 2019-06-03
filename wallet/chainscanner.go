@@ -34,6 +34,12 @@ func (cs ChainScanner) ProcessConsensusChange(cc modules.ConsensusChange) {
 			processOutput(diff, &reverted)
 		}
 	}
+	// NOTE: we do not process the DelayedSiacoinOutputDiffs in the same way as
+	// above, for two reasons. First, they don't carry enough information (e.g.
+	// for a BlockReward, we might want to know the ID of the block); second,
+	// they are "reverted" when they expire *or* are invalidated, whereas we
+	// want to continue storing block rewards/file contracts indefinitely and
+	// only revert them if they are invalidated.
 
 	processTxns := func(txns []types.Transaction, pcc *ProcessedConsensusChange) {
 		for _, txn := range txns {
@@ -49,11 +55,34 @@ func (cs ChainScanner) ProcessConsensusChange(cc modules.ConsensusChange) {
 			}
 		}
 	}
+	processMinerPayouts := func(b types.Block, pcc *ProcessedConsensusChange) {
+		for i, mp := range b.MinerPayouts {
+			if cs.Owner.OwnsAddress(mp.UnlockHash) {
+				// locate in DSCOs
+				id := b.MinerPayoutID(uint64(i))
+				for _, diff := range cc.DelayedSiacoinOutputDiffs {
+					if diff.ID == id {
+						pcc.BlockRewards = append(pcc.BlockRewards, BlockReward{
+							UnspentOutput: UnspentOutput{
+								SiacoinOutput: diff.SiacoinOutput,
+								ID:            id,
+							},
+							Timelock: diff.MaturityHeight,
+						})
+						break
+					}
+				}
+			}
+		}
+	}
+
 	for _, b := range cc.AppliedBlocks {
 		processTxns(b.Transactions, &applied)
+		processMinerPayouts(b, &applied)
 	}
 	for _, b := range cc.RevertedBlocks {
 		processTxns(b.Transactions, &reverted)
+		processMinerPayouts(b, &reverted)
 	}
 	applied.BlockCount = len(cc.AppliedBlocks)
 	reverted.BlockCount = len(cc.RevertedBlocks)

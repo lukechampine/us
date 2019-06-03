@@ -33,6 +33,9 @@ var (
 	// in limbo, its LimboSince is set to notLimboTime.
 	bucketOutputs = []byte("bucketOutputs")
 
+	// bucketBlockRewards contains a list of BlockRewards, sorted by insertion date.
+	bucketBlockRewards = []byte("bucketBlockRewards")
+
 	// bucketMemos maps TransactionIDs to memos.
 	bucketMemos = []byte("bucketMemos")
 
@@ -49,6 +52,7 @@ var (
 		bucketMeta,
 		bucketAddrs,
 		bucketOutputs,
+		bucketBlockRewards,
 		bucketMemos,
 		bucketTxns,
 		bucketTxnsAddrIndex,
@@ -87,6 +91,20 @@ func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusC
 		for _, o := range reverted.Outputs {
 			tx.Bucket(bucketOutputs).Delete(o.ID[:])
 		}
+		if len(reverted.BlockRewards) > 0 {
+			for i := range reverted.BlockRewards {
+				c := tx.Bucket(bucketBlockRewards).Cursor()
+				for k, v := c.Last(); k != nil; k, v = c.Prev() {
+					var br BlockReward
+					encoding.Unmarshal(v, &br)
+					if br.ID == reverted.BlockRewards[i].ID {
+						tx.Bucket(bucketBlockRewards).Delete(k)
+						break
+					}
+				}
+			}
+		}
+
 		for _, txn := range reverted.Transactions {
 			txid := txn.ID()
 			tx.Bucket(bucketTxns).Delete(txid[:])
@@ -118,6 +136,15 @@ func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusC
 			lo := LimboOutput{UnspentOutput: o, LimboSince: notLimboTime}
 			tx.Bucket(bucketOutputs).Put(o.ID[:], encoding.Marshal(lo))
 		}
+		if len(applied.BlockRewards) > 0 {
+			seq, _ := tx.Bucket(bucketBlockRewards).NextSequence()
+			seqBytes := make([]byte, 8)
+			for _, br := range applied.BlockRewards {
+				binary.BigEndian.PutUint64(seqBytes, seq)
+				tx.Bucket(bucketBlockRewards).Put(seqBytes, encoding.Marshal(br))
+				seq++
+			}
+		}
 		for _, txn := range applied.Transactions {
 			txid := txn.ID()
 			tx.Bucket(bucketTxns).Put(txid[:], encoding.Marshal(txn))
@@ -141,7 +168,6 @@ func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusC
 		height := binary.LittleEndian.Uint64(heightBytes) + uint64(applied.BlockCount) - uint64(reverted.BlockCount)
 		binary.LittleEndian.PutUint64(heightBytes, height)
 		tx.Bucket(bucketMeta).Put(keyHeight, heightBytes)
-
 		tx.Bucket(bucketMeta).Put(keyCCID, ccid[:])
 		return nil
 	})
@@ -173,6 +199,20 @@ func (s *BoltDBStore) LimboOutputs() (outputs []LimboOutput) {
 			if !o.LimboSince.Equal(notLimboTime) {
 				outputs = append(outputs, o)
 			}
+		}
+		return nil
+	})
+	return
+}
+
+// BlockRewards implements Store.
+func (s *BoltDBStore) BlockRewards(n int) (brs []BlockReward) {
+	s.view(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketBlockRewards).Cursor()
+		for k, v := c.Last(); k != nil && len(brs) != n; k, v = c.Prev() {
+			var br BlockReward
+			encoding.Unmarshal(v, &br)
+			brs = append(brs, br)
 		}
 		return nil
 	})

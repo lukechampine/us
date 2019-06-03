@@ -9,7 +9,8 @@ import (
 
 // EphemeralStore implements Store in-memory.
 type EphemeralStore struct {
-	outputs map[types.SiacoinOutputID]LimboOutput
+	outputs      map[types.SiacoinOutputID]LimboOutput
+	blockrewards []BlockReward
 
 	txns            map[types.TransactionID]types.Transaction
 	txnsAddrIndex   map[types.UnlockHash][]types.TransactionID
@@ -24,6 +25,14 @@ type EphemeralStore struct {
 func (s *EphemeralStore) ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) {
 	for _, o := range reverted.Outputs {
 		delete(s.outputs, o.ID)
+	}
+	for _, br := range reverted.BlockRewards {
+		for i := range s.blockrewards {
+			if s.blockrewards[i].ID == br.ID {
+				s.blockrewards = append(s.blockrewards[:i], s.blockrewards[i+1:]...)
+				break
+			}
+		}
 	}
 	for _, txn := range reverted.Transactions {
 		txid := txn.ID()
@@ -47,13 +56,13 @@ func (s *EphemeralStore) ApplyConsensusChange(reverted, applied ProcessedConsens
 		}
 		s.txnsAddrIndex[addr] = addrTxns
 	}
-
 	for _, o := range applied.Outputs {
 		s.outputs[o.ID] = LimboOutput{
 			UnspentOutput: o,
 			LimboSince:    notLimboTime,
 		}
 	}
+	s.blockrewards = append(s.blockrewards, applied.BlockRewards...)
 	for _, txn := range applied.Transactions {
 		txid := txn.ID()
 		s.txns[txid] = txn
@@ -126,6 +135,14 @@ func (s *EphemeralStore) LimboOutputs() []LimboOutput {
 		}
 	}
 	return outputs
+}
+
+// BlockRewards implements Store.
+func (s *EphemeralStore) BlockRewards(n int) []BlockReward {
+	if n > len(s.blockrewards) || n < 0 {
+		n = len(s.blockrewards)
+	}
+	return s.blockrewards[len(s.blockrewards)-n:]
 }
 
 // SetMemo implements Store.

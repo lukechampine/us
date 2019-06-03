@@ -38,6 +38,7 @@ type ChainStore interface {
 // A Store stores information needed by a generic wallet.
 type Store interface {
 	ChainStore
+	BlockRewards(n int) []BlockReward
 	ConsensusChangeID() modules.ConsensusChangeID
 	ChainHeight() types.BlockHeight
 	LimboOutputs() []LimboOutput
@@ -75,6 +76,7 @@ type ProcessedConsensusChange struct {
 	Outputs             []UnspentOutput
 	Transactions        []types.Transaction
 	AddressTransactions map[types.UnlockHash][]types.TransactionID
+	BlockRewards        []BlockReward
 	BlockCount          int
 	CCID                modules.ConsensusChangeID
 }
@@ -199,4 +201,20 @@ func (o *LimboOutput) UnmarshalSia(r io.Reader) error {
 	err := encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&o.UnspentOutput, &since)
 	o.LimboSince = time.Unix(since, 0)
 	return err
+}
+
+// A BlockReward is a timelocked output awarded to the miner of a block.
+type BlockReward struct {
+	UnspentOutput
+	Timelock types.BlockHeight
+}
+
+// MarshalSia implements encoding.SiaMarshaler.
+func (br BlockReward) MarshalSia(w io.Writer) error {
+	return encoding.NewEncoder(w).EncodeAll(br.UnspentOutput, br.Timelock)
+}
+
+// UnmarshalSia implements encoding.SiaUnmarshaler.
+func (br *BlockReward) UnmarshalSia(r io.Reader) error {
+	return encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&br.UnspentOutput, &br.Timelock)
 }
