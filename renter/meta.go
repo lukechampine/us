@@ -35,7 +35,7 @@ const (
 // assert that SectorSliceSize is accurate
 var _ [SectorSliceSize]struct{} = [unsafe.Sizeof(SectorSlice{})]struct{}{}
 
-// A MetaFile represents an extracted metafile archive.
+// A MetaFile is a set of metadata that represents a file stored on Sia hosts.
 type MetaFile struct {
 	MetaIndex
 	Shards    [][]SectorSlice
@@ -43,8 +43,9 @@ type MetaFile struct {
 	filename  string
 }
 
-// A MetaIndex contains the metadata that ties shards together into a single
-// object with file semantics.
+// A MetaIndex contains the traditional file metadata for a MetaFile, along with
+// an encryption key, redundancy parameters, and the set of hosts storing the
+// actual file data.
 type MetaIndex struct {
 	Version   int
 	Filesize  int64       // original file size
@@ -55,8 +56,9 @@ type MetaIndex struct {
 	Hosts     []hostdb.HostPublicKey
 }
 
-// A SectorSlice is the unit element of a shard file. Each SectorSlice uniquely
-// identifies a contiguous slice of data stored on a host.
+// A SectorSlice uniquely identifies a contiguous slice of data stored on a
+// host. Each SectorSlice can only address a single host sector, so multiple
+// SectorSlices may be needed to reference the data comprising a file.
 type SectorSlice struct {
 	MerkleRoot   crypto.Hash
 	SegmentIndex uint32
@@ -116,20 +118,10 @@ func (m *MetaIndex) MaxChunkSize() int64 {
 
 // MinChunkSize is the size of the smallest possible chunk. When this chunk is
 // erasure-encoded into shards, each shard will have a length of
-// merkle.SegmentSize.
+// merkle.SegmentSize, which is the smallest unit of data that the host can
+// provide Merkle proofs for.
 func (m *MetaIndex) MinChunkSize() int64 {
 	return merkle.SegmentSize * int64(m.MinShards)
-}
-
-// MinChunks returns the minimum number of chunks required to fully upload the
-// file. It assumes that each SectorSlice will reference a full sector
-// (renterhost.SectorSize bytes).
-func (m *MetaIndex) MinChunks() int64 {
-	n := m.Filesize / m.MaxChunkSize()
-	if m.Filesize%m.MaxChunkSize() != 0 {
-		n++
-	}
-	return n
 }
 
 // ErasureCode returns the erasure code used to encode and decode the shards
@@ -138,9 +130,9 @@ func (m *MetaIndex) ErasureCode() ErasureCoder {
 	return NewRSCode(m.MinShards, len(m.Hosts))
 }
 
-// Archive concatenates the metafile index with its referenced shard files and
-// writes the resulting gzipped tar archive to filename.
-func (m *MetaFile) Archive(filename string) error {
+// Commit creates a gzipped tar archive containing the metafile's index and
+// shards, writes it to filename. The write is atomic.
+func (m *MetaFile) Commit(filename string) error {
 	f, err := os.Create(filename + "_tmp")
 	if err != nil {
 		return errors.Wrap(err, "could not create archive")
@@ -200,11 +192,13 @@ func (m *MetaFile) Archive(filename string) error {
 	return nil
 }
 
-// Close re-archives the MetaFile and writes it to disk using the default
-// filename, which is the same as the filename passed to NewMetaFile or
-// OpenMetaFile.
+// Close commits the MetaFile to disk, using the same filename passed to
+// NewMetaFile or ReadMetaFile.
 func (m *MetaFile) Close() error {
-	return m.Archive(m.filename)
+	// TODO: may make sense to drop Close entirely, since it can be misleading;
+	// e.g. if you just want to read a metafile without changing it, Close
+	// results in needless I/O.
+	return m.Commit(m.filename)
 }
 
 // HostIndex returns the index of the shard that references data stored on the
@@ -230,19 +224,15 @@ func (m *MetaFile) ReplaceHost(oldHostKey, newHostKey hostdb.HostPublicKey) bool
 	return false
 }
 
-// NewMetaFile creates a metafile using the specified contracts and erasure-
-// coding parameters. The metafile is returned in extracted state, meaning a
-// temporary directory will be created to hold the archive contents. This
-// directory will be removed when Archive is called on the metafile.
-func NewMetaFile(filename string, mode os.FileMode, size int64, contracts ContractSet, minShards int) *MetaFile {
-	if minShards > len(contracts) {
-		panic("minShards cannot be greater than the number of contracts")
+// NewMetaFile creates a metafile using the specified hosts and erasure-
+// coding parameters.
+func NewMetaFile(filename string, mode os.FileMode, size int64, hosts []hostdb.HostPublicKey, minShards int) *MetaFile {
+	if minShards > len(hosts) {
+		panic("minShards cannot be greater than the number of hosts")
 	}
 	hostIndex := make(map[hostdb.HostPublicKey]int)
-	hosts := make([]hostdb.HostPublicKey, 0, len(contracts))
-	for key := range contracts {
-		hostIndex[key] = len(hosts)
-		hosts = append(hosts, key)
+	for i, hostKey := range hosts {
+		hostIndex[hostKey] = i
 	}
 	m := &MetaFile{
 		MetaIndex: MetaIndex{
@@ -261,8 +251,8 @@ func NewMetaFile(filename string, mode os.FileMode, size int64, contracts Contra
 	return m
 }
 
-// OpenMetaFile reads a metafile archive into memory.
-func OpenMetaFile(filename string) (*MetaFile, error) {
+// ReadMetaFile reads a metafile archive into memory.
+func ReadMetaFile(filename string) (*MetaFile, error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not open archive")
@@ -294,7 +284,9 @@ func OpenMetaFile(filename string) (*MetaFile, error) {
 			if err = json.NewDecoder(tr).Decode(&m.MetaIndex); err != nil {
 				return nil, errors.Wrap(err, "could not decode index")
 			}
-			continue
+			for i, h := range m.MetaIndex.Hosts {
+				m.hostIndex[h] = i
+			}
 		} else {
 			// read shard
 			shard := make([]SectorSlice, hdr.Size/SectorSliceSize)
@@ -318,7 +310,7 @@ func OpenMetaFile(filename string) (*MetaFile, error) {
 	return m, nil
 }
 
-// ReadMetaIndex reads the index of a metafile.
+// ReadMetaIndex reads the index of a metafile without reading any shards.
 func ReadMetaIndex(filename string) (MetaIndex, error) {
 	f, err := os.Open(filename)
 	if err != nil {

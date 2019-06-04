@@ -466,7 +466,7 @@ func migrateDirFile(op *Operation, newcontracts renter.ContractSet, nextFile Fil
 			if len(migrations) == 0 {
 				return errors.New("already migrated")
 			}
-			m, err := renter.OpenMetaFile(metaPath)
+			m, err := renter.ReadMetaFile(metaPath)
 			if err != nil {
 				return err
 			}
@@ -526,7 +526,7 @@ func migrateDirDirect(op *Operation, newcontracts renter.ContractSet, nextFile M
 			if len(migrations) == 0 {
 				return errors.New("already migrated")
 			}
-			m, err := renter.OpenMetaFile(metaPath)
+			m, err := renter.ReadMetaFile(metaPath)
 			if err != nil {
 				return err
 			}
@@ -580,7 +580,7 @@ func migrateDirRemote(op *Operation, newcontracts renter.ContractSet, nextFile M
 			if len(migrations) == 0 {
 				return errors.New("already migrated")
 			}
-			m, err := renter.OpenMetaFile(metaPath)
+			m, err := renter.ReadMetaFile(metaPath)
 			if err != nil {
 				return err
 			}

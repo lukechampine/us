@@ -57,8 +57,7 @@ func (fs *PseudoFS) Chmod(name string, mode os.FileMode) error {
 	}
 	path += metafileExt
 	// TODO: how does this interact with open files?
-	// TODO: this can be done without a working directory
-	m, err := renter.OpenMetaFile(path)
+	m, err := renter.ReadMetaFile(path)
 	if err != nil {
 		return errors.Wrapf(err, "chmod %v", path)
 	}
@@ -149,14 +148,14 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 				}
 			}
 		}
-		contracts := make(renter.ContractSet)
+		hosts := make([]hostdb.HostPublicKey, 0, len(fs.hosts.sessions))
 		for hostKey := range fs.hosts.sessions {
-			contracts[hostKey] = nil
+			hosts = append(hosts, hostKey)
 		}
-		m = renter.NewMetaFile(name, perm, 0, contracts, minShards)
+		m = renter.NewMetaFile(name, perm, 0, hosts, minShards)
 	} else {
 		var err error
-		m, err = renter.OpenMetaFile(path)
+		m, err = renter.ReadMetaFile(path)
 		if err != nil {
 			return nil, errors.Wrapf(err, "open %v", name)
 		}
