@@ -1,0 +1,71 @@
+version: v1.0
+
+name: Semaphore
+
+agent:
+  machine:
+    type: e1-standard-2
+    os_image: ubuntu1804
+
+blocks:
+  - name: build
+    task:
+      prologue:
+        commands:
+          - sem-version go 1.12
+          - export GOPATH=$(go env GOPATH)
+          - export "SEMAPHORE_GIT_DIR=$GOPATH/src/lukechampine.com/us"
+          - export "PATH=$GOPATH/bin:${PATH}"
+          - mkdir -vp "${SEMAPHORE_GIT_DIR}" "$GOPATH/bin"
+          - go get gitlab.com/NebulousLabs/Sia/...
+          - go get github.com/aead/chacha20
+          - go get github.com/pkg/errors
+      jobs:
+        - name: build
+          commands:
+            - checkout
+            - go get lukechampine.com/walrus
+            - go build ./...
+
+  - name: lint
+    task:
+      prologue:
+        commands:
+          - sem-version go 1.12
+          - export GOPATH=$(go env GOPATH)
+          - export "SEMAPHORE_GIT_DIR=$GOPATH/src/lukechampine.com/us"
+          - export "PATH=$GOPATH/bin:${PATH}"
+          - mkdir -vp "${SEMAPHORE_GIT_DIR}" "$GOPATH/bin"
+          - go get gitlab.com/NebulousLabs/Sia/...
+          - go get github.com/aead/chacha20
+          - go get github.com/pkg/errors
+      jobs:
+        - name: lint
+          commands:
+            - checkout
+            - go get lukechampine.com/walrus
+            - curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $GOPATH/bin v1.16.0
+            - make lint
+
+  - name: test
+    task:
+      secrets:
+        - name: coveralls
+      prologue:
+        commands:
+          - sem-version go 1.12
+          - export GOPATH=$(go env GOPATH)
+          - export "SEMAPHORE_GIT_DIR=$GOPATH/src/lukechampine.com/us"
+          - export "PATH=$GOPATH/bin:${PATH}"
+          - mkdir -vp "${SEMAPHORE_GIT_DIR}" "$GOPATH/bin"
+          - go get gitlab.com/NebulousLabs/Sia/...
+          - go get github.com/aead/chacha20
+          - go get github.com/pkg/errors
+          - go get github.com/mattn/goveralls
+      jobs:
+        - name: test
+          commands:
+            - checkout
+            - go get lukechampine.com/walrus
+            - go test -v -race -coverprofile=cover.out ./...
+            - goveralls -coverprofile=cover.out -service semaphore
