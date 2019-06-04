@@ -152,18 +152,7 @@ func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, mig
 	// shards have the same pattern of slice lengths, but it feels ugly. This
 	// is an inherent flaw in the format, and is a good argument for making
 	// the format chunk-based instead of host-based.
-	var shard []renter.SectorSlice
-	for oldhost := range migrations {
-		var err error
-		shard, err = renter.ReadShard(m.ShardPath(oldhost))
-		if err != nil {
-			op.die(err)
-			return
-		}
-		if len(shard) > 0 {
-			break
-		}
-	}
+	shard := m.Shards[0]
 	if len(shard) == 0 {
 		// nothing to do
 		op.die(nil)
@@ -319,11 +308,11 @@ func migrateDirect(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 				break
 			}
 			// write SectorSlice
-			if err := newHost.Shard.WriteSlice(s, int64(chunkIndex)); err != nil {
-				op.sendUpdate(MigrateSkipUpdate{Host: oldHost.HostKey(), Err: err})
-				total -= int64(len(oldHost.Slices[chunkIndex:])) * renterhost.SectorSize
-				break
+			for len(*newHost.Shard) <= chunkIndex {
+				*newHost.Shard = append(*newHost.Shard, renter.SectorSlice{})
 			}
+			(*newHost.Shard)[chunkIndex] = s
+
 			uploaded += renterhost.SectorSize
 			op.sendUpdate(TransferProgressUpdate{
 				Total:       total,

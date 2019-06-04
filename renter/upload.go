@@ -119,7 +119,7 @@ func (sb *SectorBuilder) Slices() []SectorSlice {
 // transferring it to the host.
 type ShardUploader struct {
 	Uploader *proto.Session
-	Shard    *Shard
+	Shard    *[]SectorSlice
 	Key      KeySeed
 	Sector   SectorBuilder
 }
@@ -135,9 +135,11 @@ func (u *ShardUploader) Upload(chunkIndex int64) error {
 		return err
 	}
 	for i, ss := range u.Sector.Slices() {
-		if err := u.Shard.WriteSlice(ss, chunkIndex+int64(i)); err != nil {
-			return errors.Wrap(err, "could not write to shard file")
+		sliceIndex := int(chunkIndex) + i
+		for len(*u.Shard) <= sliceIndex {
+			*u.Shard = append(*u.Shard, SectorSlice{})
 		}
+		(*u.Shard)[sliceIndex] = ss
 	}
 	return nil
 }
@@ -169,7 +171,6 @@ func (u *ShardUploader) HostKey() hostdb.HostPublicKey {
 // Close closes the connection to the host and the Shard file.
 func (u *ShardUploader) Close() error {
 	u.Uploader.Close()
-	u.Shard.Close()
 	return nil
 }
 
@@ -177,26 +178,19 @@ func (u *ShardUploader) Close() error {
 // uploading m's data and writing to one of m's Shard files.
 func NewShardUploader(m *MetaFile, contract *Contract, hkr HostKeyResolver, currentHeight types.BlockHeight) (*ShardUploader, error) {
 	hostKey := contract.HostKey()
-	// open shard
-	sf, err := OpenShard(m.ShardPath(hostKey))
-	if err != nil {
-		return nil, errors.Wrapf(err, "%v: could not load shard file", hostKey.ShortKey())
-	}
 	// get host IP
 	hostIP, err := hkr.ResolveHostKey(contract.HostKey())
 	if err != nil {
-		sf.Close()
 		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
 	}
 	// create uploader
 	u, err := proto.NewSession(hostIP, contract, currentHeight)
 	if err != nil {
-		sf.Close()
 		return nil, errors.Wrapf(err, "%v: could not initiate upload protocol with host", hostKey.ShortKey())
 	}
 	return &ShardUploader{
 		Uploader: u,
-		Shard:    sf,
+		Shard:    &m.Shards[m.HostIndex(hostKey)],
 		Key:      m.MasterKey,
 	}, nil
 }

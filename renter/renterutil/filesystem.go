@@ -9,7 +9,6 @@ import (
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 )
@@ -139,8 +138,7 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 	}
 
 	// no open file; create/open a metafile on disk
-	var index renter.MetaIndex
-	var shards [][]renter.SectorSlice
+	var m *renter.MetaFile
 	if flag&os.O_CREATE == os.O_CREATE {
 		if flag&os.O_TRUNC == os.O_TRUNC {
 			// remove existing file
@@ -151,31 +149,24 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 				}
 			}
 		}
-		index = renter.MetaIndex{
-			Version:   renter.MetaFileVersion,
-			Mode:      perm,
-			MinShards: minShards,
-			ModTime:   time.Now(),
-		}
-		fastrand.Read(index.MasterKey[:])
+		contracts := make(renter.ContractSet)
 		for hostKey := range fs.hosts.sessions {
-			index.Hosts = append(index.Hosts, hostKey)
+			contracts[hostKey] = nil
 		}
-		shards = make([][]renter.SectorSlice, len(index.Hosts))
+		m = renter.NewMetaFile(name, perm, 0, contracts, minShards)
 	} else {
 		var err error
-		index, shards, err = renter.ReadMetaFileContents(path)
+		m, err = renter.OpenMetaFile(path)
 		if err != nil {
 			return nil, errors.Wrapf(err, "open %v", name)
 		}
 	}
 	of := &openMetaFile{
-		name:   name,
-		m:      index,
-		shards: shards,
+		name: name,
+		m:    m,
 	}
 	if flag&os.O_APPEND == os.O_APPEND {
-		of.offset = index.Filesize
+		of.offset = m.Filesize
 	}
 	fs.files[fs.curFD] = of
 	fs.curFD++
@@ -258,7 +249,7 @@ func (fs *PseudoFS) Stat(name string) (os.FileInfo, error) {
 	fs.mu.Lock()
 	for _, f := range fs.files {
 		if f.name == name {
-			info := pseudoFileInfo{name: f.name, m: f.m}
+			info := pseudoFileInfo{name: f.name, m: f.m.MetaIndex}
 			info.m.Filesize = f.filesize()
 			fs.mu.Unlock()
 			return info, nil
@@ -499,7 +490,7 @@ func (pf PseudoFile) Readdir(n int) ([]os.FileInfo, error) {
 outer:
 	for _, f := range pf.fs.files {
 		if filepath.Dir(filepath.Join(pf.fs.root, f.name)) == d.Name() {
-			info := pseudoFileInfo{name: filepath.Base(f.name), m: f.m}
+			info := pseudoFileInfo{name: filepath.Base(f.name), m: f.m.MetaIndex}
 			info.m.Filesize = f.filesize()
 			for i := range files {
 				if files[i].Name() == info.Name() {

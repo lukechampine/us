@@ -46,12 +46,8 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 		}
 
 		// load shard slices
-		slices, err := renter.ReadShard(m.ShardPath(hostKey))
-		if err != nil {
-			res.Error = errors.Wrap(err, "could not load shard slices")
-			results <- res
-			continue
-		} else if len(slices) == 0 {
+		slices := m.Shards[m.HostIndex(hostKey)]
+		if len(slices) == 0 {
 			res.Error = errors.New("no slices stored on host")
 			results <- res
 			continue

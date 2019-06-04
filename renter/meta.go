@@ -9,12 +9,12 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/aead/chacha20/chacha"
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/fastrand"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
@@ -26,14 +26,21 @@ const (
 	// incremented after each change to the format.
 	MetaFileVersion = 2
 
+	// SectorSliceSize is the encoded size of a SectorSlice.
+	SectorSliceSize = 64
+
 	indexFilename = "index"
 )
+
+// assert that SectorSliceSize is accurate
+var _ [SectorSliceSize]struct{} = [unsafe.Sizeof(SectorSlice{})]struct{}{}
 
 // A MetaFile represents an extracted metafile archive.
 type MetaFile struct {
 	MetaIndex
+	Shards    [][]SectorSlice
 	hostIndex map[hostdb.HostPublicKey]int
-	Workdir   string
+	filename  string
 }
 
 // A MetaIndex contains the metadata that ties shards together into a single
@@ -46,6 +53,15 @@ type MetaIndex struct {
 	MasterKey KeySeed     // seed from which shard encryption keys are derived
 	MinShards int         // number of shards required to recover file
 	Hosts     []hostdb.HostPublicKey
+}
+
+// A SectorSlice is the unit element of a shard file. Each SectorSlice uniquely
+// identifies a contiguous slice of data stored on a host.
+type SectorSlice struct {
+	MerkleRoot   crypto.Hash
+	SegmentIndex uint32
+	NumSegments  uint32
+	Nonce        [24]byte
 }
 
 // A KeySeed derives subkeys and uses them to encrypt and decrypt messages.
@@ -125,27 +141,7 @@ func (m *MetaIndex) ErasureCode() ErasureCoder {
 // Archive concatenates the metafile index with its referenced shard files and
 // writes the resulting gzipped tar archive to filename.
 func (m *MetaFile) Archive(filename string) error {
-	// sync files in workdir before creating archive; otherwise a crash could
-	// leave us in an inconsistent state
-	syncPath := func(path string) error {
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		return f.Sync()
-	}
-
-	if err := syncPath(filepath.Join(m.Workdir, indexFilename)); err != nil {
-		return errors.Wrap(err, "could not sync workdir")
-	}
-	for _, h := range m.Hosts {
-		if err := syncPath(m.ShardPath(h)); err != nil {
-			return errors.Wrap(err, "could not sync workdir")
-		}
-	}
-
-	f, err := os.Create(filename)
+	f, err := os.Create(filename + "_tmp")
 	if err != nil {
 		return errors.Wrap(err, "could not create archive")
 	}
@@ -167,47 +163,40 @@ func (m *MetaFile) Archive(filename string) error {
 	}
 
 	// write shards
-	for _, h := range m.Hosts {
-		b, err := os.Open(m.ShardPath(h))
-		if err != nil {
-			return errors.Wrap(err, "could not open archive shard")
-		}
-		defer b.Close()
-		stat, err := b.Stat()
-		if err != nil {
-			return errors.Wrap(err, "could not stat shard")
-		}
+	encSlice := make([]byte, SectorSliceSize)
+	for i, hostKey := range m.Hosts {
 		err = tw.WriteHeader(&tar.Header{
-			Name: filepath.Base(b.Name()),
-			Size: stat.Size(),
-			Mode: int64(stat.Mode()),
+			Name: hostKey.Key() + ".shard",
+			Size: int64(len(m.Shards[i])) * SectorSliceSize,
+			Mode: 0666,
 		})
 		if err != nil {
 			return errors.Wrap(err, "could not write shard header")
-		} else if _, err = io.Copy(tw, b); err != nil {
-			return errors.Wrap(err, "could not add shard to archive")
+		}
+		for _, ss := range m.Shards[i] {
+			copy(encSlice, ss.MerkleRoot[:])
+			binary.LittleEndian.PutUint32(encSlice[32:], ss.SegmentIndex)
+			binary.LittleEndian.PutUint32(encSlice[36:], ss.NumSegments)
+			copy(encSlice[40:], ss.Nonce[:])
+			if _, err = tw.Write(encSlice); err != nil {
+				return errors.Wrap(err, "could not add shard to archive")
+			}
 		}
 	}
 
-	// flush tar data
+	// flush, close, and atomically rename
 	if err := tw.Close(); err != nil {
 		return errors.Wrap(err, "could not write tar data")
-	}
-
-	// flush gzip data
-	if err := zip.Close(); err != nil {
+	} else if err := zip.Close(); err != nil {
 		return errors.Wrap(err, "could not write gzip data")
-	}
-
-	// ensure durability
-	if err := f.Sync(); err != nil {
+	} else if err := f.Sync(); err != nil {
 		return errors.Wrap(err, "could not sync archive file")
+	} else if err := f.Close(); err != nil {
+		return errors.Wrap(err, "could not close archive file")
+	} else if err := os.Rename(filename+"_tmp", filename); err != nil {
+		return errors.Wrap(err, "could not atomically replace archive file")
 	}
 
-	// remove workdir
-	if err := os.RemoveAll(m.Workdir); err != nil {
-		return errors.Wrap(err, "could not clean up working directory")
-	}
 	return nil
 }
 
@@ -215,13 +204,7 @@ func (m *MetaFile) Archive(filename string) error {
 // filename, which is the same as the filename passed to NewMetaFile or
 // OpenMetaFile.
 func (m *MetaFile) Close() error {
-	return m.Archive(strings.TrimSuffix(m.Workdir, "_workdir"))
-}
-
-// ShardPath returns the canonical path on disk of a shard associated with the
-// given hostKey.
-func (m *MetaFile) ShardPath(hostKey hostdb.HostPublicKey) string {
-	return filepath.Join(m.Workdir, hostKey.Key()+".shard")
+	return m.Archive(m.filename)
 }
 
 // HostIndex returns the index of the shard that references data stored on the
@@ -235,9 +218,8 @@ func (m *MetaFile) HostIndex(hostKey hostdb.HostPublicKey) int {
 	return i
 }
 
-// ReplaceHost replaces a host within the metafile. The shard file of the
-// replaced host is not immediately deleted, but it will not be included in
-// the new archive when Close or Archive is called.
+// ReplaceHost replaces a host within the metafile. The shards of the replaced
+// host will not be included in the new archive when Close or Archive is called.
 func (m *MetaFile) ReplaceHost(oldHostKey, newHostKey hostdb.HostPublicKey) bool {
 	for i, h := range m.Hosts {
 		if h == oldHostKey {
@@ -252,21 +234,15 @@ func (m *MetaFile) ReplaceHost(oldHostKey, newHostKey hostdb.HostPublicKey) bool
 // coding parameters. The metafile is returned in extracted state, meaning a
 // temporary directory will be created to hold the archive contents. This
 // directory will be removed when Archive is called on the metafile.
-func NewMetaFile(filename string, mode os.FileMode, size int64, contracts ContractSet, minShards int) (*MetaFile, error) {
+func NewMetaFile(filename string, mode os.FileMode, size int64, contracts ContractSet, minShards int) *MetaFile {
 	if minShards > len(contracts) {
-		return nil, errors.New("minShards cannot be greater than the number of contracts")
+		panic("minShards cannot be greater than the number of contracts")
 	}
 	hostIndex := make(map[hostdb.HostPublicKey]int)
 	hosts := make([]hostdb.HostPublicKey, 0, len(contracts))
 	for key := range contracts {
 		hostIndex[key] = len(hosts)
 		hosts = append(hosts, key)
-	}
-	// create workdir
-	workdir := filename + "_workdir"
-	err := os.MkdirAll(workdir, 0700)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not create working directory")
 	}
 	m := &MetaFile{
 		MetaIndex: MetaIndex{
@@ -277,71 +253,35 @@ func NewMetaFile(filename string, mode os.FileMode, size int64, contracts Contra
 			MinShards: minShards,
 			Hosts:     hosts,
 		},
+		Shards:    make([][]SectorSlice, len(hosts)),
 		hostIndex: hostIndex,
-		Workdir:   workdir,
+		filename:  filename,
 	}
 	fastrand.Read(m.MasterKey[:])
-	// create index file
-	indexFile, err := os.Create(filepath.Join(workdir, indexFilename))
-	if err != nil {
-		os.RemoveAll(workdir)
-		return nil, errors.Wrap(err, "could not create index file")
-	}
-	defer indexFile.Close()
-	if err := json.NewEncoder(indexFile).Encode(m.MetaIndex); err != nil {
-		os.RemoveAll(workdir)
-		return nil, errors.Wrap(err, "could not write index file")
-	}
-	// create shard files
-	for _, h := range hosts {
-		f, err := os.Create(m.ShardPath(h))
-		if err != nil {
-			os.RemoveAll(workdir)
-			return nil, errors.Wrap(err, "could not create shard file")
-		}
-		f.Close()
-	}
-
-	return m, nil
+	return m
 }
 
-// OpenMetaFile extracts an existing metafile archive. Like NewMetaFile,
-// it creates a temporary directory to hold the extracted files.
-func OpenMetaFile(filename string) (_ *MetaFile, err error) {
+// OpenMetaFile reads a metafile archive into memory.
+func OpenMetaFile(filename string) (*MetaFile, error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not open archive")
 	}
 	defer f.Close()
-
-	// check that we aren't clobbering an existing workdir
-	workdir := filename + "_workdir"
-	if _, err := os.Stat(workdir); err == nil {
-		return nil, errors.New("refusing to overwrite " + workdir)
-	}
-
-	// create working directory
-	err = os.MkdirAll(workdir, 0700)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not create working directory")
-	}
-	defer func() {
-		if err != nil {
-			os.RemoveAll(workdir)
-		}
-	}()
-
-	// decode index and extract shards to workdir
-	var index MetaIndex
 	zip, err := gzip.NewReader(f)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not read gzip header")
 	}
 	tr := tar.NewReader(zip)
+
+	m := &MetaFile{
+		hostIndex: make(map[hostdb.HostPublicKey]int),
+		filename:  filename,
+	}
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
-			if index.Version == 0 {
+			if m.Version == 0 {
 				return nil, errors.New("archive is missing an index")
 			}
 			break
@@ -350,47 +290,35 @@ func OpenMetaFile(filename string) (_ *MetaFile, err error) {
 		}
 
 		if hdr.Name == indexFilename {
-			// copy index to file and simultaneously read into memory
-			indexFile, err := os.Create(filepath.Join(workdir, indexFilename))
-			if err != nil {
-				return nil, errors.Wrap(err, "could not create index file")
+			// read index
+			if err = json.NewDecoder(tr).Decode(&m.MetaIndex); err != nil {
+				return nil, errors.Wrap(err, "could not decode index")
 			}
-			defer indexFile.Close()
-			tee := io.TeeReader(tr, indexFile)
-			if err = json.NewDecoder(tee).Decode(&index); err != nil {
-				return nil, errors.Wrap(err, "could not process index file")
-			}
+			continue
 		} else {
-			// copy shard to file
-			bf, err := os.Create(filepath.Join(workdir, hdr.Name))
-			if err != nil {
-				return nil, errors.Wrap(err, "could not create shard file")
+			// read shard
+			shard := make([]SectorSlice, hdr.Size/SectorSliceSize)
+			buf := make([]byte, SectorSliceSize)
+			for i := range shard {
+				if _, err := io.ReadFull(tr, buf); err != nil {
+					return nil, errors.Wrap(err, "could not read shard")
+				}
+				copy(shard[i].MerkleRoot[:], buf[:32])
+				shard[i].SegmentIndex = binary.LittleEndian.Uint32(buf[32:36])
+				shard[i].NumSegments = binary.LittleEndian.Uint32(buf[36:40])
+				copy(shard[i].Nonce[:], buf[40:64])
 			}
-			defer bf.Close()
-			if _, err = io.Copy(bf, tr); err != nil {
-				return nil, errors.Wrap(err, "could not write shard file")
-			}
+			m.Shards = append(m.Shards, shard)
 		}
 	}
 
 	if err := zip.Close(); err != nil {
 		return nil, errors.Wrap(err, "archive is corrupted")
 	}
-
-	// initialize hostIndex
-	hostIndex := make(map[hostdb.HostPublicKey]int)
-	for i, h := range index.Hosts {
-		hostIndex[h] = i
-	}
-
-	return &MetaFile{
-		MetaIndex: index,
-		hostIndex: hostIndex,
-		Workdir:   workdir,
-	}, nil
+	return m, nil
 }
 
-// ReadMetaIndex returns the index of a metafile without extracting it.
+// ReadMetaIndex reads the index of a metafile.
 func ReadMetaIndex(filename string) (MetaIndex, error) {
 	f, err := os.Open(filename)
 	if err != nil {
@@ -419,62 +347,14 @@ func ReadMetaIndex(filename string) (MetaIndex, error) {
 		if err := json.NewDecoder(tr).Decode(&index); err != nil {
 			return MetaIndex{}, errors.Wrap(err, "could not decode index")
 		}
+		// done
 		return index, nil
 	}
 	return MetaIndex{}, errors.New("archive is missing an index")
 }
 
-// ReadMetaFileContents returns the metafile's index and shard slice data.
-func ReadMetaFileContents(filename string) (MetaIndex, [][]SectorSlice, error) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return MetaIndex{}, nil, errors.Wrap(err, "could not open archive")
-	}
-	defer f.Close()
-	zip, err := gzip.NewReader(f)
-	if err != nil {
-		return MetaIndex{}, nil, errors.Wrap(err, "could not read gzip header")
-	}
-	tr := tar.NewReader(zip)
-
-	var index MetaIndex
-	var slices [][]SectorSlice
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			if index.Version == 0 {
-				return MetaIndex{}, nil, errors.New("archive is missing an index")
-			}
-			break
-		} else if err != nil {
-			return MetaIndex{}, nil, errors.Wrap(err, "could not read archive entry")
-		}
-
-		if hdr.Name == indexFilename {
-			// read index
-			if err = json.NewDecoder(tr).Decode(&index); err != nil {
-				return MetaIndex{}, nil, errors.Wrap(err, "could not decode index")
-			}
-			continue
-		} else {
-			// read slices
-			bs := make([]SectorSlice, hdr.Size/SectorSliceSize)
-			if err = binary.Read(tr, binary.LittleEndian, &bs); err != nil {
-				return MetaIndex{}, nil, errors.Wrap(err, "could not read shard")
-			}
-			slices = append(slices, bs)
-		}
-	}
-
-	if err := zip.Close(); err != nil {
-		return MetaIndex{}, nil, errors.Wrap(err, "archive is corrupted")
-	}
-
-	return index, slices, nil
-}
-
-// MetaFileFullyUploaded reads a metafile without extracting it, reporting
-// whether it has been fully uploaded.
+// MetaFileFullyUploaded reads a metafile archive and reports whether it has
+// been fully uploaded.
 func MetaFileFullyUploaded(filename string) (bool, error) {
 	index, shards, err := readMetaFileShards(filename)
 	if err != nil {
@@ -483,8 +363,8 @@ func MetaFileFullyUploaded(filename string) (bool, error) {
 	return shards == len(index.Hosts), nil
 }
 
-// MetaFileCanDownload reads a metafile without extracting it, reporting
-// whether it can be downloaded.
+// MetaFileCanDownload reads a metafile archive and reports whether it can be
+// downloaded.
 func MetaFileCanDownload(filename string) (bool, error) {
 	index, shards, err := readMetaFileShards(filename)
 	if err != nil {

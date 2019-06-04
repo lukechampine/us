@@ -37,8 +37,7 @@ func (sw *skipWriter) Write(p []byte) (int, error) {
 
 type openMetaFile struct {
 	name          string
-	m             renter.MetaIndex
-	shards        [][]renter.SectorSlice
+	m             *renter.MetaFile
 	pendingWrites []pendingWrite
 	pendingChunks []pendingChunk
 	offset        int64
@@ -117,8 +116,8 @@ func (f *openMetaFile) commitPendingSlices(sectors map[hostdb.HostPublicKey]*ren
 		return
 	}
 
-	newShards := make([][]renter.SectorSlice, len(f.shards))
-	oldShards := f.shards
+	newShards := make([][]renter.SectorSlice, len(f.m.Shards))
+	oldShards := f.m.Shards
 	pending := f.pendingChunks
 	var offset int64
 	for len(oldShards[0])+len(pending) > 0 {
@@ -172,7 +171,7 @@ func (f *openMetaFile) commitPendingSlices(sectors map[hostdb.HostPublicKey]*ren
 		}
 	}
 
-	f.shards = newShards
+	f.m.Shards = newShards
 	f.m.Filesize = f.filesize()
 }
 
@@ -180,38 +179,7 @@ func (fs *PseudoFS) commitChanges(f *openMetaFile) error {
 	if !f.m.ModTime.After(fs.lastCommitTime) {
 		return nil
 	}
-
-	// TODO: do this better
-	contracts := make(renter.ContractSet)
-	for hostKey := range fs.hosts.sessions {
-		contracts[hostKey] = nil
-	}
-	os.RemoveAll("tmp-metafile")
-	m, err := renter.NewMetaFile("tmp-metafile", f.m.Mode, f.m.Filesize, contracts, f.m.MinShards)
-	if err != nil {
-		return err
-	}
-	m.MetaIndex = f.m
-	for i, hostKey := range m.Hosts {
-		sf, err := renter.OpenShard(m.ShardPath(hostKey))
-		if err != nil {
-			return err
-		}
-		for chunkIndex, ss := range f.shards[i] {
-			if err := sf.WriteSlice(ss, int64(chunkIndex)); err != nil {
-				sf.Close()
-				return err
-			}
-		}
-		sf.Close()
-	}
-	if err := m.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename("tmp-metafile", fs.path(f.name)+metafileExt); err != nil {
-		return err
-	}
-	return nil
+	return f.m.Archive(fs.path(f.name) + metafileExt)
 }
 
 func (fs *PseudoFS) canFit(f *openMetaFile, shardSize int) bool {
@@ -455,7 +423,7 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 		hosts[i] = &renter.ShardDownloader{
 			Downloader: s,
 			Key:        f.m.MasterKey,
-			Slices:     f.shards[i],
+			Slices:     f.m.Shards[i],
 		}
 		nHosts++
 	}
@@ -589,7 +557,7 @@ func (fs *PseudoFS) fileTruncate(f *openMetaFile, size int64) error {
 	if size < f.m.Filesize {
 		f.m.Filesize = size
 		// update shards
-		for shardIndex, slices := range f.shards {
+		for shardIndex, slices := range f.m.Shards {
 			var n int64
 			for i, s := range slices {
 				sliceSize := int64(s.NumSegments) * f.m.MinChunkSize()
@@ -606,7 +574,7 @@ func (fs *PseudoFS) fileTruncate(f *openMetaFile, size int64) error {
 				}
 				n += sliceSize
 			}
-			f.shards[shardIndex] = slices
+			f.m.Shards[shardIndex] = slices
 		}
 	}
 
@@ -622,7 +590,7 @@ func (fs *PseudoFS) fileSync(f *openMetaFile) error {
 }
 
 func (fs *PseudoFS) fileStat(f *openMetaFile) (os.FileInfo, error) {
-	info := pseudoFileInfo{name: f.name, m: f.m}
+	info := pseudoFileInfo{name: f.name, m: f.m.MetaIndex}
 	info.m.Filesize = f.filesize()
 	return info, nil
 }

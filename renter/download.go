@@ -163,11 +163,6 @@ func (d *ShardDownloader) Close() error {
 // of downloading the SectorSlices of m.
 func NewShardDownloader(m *MetaFile, contract *Contract, hkr HostKeyResolver) (*ShardDownloader, error) {
 	hostKey := contract.HostKey()
-	// load sector slices
-	slices, err := ReadShard(m.ShardPath(hostKey))
-	if err != nil {
-		return nil, errors.Wrapf(err, "%v: could not load sector slices", hostKey.ShortKey())
-	}
 	// get host IP
 	hostIP, err := hkr.ResolveHostKey(contract.HostKey())
 	if err != nil {
@@ -181,6 +176,6 @@ func NewShardDownloader(m *MetaFile, contract *Contract, hkr HostKeyResolver) (*
 	return &ShardDownloader{
 		Downloader: d,
 		Key:        m.MasterKey,
-		Slices:     slices,
+		Slices:     m.Shards[m.HostIndex(hostKey)],
 	}, nil
 }
