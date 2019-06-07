@@ -68,16 +68,16 @@ func createHostWithContract(tb testing.TB) (*ghost.Host, *renter.Contract) {
 
 func createTestingFS(tb testing.TB) (*PseudoFS, func()) {
 	hosts := make([]*ghost.Host, 3)
-	contracts := make(renter.ContractSet)
 	hkr := make(testHKR)
+	hs := NewHostSet(hkr, 0)
 	for i := range hosts {
 		h, c := createHostWithContract(tb)
 		hosts[i] = h
-		contracts[h.PublicKey()] = c
 		hkr[h.PublicKey()] = h.Settings().NetAddress
+		hs.AddHost(c)
 	}
 
-	fs := NewFileSystem(os.TempDir(), contracts, hkr, 0)
+	fs := NewFileSystem(os.TempDir(), hs)
 	cleanup := func() {
 		fs.Close()
 		for _, h := range hosts {

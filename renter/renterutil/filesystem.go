@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 )
@@ -291,16 +290,16 @@ func (fs *PseudoFS) Close() error {
 
 // NewFileSystem returns a new pseudo-filesystem rooted at root, which must be a
 // directory containing only metafiles and other directories.
-func NewFileSystem(root string, contracts renter.ContractSet, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) *PseudoFS {
+func NewFileSystem(root string, hosts *HostSet) *PseudoFS {
 	sectors := make(map[hostdb.HostPublicKey]*renter.SectorBuilder)
-	for hostKey := range contracts {
+	for hostKey := range hosts.sessions {
 		sectors[hostKey] = new(renter.SectorBuilder)
 	}
 	return &PseudoFS{
 		root:           root,
 		files:          make(map[int]*openMetaFile),
 		dirs:           make(map[int]*os.File),
-		hosts:          NewHostSet(contracts, hkr, currentHeight),
+		hosts:          hosts,
 		sectors:        sectors,
 		lastCommitTime: time.Now(),
 	}

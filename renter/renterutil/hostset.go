@@ -21,7 +21,9 @@ type lockedHost struct {
 
 // A HostSet is a collection of renter-host protocol sessions.
 type HostSet struct {
-	sessions map[hostdb.HostPublicKey]lockedHost
+	sessions      map[hostdb.HostPublicKey]lockedHost
+	hkr           renter.HostKeyResolver
+	currentHeight types.BlockHeight
 }
 
 // Close closes all of the Downloaders in the set.
@@ -52,29 +54,32 @@ func (set *HostSet) release(host hostdb.HostPublicKey) {
 	set.sessions[host].mu.Unlock()
 }
 
-// NewHostSet creates a HostSet composed of one protocol session per contract.
-// If a session cannot be established, that contract is skipped; these errors
-// are exposed via the acquire method.
-func NewHostSet(contracts renter.ContractSet, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) *HostSet {
-	hs := &HostSet{
-		sessions: make(map[hostdb.HostPublicKey]lockedHost),
+// AddHost adds a host to the set, using the provided contract to establish a
+// protocol session. If a session cannot be established, the error is returned,
+// but the host is still added to the set, and the error is exposed via the
+// acquire method.
+func (set *HostSet) AddHost(c proto.ContractEditor) error {
+	hostKey := c.Revision().HostKey()
+	var s *proto.Session
+	hostIP, err := set.hkr.ResolveHostKey(hostKey)
+	if err != nil {
+		err = errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
+	} else {
+		s, err = proto.NewSession(hostIP, c, set.currentHeight)
+		err = errors.Wrapf(err, "%v", hostKey.ShortKey())
 	}
-	for hostKey, contract := range contracts {
-		hostIP, err := hkr.ResolveHostKey(contract.HostKey())
-		if err != nil {
-			err = errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
-			hs.sessions[hostKey] = lockedHost{err: err, mu: new(sync.Mutex)}
-			continue
-		}
-		s, err := proto.NewSession(hostIP, contract, currentHeight)
-		if err != nil {
-			err = errors.Wrapf(err, "%v", hostKey.ShortKey())
-			hs.sessions[hostKey] = lockedHost{err: err, mu: new(sync.Mutex)}
-			continue
-		}
-		hs.sessions[hostKey] = lockedHost{s: s, mu: new(sync.Mutex)}
+	set.sessions[hostKey] = lockedHost{s: s, err: err, mu: new(sync.Mutex)}
+	return err
+}
+
+// NewHostSet creates an empty HostSet using the provided resolver and current
+// height.
+func NewHostSet(hkr renter.HostKeyResolver, currentHeight types.BlockHeight) *HostSet {
+	return &HostSet{
+		hkr:           hkr,
+		currentHeight: currentHeight,
+		sessions:      make(map[hostdb.HostPublicKey]lockedHost),
 	}
-	return hs
 }
 
 // DownloadChunkShards downloads the shards of chunkIndex from hosts in
