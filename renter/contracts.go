@@ -22,7 +22,7 @@ const (
 	ContractHeaderSize = 11 + 1 + 32 + 32 + 32
 
 	// ContractSize is the maximum size in bytes of a contract file.
-	ContractSize = 1024
+	ContractSize = 2048
 
 	// ContractVersion is the current version of the contract file format. It is
 	// incremented after each change to the format.
@@ -138,9 +138,13 @@ func SaveContract(contract proto.ContractRevision, key ed25519.PrivateKey, filen
 		return errors.Wrap(err, "could not create contract file")
 	}
 	defer f.Close()
-	buf := make([]byte, ContractSize)
+	buf := make([]byte, ContractHeaderSize, ContractSize)
 	copy(buf, marshalHeader(contract, key))
-	copy(buf[ContractHeaderSize:], marshalRevision(contract))
+	buf = append(buf, marshalRevision(contract)...)
+	if len(buf) > ContractSize {
+		panic("encoded contract exceeded maximum size")
+	}
+	buf = buf[:ContractSize]
 	if _, err := f.Write(buf); err != nil {
 		return errors.Wrap(err, "could not write contract header and revision")
 	} else if err := f.Sync(); err != nil {
@@ -206,6 +210,10 @@ func ReadContractRevision(filename string) (proto.ContractRevision, error) {
 	b := make([]byte, ContractSize)
 	if _, err := f.ReadAt(b, 0); err != nil {
 		return proto.ContractRevision{}, errors.Wrap(err, "could not read revision")
+	}
+	header := unmarshalHeader(b[:ContractHeaderSize])
+	if err := header.Validate(); err != nil {
+		return proto.ContractRevision{}, errors.Wrap(err, "contract is invalid")
 	}
 	var rev proto.ContractRevision
 	err = unmarshalRevision(b[ContractHeaderSize:], &rev)
