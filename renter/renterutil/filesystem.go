@@ -123,6 +123,7 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 	for fd, of := range fs.files {
 		if of.name == name {
 			of.closed = false
+			of.offset = 0
 			if flag&os.O_APPEND == os.O_APPEND {
 				of.offset = of.filesize()
 			}
