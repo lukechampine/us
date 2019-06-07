@@ -19,7 +19,8 @@ import (
 	"lukechampine.com/walrus"
 )
 
-var errNoHostAnnouncement = errors.New("host announcement not found")
+// ErrNoHostAnnouncement is returned when a host announcement cannot be found.
+var ErrNoHostAnnouncement = errors.New("host announcement not found")
 
 // SiadClient wraps the siad API client. It satisfies the proto.Wallet,
 // proto.TransactionPool, and renter.HostKeyResolver interfaces. The
@@ -120,7 +121,7 @@ func (c *SiadClient) LookupHost(prefix string) (hostdb.HostPublicKey, error) {
 func (c *SiadClient) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAddress, error) {
 	hhg, err := c.siad.HostDbHostsGet(pubkey.SiaPublicKey())
 	if err != nil && strings.Contains(err.Error(), "requested host does not exist") {
-		return "", errNoHostAnnouncement
+		return "", ErrNoHostAnnouncement
 	}
 	return hhg.Entry.NetAddress, err
 }
@@ -183,8 +184,10 @@ func (c *SHARDClient) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAd
 	var ha modules.HostAnnouncement
 	var sig crypto.Signature
 	err := c.req("/host/"+string(pubkey), func(resp *http.Response) error {
-		if resp.ContentLength == 0 {
-			return errNoHostAnnouncement
+		if resp.StatusCode == http.StatusNoContent {
+			return ErrNoHostAnnouncement
+		} else if resp.StatusCode == http.StatusGone {
+			return errors.New("ambiguous pubkey")
 		}
 		return encoding.NewDecoder(resp.Body, encoding.DefaultAllocLimit).DecodeAll(&ha, &sig)
 	})
@@ -206,7 +209,7 @@ func (c *SHARDClient) LookupHost(prefix string) (hostdb.HostPublicKey, error) {
 	var sig crypto.Signature
 	err := c.req("/host/"+prefix, func(resp *http.Response) error {
 		if resp.ContentLength == 0 {
-			return errNoHostAnnouncement
+			return ErrNoHostAnnouncement
 		}
 		return encoding.NewDecoder(resp.Body, encoding.DefaultAllocLimit).DecodeAll(&ha, &sig)
 	})
