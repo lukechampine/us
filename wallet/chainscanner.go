@@ -141,13 +141,13 @@ func (cs *ChainScanner) relevantTxn(txn types.Transaction) map[types.UnlockHash]
 		}
 	}
 	for i := range txn.SiacoinInputs {
-		processAddr(txn.SiacoinInputs[i].UnlockConditions.UnlockHash())
+		processAddr(CalculateUnlockHash(txn.SiacoinInputs[i].UnlockConditions))
 	}
 	for i := range txn.SiacoinOutputs {
 		processAddr(txn.SiacoinOutputs[i].UnlockHash)
 	}
 	for i := range txn.SiafundInputs {
-		processAddr(txn.SiafundInputs[i].UnlockConditions.UnlockHash())
+		processAddr(CalculateUnlockHash(txn.SiafundInputs[i].UnlockConditions))
 		processAddr(txn.SiafundInputs[i].ClaimUnlockHash)
 	}
 	for i := range txn.SiafundOutputs {

@@ -142,6 +142,17 @@ func StandardAddress(pk types.SiaPublicKey) types.UnlockHash {
 	return blake2b.Sum256(buf)
 }
 
+// CalculateUnlockHash calculates the UnlockHash of a set of UnlockConditions.
+// It calls StandardAddress on "standard" UnlockConditions, falling back to the
+// UnlockHash method otherwise. Since the vast majority of UnlockConditions are
+// standard, this results in faster average computation.
+func CalculateUnlockHash(uc types.UnlockConditions) types.UnlockHash {
+	if uc.Timelock == 0 && len(uc.PublicKeys) == 1 && uc.SignaturesRequired == 1 {
+		return StandardAddress(uc.PublicKeys[0])
+	}
+	return uc.UnlockHash()
+}
+
 // StandardTransactionSignature is the most common form of TransactionSignature.
 // It covers the entire transaction and references the first (typically the
 // only) public key.
