@@ -3,6 +3,7 @@ package proto
 import (
 	"encoding/json"
 	"io"
+	"math/bits"
 	"net"
 	"time"
 
@@ -185,6 +186,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	var bandwidth uint64
 	for _, sec := range sections {
 		proofHashes := merkle.ProofSize(merkle.SegmentsPerSector, int(sec.Offset), int(sec.Offset+sec.Length))
+		proofHashes = 2 * bits.Len64(merkle.SegmentsPerSector) // siad host uses worst-case size
 		bandwidth += uint64(sec.Length) + uint64(proofHashes)*crypto.HashSize
 	}
 	if bandwidth < renterhost.MinMessageSize {
