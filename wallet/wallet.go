@@ -43,8 +43,9 @@ type Store interface {
 	ChainHeight() types.BlockHeight
 	FileContracts(n int) []FileContract
 	FileContractHistory(id types.FileContractID) []FileContract
-	LimboOutputs() []LimboOutput
-	MarkSpent(id types.SiacoinOutputID, spent bool)
+	LimboTransactions() []LimboTransaction
+	AddToLimbo(txn types.Transaction)
+	RemoveFromLimbo(id types.TransactionID)
 	Memo(txid types.TransactionID) []byte
 	SetMemo(txid types.TransactionID, memo []byte)
 	Transaction(id types.TransactionID) (types.Transaction, bool)
@@ -197,26 +198,6 @@ func (i *ValuedInput) UnmarshalSia(r io.Reader) error {
 	return encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&i.SiacoinInput, &i.Value)
 }
 
-// A LimboOutput is an output that may or may not be spendable.
-type LimboOutput struct {
-	UnspentOutput
-	LimboSince time.Time
-}
-
-// MarshalSia implements encoding.SiaMarshaler.
-func (o LimboOutput) MarshalSia(w io.Writer) error {
-	since := o.LimboSince.Unix()
-	return encoding.NewEncoder(w).EncodeAll(o.UnspentOutput, since)
-}
-
-// UnmarshalSia implements encoding.SiaUnmarshaler.
-func (o *LimboOutput) UnmarshalSia(r io.Reader) error {
-	var since int64
-	err := encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&o.UnspentOutput, &since)
-	o.LimboSince = time.Unix(since, 0)
-	return err
-}
-
 // A BlockReward is a timelocked output awarded to the miner of a block.
 type BlockReward struct {
 	UnspentOutput
@@ -248,4 +229,57 @@ func (fc FileContract) MarshalSia(w io.Writer) error {
 // UnmarshalSia implements encoding.SiaUnmarshaler.
 func (fc *FileContract) UnmarshalSia(r io.Reader) error {
 	return encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&fc.FileContract, &fc.UnlockConditions, &fc.ID)
+}
+
+// A LimboTransaction is a transaction that has been broadcast, but has not
+// appeared in a block.
+type LimboTransaction struct {
+	types.Transaction
+	LimboSince time.Time
+}
+
+// MarshalSia implements encoding.SiaMarshaler.
+func (txn LimboTransaction) MarshalSia(w io.Writer) error {
+	since := txn.LimboSince.Unix()
+	return encoding.NewEncoder(w).EncodeAll(txn.Transaction, since)
+}
+
+// UnmarshalSia implements encoding.SiaUnmarshaler.
+func (txn *LimboTransaction) UnmarshalSia(r io.Reader) error {
+	var since int64
+	err := encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&txn.Transaction, &since)
+	txn.LimboSince = time.Unix(since, 0)
+	return err
+}
+
+// CalculateLimboOutputs returns the outputs the owner would control if all
+// transactions in limbo were applied.
+func CalculateLimboOutputs(owner AddressOwner, limbo []LimboTransaction, outputs []UnspentOutput) []UnspentOutput {
+	newOutputs := append([]UnspentOutput(nil), outputs...)
+	// first add all newly-created outputs, then delete all spent outputs; this
+	// way, the ordering of the limbo transactions (e.g. if one txn creates an
+	// output spent by another txn) is irrelevant
+	for _, txn := range limbo {
+		for i, o := range txn.SiacoinOutputs {
+			if owner.OwnsAddress(o.UnlockHash) {
+				newOutputs = append(newOutputs, UnspentOutput{
+					SiacoinOutput: o,
+					ID:            txn.SiacoinOutputID(uint64(i)),
+				})
+			}
+		}
+	}
+	for _, txn := range limbo {
+		for _, o := range txn.SiacoinInputs {
+			if owner.OwnsAddress(CalculateUnlockHash(o.UnlockConditions)) {
+				for j := range newOutputs {
+					if newOutputs[j].ID == o.ParentID {
+						newOutputs = append(newOutputs[:j], newOutputs[j+1:]...)
+						break
+					}
+				}
+			}
+		}
+	}
+	return newOutputs
 }

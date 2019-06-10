@@ -29,8 +29,7 @@ var (
 	// bucketAddrs stores the set of watched addresses.
 	bucketAddrs = []byte("bucketAddrs")
 
-	// bucketOutputs maps SiacoinOutputIDs to LimboOutputs. If an output is not
-	// in limbo, its LimboSince is set to notLimboTime.
+	// bucketOutputs maps SiacoinOutputIDs to UnspentOutputs.
 	bucketOutputs = []byte("bucketOutputs")
 
 	// bucketBlockRewards contains a list of BlockRewards, sorted by insertion date.
@@ -51,21 +50,22 @@ var (
 	// bucketTxnsRecentIndex contains a list of TransactionIDs, sorted by insertion date.
 	bucketTxnsRecentIndex = []byte("bucketTxnsRecentIndex")
 
+	// bucketLimbo maps TransactionIDs to LimboTransactions.
+	bucketLimbo = []byte("bucketLimbo")
+
 	dbBuckets = [][]byte{
-		bucketMeta,
 		bucketAddrs,
-		bucketOutputs,
 		bucketBlockRewards,
 		bucketFileContracts,
+		bucketLimbo,
 		bucketMemos,
+		bucketMeta,
+		bucketOutputs,
 		bucketTxns,
 		bucketTxnsAddrIndex,
 		bucketTxnsRecentIndex,
 	}
 )
-
-// notLimboTime is a sentinel value for outputs that are not in limbo.
-var notLimboTime = time.Time{}
 
 // BoltDBStore implements SeedStore and WatchOnlyStore with a Bolt key-value
 // database.
@@ -125,6 +125,7 @@ func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusC
 		for _, txn := range reverted.Transactions {
 			txid := txn.ID()
 			tx.Bucket(bucketTxns).Delete(txid[:])
+			tx.Bucket(bucketLimbo).Delete(txid[:])
 			c := tx.Bucket(bucketTxnsRecentIndex).Cursor()
 			for k, v := c.Last(); k != nil; k, v = c.Prev() {
 				if bytes.Equal(v, txid[:]) {
@@ -150,8 +151,7 @@ func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusC
 		}
 
 		for _, o := range applied.Outputs {
-			lo := LimboOutput{UnspentOutput: o, LimboSince: notLimboTime}
-			tx.Bucket(bucketOutputs).Put(o.ID[:], encoding.Marshal(lo))
+			tx.Bucket(bucketOutputs).Put(o.ID[:], encoding.Marshal(o))
 		}
 		if len(applied.BlockRewards) > 0 {
 			seq, _ := tx.Bucket(bucketBlockRewards).NextSequence()
@@ -174,6 +174,7 @@ func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusC
 		for _, txn := range applied.Transactions {
 			txid := txn.ID()
 			tx.Bucket(bucketTxns).Put(txid[:], encoding.Marshal(txn))
+			tx.Bucket(bucketLimbo).Delete(txid[:])
 			seq, _ := tx.Bucket(bucketTxnsRecentIndex).NextSequence()
 			seqBytes := make([]byte, 8)
 			binary.BigEndian.PutUint64(seqBytes, seq)
@@ -204,27 +205,46 @@ func (s *BoltDBStore) UnspentOutputs() (outputs []UnspentOutput) {
 	s.view(func(tx *bolt.Tx) error {
 		c := tx.Bucket(bucketOutputs).Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			var o LimboOutput
+			var o UnspentOutput
 			encoding.Unmarshal(v, &o)
-			if o.LimboSince.Equal(notLimboTime) {
-				outputs = append(outputs, o.UnspentOutput)
-			}
+			outputs = append(outputs, o)
 		}
 		return nil
 	})
 	return
 }
 
-// LimboOutputs implements Store.
-func (s *BoltDBStore) LimboOutputs() (outputs []LimboOutput) {
+// AddToLimbo implements Store.
+func (s *BoltDBStore) AddToLimbo(txn types.Transaction) {
+	s.update(func(tx *bolt.Tx) error {
+		txid := txn.ID()
+		if tx.Bucket(bucketLimbo).Get(txid[:]) != nil {
+			return nil // don't overwrite older LimboSince
+		}
+		return tx.Bucket(bucketLimbo).Put(txid[:], encoding.Marshal(LimboTransaction{
+			Transaction: txn,
+			LimboSince:  time.Now(),
+		}))
+	})
+	return
+}
+
+// RemoveFromLimbo implements Store.
+func (s *BoltDBStore) RemoveFromLimbo(id types.TransactionID) {
+	s.update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketLimbo).Delete(id[:])
+	})
+	return
+}
+
+// LimboTransactions implements Store.
+func (s *BoltDBStore) LimboTransactions() (txns []LimboTransaction) {
 	s.view(func(tx *bolt.Tx) error {
-		c := tx.Bucket(bucketOutputs).Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			var o LimboOutput
-			encoding.Unmarshal(v, &o)
-			if !o.LimboSince.Equal(notLimboTime) {
-				outputs = append(outputs, o)
-			}
+		c := tx.Bucket(bucketLimbo).Cursor()
+		for k, v := c.Last(); k != nil; k, v = c.Prev() {
+			var txn LimboTransaction
+			encoding.Unmarshal(v, &txn)
+			txns = append(txns, txn)
 		}
 		return nil
 	})
@@ -334,25 +354,6 @@ func (s *BoltDBStore) Memo(txid types.TransactionID) (memo []byte) {
 		return nil
 	})
 	return
-}
-
-// MarkSpent implements Store.
-func (s *BoltDBStore) MarkSpent(id types.SiacoinOutputID, spent bool) {
-	s.update(func(tx *bolt.Tx) error {
-		v := append([]byte(nil), tx.Bucket(bucketOutputs).Get(id[:])...)
-		if len(v) == 0 {
-			return nil
-		}
-		var since time.Time
-		if spent {
-			since = time.Now()
-		} else {
-			since = notLimboTime
-		}
-		binary.LittleEndian.PutUint64(v[len(v)-8:], uint64(since.Unix()))
-		tx.Bucket(bucketOutputs).Put(id[:], v)
-		return nil
-	})
 }
 
 // ChainHeight implements Store.

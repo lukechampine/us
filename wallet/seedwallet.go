@@ -90,12 +90,10 @@ func (w *SeedWallet) AddressInfo(addr types.UnlockHash) (SeedAddressInfo, bool) 
 	}, ok1 && ok2
 }
 
-// Balance returns the siacoin balance of the wallet. Unconfirmed transactions
-// are not reflected in the balance.
-func (w *SeedWallet) Balance() types.Currency {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return SumOutputs(w.store.UnspentOutputs())
+// Balance returns the siacoin balance of the wallet. If the limbo flag is true,
+// the balance reflects any transactions currently in Limbo.
+func (w *SeedWallet) Balance(limbo bool) types.Currency {
+	return SumOutputs(w.UnspentOutputs(limbo))
 }
 
 // OwnsAddress reports whether addr was generated from the wallet's seed.
@@ -104,13 +102,6 @@ func (w *SeedWallet) OwnsAddress(addr types.UnlockHash) bool {
 	owned := w.sm.OwnsAddress(addr)
 	w.mu.Unlock()
 	return owned
-}
-
-// MarkSpent marks an output as spent or unspent.
-func (w *SeedWallet) MarkSpent(id types.SiacoinOutputID, spent bool) {
-	w.mu.Lock()
-	w.store.MarkSpent(id, spent)
-	w.mu.Unlock()
 }
 
 // NextAddress returns a new address derived from the wallet's Seed and
@@ -142,11 +133,16 @@ func (w *SeedWallet) SignTransaction(txn *types.Transaction, toSign []int) error
 	return w.sm.SignTransaction(txn, toSign)
 }
 
-// UnspentOutputs returns the spendable outputs tracked by the wallet.
-func (w *SeedWallet) UnspentOutputs() []UnspentOutput {
+// UnspentOutputs returns the spendable outputs tracked by the wallet. If the
+// limbo flag is true, the outputs reflect any transactions currently in Limbo.
+func (w *SeedWallet) UnspentOutputs(limbo bool) []UnspentOutput {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.store.UnspentOutputs()
+	outputs := w.store.UnspentOutputs()
+	if limbo {
+		outputs = CalculateLimboOutputs(w.sm, w.store.LimboTransactions(), outputs)
+	}
+	return outputs
 }
 
 // ValuedInputs returns the spendable outputs tracked by the wallet along with
@@ -157,12 +153,27 @@ func (w *SeedWallet) ValuedInputs() []ValuedInput {
 	return w.fillUnlockConditions(w.store.UnspentOutputs())
 }
 
-// LimboOutputs returns the outputs that have been marked as spent, but have not
-// been confirmed spent in the blockchain.
-func (w *SeedWallet) LimboOutputs() []LimboOutput {
+// AddToLimbo stores a transaction in Limbo. If the transaction is already in
+// Limbo, its LimboSince timestamp is not updated.
+func (w *SeedWallet) AddToLimbo(txn types.Transaction) {
+	w.mu.Lock()
+	w.store.AddToLimbo(txn)
+	w.mu.Unlock()
+}
+
+// RemoveFromLimbo removes a transaction from Limbo.
+func (w *SeedWallet) RemoveFromLimbo(txid types.TransactionID) {
+	w.mu.Lock()
+	w.store.RemoveFromLimbo(txid)
+	w.mu.Unlock()
+}
+
+// LimboTransactions returns the transactions that have been broadcast, but have
+// not appeared in the blockchain.
+func (w *SeedWallet) LimboTransactions() []LimboTransaction {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.store.LimboOutputs()
+	return w.store.LimboTransactions()
 }
 
 // SetMemo sets the memo associated with the specified transaction.

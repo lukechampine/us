@@ -267,7 +267,7 @@ func (c *WalrusClient) SignTransaction(txn *types.Transaction, toSign []crypto.H
 // UnspentOutputs returns the set of outputs tracked by the wallet that are
 // spendable.
 func (c *WalrusClient) UnspentOutputs() ([]modules.UnspentOutput, error) {
-	utxos, err := c.walrus.UnspentOutputs()
+	utxos, err := c.walrus.UnspentOutputs(false)
 	outputs := make([]modules.UnspentOutput, len(utxos))
 	for i := range outputs {
 		outputs[i] = modules.UnspentOutput{

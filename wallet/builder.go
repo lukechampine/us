@@ -4,7 +4,6 @@ import (
 	"math/big"
 	"unsafe"
 
-	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/ed25519"
 )
@@ -75,54 +74,41 @@ func AppendTransactionSignature(txn *types.Transaction, txnSig types.Transaction
 	txn.TransactionSignatures[sigIndex].Signature = key.SignHash(txn.SigHash(sigIndex, types.ASICHardforkHeight+1))
 }
 
-// UnconfirmedParents returns the parent transactions of txn that have not yet
-// appeared in the blockchain.
-func UnconfirmedParents(txn types.Transaction, tp TransactionPool) []types.Transaction {
-	var parents []types.Transaction
+// UnconfirmedParents returns the parents of txn that are in limbo.
+func UnconfirmedParents(txn types.Transaction, limbo []LimboTransaction) []LimboTransaction {
+	// first, map each output created in a limbo transaction to its parent
+	outputToParent := make(map[types.OutputID]*LimboTransaction)
+	for i := range limbo {
+		for j := range limbo[i].SiacoinOutputs {
+			scoid := limbo[i].SiacoinOutputID(uint64(j))
+			outputToParent[types.OutputID(scoid)] = &limbo[i]
+		}
+		for j := range limbo[i].SiafundOutputs {
+			sfoid := limbo[i].SiafundOutputID(uint64(j))
+			outputToParent[types.OutputID(sfoid)] = &limbo[i]
+		}
+	}
+
+	// then, for each input spent in txn, if that input was created by a limbo
+	// transaction, add that limbo transaction to the returned set.
+	var parents []LimboTransaction
 	seen := make(map[types.TransactionID]struct{})
-
-sciLoop:
+	addParent := func(parent *LimboTransaction) {
+		txid := parent.ID()
+		if _, ok := seen[txid]; !ok {
+			seen[txid] = struct{}{}
+			parents = append(parents, *parent)
+		}
+	}
 	for _, sci := range txn.SiacoinInputs {
-		uh := sci.UnlockConditions.UnlockHash()
-		parentSet := tp.TransactionSet(crypto.Hash(sci.ParentID))
-		for _, parentTxn := range parentSet {
-			txid := parentTxn.ID()
-			if _, ok := seen[txid]; ok {
-				continue
-			}
-			seen[txid] = struct{}{}
-			parents = append(parents, parentTxn)
-
-			// If this is the transaction that created the input, stop here.
-			// There may be additional children in the parentSet, but we don't
-			// need (or want) to include them.
-			for i, sco := range parentTxn.SiacoinOutputs {
-				// check UnlockHash first; calculating IDs is expensive
-				if sco.UnlockHash == uh && parentTxn.SiacoinOutputID(uint64(i)) == sci.ParentID {
-					continue sciLoop
-				}
-			}
+		if parent, ok := outputToParent[types.OutputID(sci.ParentID)]; ok {
+			addParent(parent)
 		}
 	}
-
-sfiLoop:
 	for _, sfi := range txn.SiafundInputs {
-		uh := sfi.UnlockConditions.UnlockHash()
-		parentSet := tp.TransactionSet(crypto.Hash(sfi.ParentID))
-		for _, parentTxn := range parentSet {
-			txid := parentTxn.ID()
-			if _, ok := seen[txid]; ok {
-				continue
-			}
-			seen[txid] = struct{}{}
-			parents = append(parents, parentTxn)
-			for i, sco := range parentTxn.SiacoinOutputs {
-				if sco.UnlockHash == uh && parentTxn.SiafundOutputID(uint64(i)) == sfi.ParentID {
-					continue sfiLoop
-				}
-			}
+		if parent, ok := outputToParent[types.OutputID(sfi.ParentID)]; ok {
+			addParent(parent)
 		}
 	}
-
 	return parents
 }

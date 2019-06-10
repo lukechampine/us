@@ -31,7 +31,7 @@ func TestWatchOnlyWallet(t *testing.T) {
 	cs.ConsensusSetSubscribe(w, store.ConsensusChangeID(), nil)
 
 	// initial balance should be zero
-	if !w.Balance().IsZero() {
+	if !w.Balance(false).IsZero() {
 		t.Fatal("balance should be zero")
 	}
 
@@ -71,7 +71,7 @@ func TestWatchOnlyWallet(t *testing.T) {
 	})
 
 	// get new balance
-	if !w.Balance().Equals(types.SiacoinPrecision) {
+	if !w.Balance(false).Equals(types.SiacoinPrecision) {
 		t.Fatal("balance should be 1 SC")
 	}
 
@@ -88,7 +88,7 @@ func TestWatchOnlyWallet(t *testing.T) {
 	}
 
 	// create an unsigned transaction using available outputs
-	outputs := w.UnspentOutputs()
+	outputs := w.UnspentOutputs(true)
 	if len(outputs) != 2 {
 		t.Fatal("should have two UTXOs")
 	}
@@ -125,34 +125,41 @@ func TestWatchOnlyWallet(t *testing.T) {
 	if err := txn.StandaloneValid(types.ASICHardforkHeight + 1); err != nil {
 		t.Fatal(err)
 	}
-	// simulate broadcasting by marking the inputs as spent
-	for _, o := range txn.SiacoinInputs {
-		if w.OwnsAddress(o.UnlockConditions.UnlockHash()) {
-			w.MarkSpent(o.ParentID, true)
-		}
+
+	// simulate broadcasting by putting the transaction in limbo
+	w.AddToLimbo(txn)
+	// set and retrieve a memo for the transaction
+	w.SetMemo(txn.ID(), []byte("test txn"))
+	if string(w.Memo(txn.ID())) != "test txn" {
+		t.Fatal("wrong memo for transaction")
 	}
 
-	// outputs should no longer be reported as spendable
-	outputs = w.UnspentOutputs()
-	if len(outputs) != 0 {
-		t.Fatal("should have zero UTXOs")
-	}
-
-	// instead, they should appear in limbo
-	limbo := w.LimboOutputs()
-	if len(limbo) != 2 {
-		t.Fatal("should have two UTXOs in limbo")
-	}
-
-	// bring back an output from limbo
-	w.MarkSpent(limbo[0].ID, false)
-	outputs = w.UnspentOutputs()
+	// with limbo transactions applied, we should only have one UTXO (the change
+	// output created by the transaction)
+	outputs = w.UnspentOutputs(true)
 	if len(outputs) != 1 {
 		t.Fatal("should have one UTXO")
+	} else if outputs[0].UnlockHash != addr {
+		t.Fatal("UTXO should be sent to addr")
 	}
-	limbo = w.LimboOutputs()
+
+	// the spent outputs should appear in the limbo transaction
+	limbo := w.LimboTransactions()
 	if len(limbo) != 1 {
-		t.Fatal("should have one UTXO in limbo")
+		t.Fatal("should have one transaction in limbo")
+	} else if len(limbo[0].SiacoinInputs) != 2 {
+		t.Fatal("limbo transaction should have two inputs")
+	}
+
+	// bring the transaction back from limbo
+	w.RemoveFromLimbo(limbo[0].ID())
+	// we should have two UTXOs again
+	if limbo := w.LimboTransactions(); len(limbo) != 0 {
+		t.Fatal("limbo should be empty")
+	} else if len(w.UnspentOutputs(true)) != len(w.UnspentOutputs(false)) {
+		t.Fatal("w.UnspentOutputs(true) should match w.UnspentOutputs(false) when limbo is empty")
+	} else if len(w.UnspentOutputs(false)) != 2 {
+		t.Fatal("should have two UTXOs")
 	}
 }
 
@@ -179,7 +186,7 @@ func TestWatchOnlyWalletThreadSafety(t *testing.T) {
 	// concurrently
 	funcs := []func(){
 		func() { cs.sendTxn(txn) },
-		func() { _ = w.Balance() },
+		func() { _ = w.Balance(true) },
 		func() { w.AddAddress(randomAddr(), nil) },
 		func() { w.RemoveAddress(randomAddr()) },
 		func() { _ = w.Addresses() },

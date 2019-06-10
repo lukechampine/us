@@ -22,12 +22,10 @@ func (w *WatchOnlyWallet) ProcessConsensusChange(cc modules.ConsensusChange) {
 	w.mu.Unlock()
 }
 
-// Balance returns the siacoin balance of the wallet. Unconfirmed transactions
-// are not reflected in the balance.
-func (w *WatchOnlyWallet) Balance() types.Currency {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return SumOutputs(w.store.UnspentOutputs())
+// Balance returns the siacoin balance of the wallet. If the limbo flag is true,
+// the balance reflects any transactions currently in Limbo.
+func (w *WatchOnlyWallet) Balance(limbo bool) types.Currency {
+	return SumOutputs(w.UnspentOutputs(limbo))
 }
 
 // ConsensusChangeID returns the ConsensusChangeID most recently processed by
@@ -43,13 +41,6 @@ func (w *WatchOnlyWallet) ChainHeight() types.BlockHeight {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.store.ChainHeight()
-}
-
-// MarkSpent marks an output as spent or unspent.
-func (w *WatchOnlyWallet) MarkSpent(id types.SiacoinOutputID, spent bool) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.store.MarkSpent(id, spent)
 }
 
 // OwnsAddress reports whether addr is being tracked by the wallet.
@@ -88,19 +79,39 @@ func (w *WatchOnlyWallet) RemoveAddress(addr types.UnlockHash) {
 	w.store.RemoveAddress(addr)
 }
 
-// UnspentOutputs returns the spendable outputs tracked by the wallet.
-func (w *WatchOnlyWallet) UnspentOutputs() []UnspentOutput {
+// UnspentOutputs returns the spendable outputs tracked by the wallet. If the
+// limbo flag is true, the outputs reflect any transactions currently in Limbo.
+func (w *WatchOnlyWallet) UnspentOutputs(limbo bool) []UnspentOutput {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.store.UnspentOutputs()
+	outputs := w.store.UnspentOutputs()
+	if limbo {
+		outputs = CalculateLimboOutputs(w.store, w.store.LimboTransactions(), outputs)
+	}
+	return outputs
 }
 
-// LimboOutputs returns the outputs that have been marked as spent, but have
-// not been confirmed spent in the blockchain.
-func (w *WatchOnlyWallet) LimboOutputs() []LimboOutput {
+// AddToLimbo stores a transaction in Limbo. If the transaction is already in
+// Limbo, its LimboSince timestamp is not updated.
+func (w *WatchOnlyWallet) AddToLimbo(txn types.Transaction) {
+	w.mu.Lock()
+	w.store.AddToLimbo(txn)
+	w.mu.Unlock()
+}
+
+// RemoveFromLimbo removes a transaction from Limbo.
+func (w *WatchOnlyWallet) RemoveFromLimbo(txid types.TransactionID) {
+	w.mu.Lock()
+	w.store.RemoveFromLimbo(txid)
+	w.mu.Unlock()
+}
+
+// LimboTransactions returns the transactions that have been broadcast, but have
+// not appeared in the blockchain.
+func (w *WatchOnlyWallet) LimboTransactions() []LimboTransaction {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.store.LimboOutputs()
+	return w.store.LimboTransactions()
 }
 
 // SetMemo sets the memo associated with the specified transaction.
