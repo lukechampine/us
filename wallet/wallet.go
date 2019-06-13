@@ -12,19 +12,6 @@ import (
 	"golang.org/x/crypto/blake2b"
 )
 
-// A ConsensusSet notifies subscribers of new consensus changes.
-type ConsensusSet interface {
-	ConsensusSetSubscribe(s modules.ConsensusSetSubscriber, ccid modules.ConsensusChangeID, cancel <-chan struct{}) error
-}
-
-// A TransactionPool can broadcast transactions and estimate transaction
-// fees.
-type TransactionPool interface {
-	AcceptTransactionSet([]types.Transaction) error
-	FeeEstimation() (min types.Currency, max types.Currency)
-	TransactionSet(id crypto.Hash) []types.Transaction
-}
-
 // An AddressOwner claims ownership of addresses.
 type AddressOwner interface {
 	OwnsAddress(addr types.UnlockHash) bool
