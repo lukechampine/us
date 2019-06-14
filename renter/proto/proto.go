@@ -18,6 +18,7 @@ type (
 		NewWalletAddress() (types.UnlockHash, error)
 		SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error
 		UnspentOutputs() ([]modules.UnspentOutput, error)
+		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 		UnlockConditions(addr types.UnlockHash) (types.UnlockConditions, error)
 	}
 	// A TransactionPool can broadcast transactions and estimate transaction

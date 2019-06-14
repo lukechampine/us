@@ -117,9 +117,15 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, contract Contra
 		return ContractRevision{}, err
 	}
 
+	// include any unconfirmed parent transactions
+	parents, err := w.UnconfirmedParents(txn)
+	if err != nil {
+		return ContractRevision{}, err
+	}
+
 	s.extendDeadline(60 * time.Second)
 	req := &renterhost.RPCFormContractRequest{
-		Transactions: []types.Transaction{txn},
+		Transactions: append(parents, txn),
 		RenterKey:    contract.Revision().Revision.UnlockConditions.PublicKeys[0],
 	}
 	if err := s.sess.WriteRequest(renterhost.RPCRenewContractID, req); err != nil {
@@ -199,7 +205,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, contract Contra
 	txn.TransactionSignatures = append(txn.TransactionSignatures, hostSigs.ContractSignatures...)
 
 	// submit contract txn to tpool
-	signedTxnSet := append(resp.Parents, txn)
+	signedTxnSet := append(resp.Parents, append(parents, txn)...)
 	err = tpool.AcceptTransactionSet(signedTxnSet)
 	if err != nil && err != modules.ErrDuplicateTransactionSet {
 		return ContractRevision{}, errors.Wrap(err, "contract transaction was not accepted")

@@ -25,6 +25,7 @@ type stubWallet struct{}
 func (stubWallet) NewWalletAddress() (uh types.UnlockHash, err error)                       { return }
 func (stubWallet) SignTransaction(*types.Transaction, []crypto.Hash) (err error)            { return }
 func (stubWallet) UnspentOutputs() (us []modules.UnspentOutput, err error)                  { return }
+func (stubWallet) UnconfirmedParents(types.Transaction) (ps []types.Transaction, err error) { return }
 func (stubWallet) UnlockConditions(types.UnlockHash) (uc types.UnlockConditions, err error) { return }
 
 type stubTpool struct{}

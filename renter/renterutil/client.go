@@ -82,6 +82,12 @@ func (c *SiadClient) UnspentOutputs() ([]modules.UnspentOutput, error) {
 	return wug.Outputs, err
 }
 
+// UnconfirmedParents returns any currently-unconfirmed parents of the specified
+// transaction.
+func (c *SiadClient) UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error) {
+	return nil, nil // not supported
+}
+
 // UnlockConditions returns the UnlockConditions that correspond to the
 // specified address.
 func (c *SiadClient) UnlockConditions(addr types.UnlockHash) (types.UnlockConditions, error) {
@@ -278,6 +284,17 @@ func (c *WalrusClient) UnspentOutputs() ([]modules.UnspentOutput, error) {
 		}
 	}
 	return outputs, err
+}
+
+// UnconfirmedParents returns any currently-unconfirmed parents of the specified
+// transaction.
+func (c *WalrusClient) UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error) {
+	limboParents, err := c.walrus.UnconfirmedParents(txn)
+	parents := make([]types.Transaction, len(limboParents))
+	for i := range parents {
+		parents[i] = limboParents[i].Transaction
+	}
+	return parents, err
 }
 
 // UnlockConditions returns the UnlockConditions that correspond to the
