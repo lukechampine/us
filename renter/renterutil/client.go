@@ -16,6 +16,8 @@ import (
 	"gitlab.com/NebulousLabs/Sia/node/api/client"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/walrus"
 )
 
@@ -309,3 +311,17 @@ func (c *WalrusClient) UnlockConditions(addr types.UnlockHash) (types.UnlockCond
 func NewWalrusClient(addr string) *WalrusClient {
 	return &WalrusClient{walrus.NewSeedClient(addr)}
 }
+
+// verify that clients satisfy their intended interfaces
+var (
+	_ interface {
+		proto.Wallet
+		proto.TransactionPool
+		renter.HostKeyResolver
+	} = (*SiadClient)(nil)
+	_ interface {
+		proto.Wallet
+		proto.TransactionPool
+	} = (*WalrusClient)(nil)
+	_ renter.HostKeyResolver = (*SHARDClient)(nil)
+)
