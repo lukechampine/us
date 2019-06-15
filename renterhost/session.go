@@ -56,6 +56,7 @@ type Session struct {
 	inbuf     objBuffer
 	outbuf    objBuffer
 	challenge [16]byte
+	closed    bool
 	isRenter  bool
 }
 
@@ -190,6 +191,10 @@ func (s *Session) ReadResponse(resp ProtocolObject, maxLen uint64) error {
 
 // Close gracefully terminates the RPC loop and closes the connection.
 func (s *Session) Close() error {
+	if s.closed {
+		return nil
+	}
+	s.closed = true
 	if s.isRenter {
 		s.WriteRequest(loopExit, nil)
 	}
