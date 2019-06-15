@@ -23,12 +23,12 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 	if err := s.Lock(contract); err != nil {
 		return ContractRevision{}, err
 	}
-	return s.RenewContract(w, tpool, contract, renterPayout, startHeight, endHeight)
+	return s.RenewContract(w, tpool, renterPayout, startHeight, endHeight)
 }
 
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host.
-func (s *Session) RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
+func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
 	if endHeight < startHeight {
 		return ContractRevision{}, errors.New("end height must be greater than start height")
 	}
@@ -60,7 +60,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, contract Contra
 
 	// Calculate additional basePrice and baseCollateral. If the contract
 	// height did not increase, basePrice and baseCollateral are zero.
-	currentRevision := contract.Revision().Revision
+	currentRevision := s.contract.Revision().Revision
 	var basePrice, baseCollateral types.Currency
 	if endHeight+s.host.WindowSize > currentRevision.NewWindowEnd {
 		timeExtension := uint64((endHeight + s.host.WindowSize) - currentRevision.NewWindowEnd)
@@ -126,7 +126,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, contract Contra
 	s.extendDeadline(60 * time.Second)
 	req := &renterhost.RPCFormContractRequest{
 		Transactions: append(parents, txn),
-		RenterKey:    contract.Revision().Revision.UnlockConditions.PublicKeys[0],
+		RenterKey:    s.contract.Revision().Revision.UnlockConditions.PublicKeys[0],
 	}
 	if err := s.sess.WriteRequest(renterhost.RPCRenewContractID, req); err != nil {
 		return ContractRevision{}, err
@@ -185,7 +185,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, contract Contra
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 0,
-		Signature:      contract.Key().SignHash(renterhost.HashRevision(initRevision)),
+		Signature:      s.contract.Key().SignHash(renterhost.HashRevision(initRevision)),
 	}
 
 	// Send signatures.
