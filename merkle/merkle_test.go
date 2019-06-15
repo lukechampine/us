@@ -297,7 +297,7 @@ func TestBuildVerifyProof(t *testing.T) {
 	// test some random proofs against VerifyProof
 	for i := 0; i < 5; i++ {
 		start := fastrand.Intn(SegmentsPerSector - 1)
-		end := start + fastrand.Intn(SegmentsPerSector-start)
+		end := start + fastrand.Intn(SegmentsPerSector-start) + 1
 		proof := BuildProof(&sector, start, end, nil)
 		if !VerifyProof(proof, sector[start*SegmentSize:end*SegmentSize], start, end, sectorRoot) {
 			t.Errorf("BuildProof constructed an incorrect proof for range %v-%v", start, end)
