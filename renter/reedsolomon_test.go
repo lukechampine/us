@@ -29,7 +29,7 @@ func encodeAlloc(rsc ErasureCoder, data []byte) [][]byte {
 
 func checkRecover(rsc ErasureCoder, shards [][]byte, data []byte) bool {
 	var buf bytes.Buffer
-	if err := rsc.Recover(&buf, shards, len(data)); err != nil {
+	if err := rsc.Recover(&buf, shards, 0, len(data)); err != nil {
 		return false
 	}
 	return bytes.Equal(buf.Bytes(), data)
@@ -146,7 +146,7 @@ func BenchmarkReedSolomon(b *testing.B) {
 				for j := range shards[:r] {
 					shards[j] = shards[j][:0]
 				}
-				if err := rsc.Recover(ioutil.Discard, shards, len(data)); err != nil {
+				if err := rsc.Recover(ioutil.Discard, shards, 0, len(data)); err != nil {
 					b.Fatal(err)
 				}
 			}

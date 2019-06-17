@@ -82,6 +82,6 @@ func BenchmarkIdealDownload(b *testing.B) {
 		for i := range shards[:10] {
 			key.XORKeyStream(shards[i*2], nonce, 0)
 		}
-		rsc.Recover(ioutil.Discard, shards, renterhost.SectorSize*10)
+		rsc.Recover(ioutil.Discard, shards, 0, renterhost.SectorSize*10)
 	}
 }

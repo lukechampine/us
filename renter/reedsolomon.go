@@ -23,8 +23,8 @@ type ErasureCoder interface {
 	// zero.
 	Reconstruct(shards [][]byte) error
 	// Recover recalculates any missing data shards and writes them to w,
-	// stopping after n bytes.
-	Recover(w io.Writer, shards [][]byte, n int) error
+	// skipping the first off bytes and stopping after n bytes.
+	Recover(w io.Writer, shards [][]byte, off, n int) error
 }
 
 type rsCode struct {
@@ -94,12 +94,12 @@ func (rsc rsCode) Reconstruct(shards [][]byte) error {
 	return rsc.enc.ReconstructMulti(shards, merkle.SegmentSize)
 }
 
-func (rsc rsCode) Recover(w io.Writer, shards [][]byte, n int) error {
+func (rsc rsCode) Recover(w io.Writer, shards [][]byte, off, n int) error {
 	checkShards(shards, rsc.n)
 	if err := rsc.enc.ReconstructDataMulti(shards, merkle.SegmentSize); err != nil {
 		return err
 	}
-	return rsc.enc.JoinMulti(w, shards, merkle.SegmentSize, n)
+	return rsc.enc.JoinMulti(w, shards, merkle.SegmentSize, off, n)
 }
 
 // NewRSCode returns an m-of-n ErasureCoder. It panics if m <= 0 or n < m.
@@ -153,7 +153,7 @@ func (r simpleRedundancy) Reconstruct(shards [][]byte) error {
 	return r.checkShards(shards)
 }
 
-func (r simpleRedundancy) Recover(dst io.Writer, shards [][]byte, n int) error {
+func (r simpleRedundancy) Recover(dst io.Writer, shards [][]byte, skip, n int) error {
 	if err := r.checkShards(shards); err != nil {
 		return err
 	}
@@ -161,6 +161,13 @@ func (r simpleRedundancy) Recover(dst io.Writer, shards [][]byte, n int) error {
 	for off := 0; rem > 0; off += merkle.SegmentSize {
 		for _, shard := range shards {
 			s := shard[off:][:merkle.SegmentSize]
+			if skip >= len(s) {
+				skip -= len(s)
+				continue
+			} else if skip > 0 {
+				s = s[skip:]
+				skip = 0
+			}
 			if rem < len(s) {
 				s = s[:rem]
 			}

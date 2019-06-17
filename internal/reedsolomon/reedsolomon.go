@@ -885,8 +885,10 @@ func (r *ReedSolomon) Join(dst io.Writer, shards [][]byte, outSize int) error {
 	return nil
 }
 
-// JoinMulti joins the supplied multi-block shards, writing them to dst.
-func (r *ReedSolomon) JoinMulti(dst io.Writer, shards [][]byte, subsize int, outSize int) error {
+// JoinMulti joins the supplied multi-block shards, writing them to dst. The
+// first 'skip' bytes of the recovered data are skipped, and 'writeLen' bytes
+// are written in total.
+func (r *ReedSolomon) JoinMulti(dst io.Writer, shards [][]byte, subsize, skip, writeLen int) error {
 	// Do we have enough shards?
 	if len(shards) < r.DataShards {
 		return ErrTooFewShards
@@ -900,28 +902,33 @@ func (r *ReedSolomon) JoinMulti(dst io.Writer, shards [][]byte, subsize int, out
 			return ErrReconstructRequired
 		}
 		size += len(shard)
-		if size >= outSize {
+		if size >= writeLen {
 			break
 		}
 	}
-	if size < outSize {
+	if size < writeLen {
 		return ErrShortData
 	}
 
-	// Copy data to dst
-	write := outSize
-
-	for off := 0; write > 0; off += subsize {
+	// Copy data to dst.
+	for off := 0; writeLen > 0; off += subsize {
 		for _, shard := range shards {
 			shard = shard[off:][:subsize]
-			if write < len(shard) {
-				shard = shard[:write]
+			if skip >= len(shard) {
+				skip -= len(shard)
+				continue
+			} else if skip > 0 {
+				shard = shard[skip:]
+				skip = 0
+			}
+			if writeLen < len(shard) {
+				shard = shard[:writeLen]
 			}
 			n, err := dst.Write(shard)
 			if err != nil {
 				return err
 			}
-			write -= n
+			writeLen -= n
 		}
 	}
 	return nil

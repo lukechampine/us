@@ -14,27 +14,6 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
-// helper type that skips a prefix of the bytes written to it; used to trim
-// chunks during erasure decoding
-type skipWriter struct {
-	buf  []byte
-	skip int
-}
-
-func (sw *skipWriter) Write(p []byte) (int, error) {
-	toSkip := sw.skip
-	if toSkip > len(p) {
-		toSkip = len(p)
-	}
-	if len(p[toSkip:]) > len(sw.buf) {
-		panic("write is too large for buffer")
-	}
-	n := copy(sw.buf, p[toSkip:])
-	sw.buf = sw.buf[n:]
-	sw.skip -= toSkip
-	return len(p), nil
-}
-
 type openMetaFile struct {
 	name          string
 	m             *renter.MetaFile
@@ -483,8 +462,7 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 		}
 	}
 	skip := int(off % f.m.MinChunkSize())
-	w := &skipWriter{p, skip}
-	err := f.m.ErasureCode().Recover(w, shards, skip+len(p))
+	err := f.m.ErasureCode().Recover(bytes.NewBuffer(p[:0]), shards, skip, len(p))
 	if err != nil {
 		return 0, errors.Wrap(err, "could not recover chunk")
 	}
