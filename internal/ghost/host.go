@@ -1,7 +1,6 @@
 package ghost
 
 import (
-	"encoding/hex"
 	"net"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
@@ -31,7 +30,7 @@ type Host struct {
 }
 
 func (h *Host) PublicKey() hostdb.HostPublicKey {
-	return hostdb.HostPublicKey("ed25519:" + hex.EncodeToString(h.secretKey.PublicKey()))
+	return hostdb.HostKeyFromPublicKey(h.secretKey.PublicKey())
 }
 
 func (h *Host) Settings() hostdb.HostSettings {

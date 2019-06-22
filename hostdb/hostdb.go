@@ -69,6 +69,19 @@ func (hpk HostPublicKey) VerifyHash(hash crypto.Hash, sig []byte) bool {
 	return hpk.Ed25519().VerifyHash(hash, sig)
 }
 
+// HostKeyFromPublicKey converts an ed25519.PublicKey to a HostPublicKey.
+func HostKeyFromPublicKey(pk ed25519.PublicKey) HostPublicKey {
+	return HostKeyFromSiaPublicKey(types.SiaPublicKey{
+		Algorithm: types.SignatureEd25519,
+		Key:       pk,
+	})
+}
+
+// HostKeyFromSiaPublicKey converts an types.SiaPublicKey to a HostPublicKey.
+func HostKeyFromSiaPublicKey(spk types.SiaPublicKey) HostPublicKey {
+	return HostPublicKey(spk.String())
+}
+
 // HostSettings are the settings reported by a host.
 type HostSettings struct {
 	AcceptingContracts     bool

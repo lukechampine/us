@@ -224,7 +224,7 @@ func (c *SHARDClient) LookupHost(prefix string) (hostdb.HostPublicKey, error) {
 	if err != nil {
 		return "", err
 	}
-	return hostdb.HostPublicKey(ha.PublicKey.String()), nil
+	return hostdb.HostKeyFromSiaPublicKey(ha.PublicKey), nil
 }
 
 // NewSHARDClient returns a SHARDClient that communicates with the SHARD

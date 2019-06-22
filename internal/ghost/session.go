@@ -172,7 +172,7 @@ func (h *Host) rpcLock(s *session) error {
 	}
 
 	contract, ok := h.contracts[req.ContractID]
-	if !ok || !s.sess.VerifyChallenge(req.Signature, hostdb.HostPublicKey(contract.renterKey.String())) {
+	if !ok || !s.sess.VerifyChallenge(req.Signature, hostdb.HostKeyFromSiaPublicKey(contract.renterKey)) {
 		err := errors.New("bad signature or no such contract")
 		s.sess.WriteResponse(nil, err)
 		return err

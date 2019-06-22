@@ -101,10 +101,7 @@ func unmarshalHeader(b []byte) (h ContractHeader) {
 	buf := bytes.NewBuffer(b)
 	h.magic = string(buf.Next(len(ContractMagic)))
 	h.version, _ = buf.ReadByte()
-	h.hostKey = hostdb.HostPublicKey(types.SiaPublicKey{
-		Algorithm: types.SignatureEd25519,
-		Key:       buf.Next(32),
-	}.String())
+	h.hostKey = hostdb.HostKeyFromPublicKey(buf.Next(32))
 	copy(h.id[:], buf.Next(32))
 	h.key = ed25519.NewKeyFromSeed(buf.Next(32))
 	return h

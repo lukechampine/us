@@ -64,8 +64,7 @@ func (c ContractRevision) ID() types.FileContractID {
 
 // HostKey returns the public key of the host.
 func (c ContractRevision) HostKey() hostdb.HostPublicKey {
-	key := c.Revision.UnlockConditions.PublicKeys[1]
-	return hostdb.HostPublicKey(key.String())
+	return hostdb.HostKeyFromSiaPublicKey(c.Revision.UnlockConditions.PublicKeys[1])
 }
 
 // RenterFunds returns the funds remaining in the contract's Renter payout as
