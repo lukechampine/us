@@ -3,7 +3,7 @@ package renter
 import (
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter/proto"
@@ -58,7 +58,7 @@ func (sb *SectorBuilder) Append(data []byte, key KeySeed) {
 	// encrypt the data in place
 	segmentIndex := sb.sectorLen / merkle.SegmentSize
 	var nonce [24]byte
-	fastrand.Read(nonce[:])
+	frand.Read(nonce[:])
 	key.XORKeyStream(sectorSlice, nonce[:], uint64(segmentIndex))
 
 	// record the new slice and update sectorLen
@@ -94,7 +94,7 @@ func (sb *SectorBuilder) Remaining() int {
 // regarding such pointers apply. In particular, the pointer should not be
 // retained after Reset is called.
 func (sb *SectorBuilder) Finish() *[renterhost.SectorSize]byte {
-	fastrand.Read(sb.sector[sb.sectorLen:])
+	frand.Read(sb.sector[sb.sectorLen:])
 	sb.sectorLen = len(sb.sector)
 
 	// set Merkle root of each slice

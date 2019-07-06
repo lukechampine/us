@@ -9,15 +9,15 @@ import (
 
 	"github.com/aead/chacha20"
 	"github.com/aead/chacha20/chacha"
-	"gitlab.com/NebulousLabs/fastrand"
 	"golang.org/x/crypto/xts"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
 )
 
 func TestEncryption(t *testing.T) {
 	var m MetaIndex
-	fastrand.Read(m.MasterKey[:])
+	frand.Read(m.MasterKey[:])
 	key := m.MasterKey
 	nonce := make([]byte, 24)
 

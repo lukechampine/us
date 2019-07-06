@@ -9,7 +9,7 @@ import (
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/modules"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
@@ -80,7 +80,7 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 		}
 
 		// download a random slice
-		chunk := int64(fastrand.Intn(len(slices)))
+		chunk := int64(frand.Intn(len(slices)))
 		start = time.Now()
 		data, err := h.DownloadAndDecrypt(chunk)
 		bandTime := time.Since(start)
@@ -131,7 +131,7 @@ func CheckupContract(contract *renter.Contract, hkr renter.HostKeyResolver) Chec
 	defer s.Close()
 
 	// request a random sector root
-	roots, err := s.SectorRoots(fastrand.Intn(numSectors), 1)
+	roots, err := s.SectorRoots(frand.Intn(numSectors), 1)
 	if err != nil {
 		res.Error = errors.Wrap(err, "could not get a sector to test")
 		return res

@@ -10,7 +10,7 @@ import (
 
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 )
 
 type mockCS struct {
@@ -40,7 +40,7 @@ func (m *mockCS) sendTxn(txn types.Transaction) {
 		}},
 		SiacoinOutputDiffs: outputs,
 	}
-	fastrand.Read(cc.ID[:])
+	frand.Read(cc.ID[:])
 	m.subscriber.ProcessConsensusChange(cc)
 	m.height++
 }
@@ -70,7 +70,7 @@ func (m *mockCS) mineBlock(fees types.Currency, addr types.UnlockHash) {
 			ID:            dsco.ID,
 		})
 	}
-	fastrand.Read(cc.ID[:])
+	frand.Read(cc.ID[:])
 	m.subscriber.ProcessConsensusChange(cc)
 	m.height++
 	if m.dscos == nil {
@@ -104,7 +104,7 @@ func (m *mockCS) formContract(payout types.Currency, addr types.UnlockHash) {
 			Direction:    modules.DiffApply,
 		}},
 	}
-	fastrand.Read(cc.ID[:])
+	frand.Read(cc.ID[:])
 	m.subscriber.ProcessConsensusChange(cc)
 	m.height++
 	if m.filecontracts == nil {
@@ -151,7 +151,7 @@ func (m *mockCS) reviseContract(id types.FileContractID) {
 			},
 		},
 	}
-	fastrand.Read(cc.ID[:])
+	frand.Read(cc.ID[:])
 	m.subscriber.ProcessConsensusChange(cc)
 	m.height++
 	m.filecontracts[id] = fc
@@ -190,7 +190,7 @@ func sendSiacoins(amount types.Currency, dest types.UnlockHash, feePerByte types
 func TestSeedWallet(t *testing.T) {
 	// randomly use either the on-disk DB store or the in-memory ephemeral store
 	var store SeedStore
-	if fastrand.Intn(2) == 0 {
+	if frand.Intn(2) == 0 {
 		store = NewEphemeralSeedStore()
 	} else {
 		dir, err := ioutil.TempDir("", t.Name())
@@ -406,7 +406,7 @@ func TestSeedWalletThreadSafety(t *testing.T) {
 	for _, fn := range funcs {
 		go func(fn func()) {
 			for i := 0; i < 10; i++ {
-				time.Sleep(time.Duration(fastrand.Intn(10)) * time.Millisecond)
+				time.Sleep(time.Duration(frand.Intn(10)) * time.Millisecond)
 				fn()
 			}
 			wg.Done()

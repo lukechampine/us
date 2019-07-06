@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/fastrand"
 	"golang.org/x/crypto/blake2b"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/renterhost"
 )
 
@@ -88,7 +88,7 @@ func TestSectorRoot(t *testing.T) {
 
 	// test some random roots against a reference implementation
 	for i := 0; i < 5; i++ {
-		fastrand.Read(sector[:])
+		frand.Read(sector[:])
 		if SectorRoot(&sector) != refSectorRoot(&sector) {
 			t.Error("SectorRoot does not match reference implementation")
 		}
@@ -117,7 +117,7 @@ func TestMetaRoot(t *testing.T) {
 		t.Error("wrong cached Merkle root for empty stack")
 	}
 	roots := make([]crypto.Hash, 1)
-	fastrand.Read(roots[0][:])
+	frand.Read(roots[0][:])
 	if MetaRoot(roots) != roots[0] {
 		t.Error("wrong cached Merkle root for single root")
 	}
@@ -133,7 +133,7 @@ func TestMetaRoot(t *testing.T) {
 	// test some random roots against a reference implementation
 	for i := 0; i < 5; i++ {
 		for j := range roots {
-			fastrand.Read(roots[j][:])
+			frand.Read(roots[j][:])
 		}
 		if MetaRoot(roots) != recNodeRoot(roots) {
 			t.Error("MetaRoot does not match reference implementation")
@@ -193,7 +193,7 @@ func TestStack(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		s.reset()
 		for j := range roots {
-			fastrand.Read(roots[j][:])
+			frand.Read(roots[j][:])
 			s.insertNodeHash(roots[j], 0)
 		}
 		if s.root() != recNodeRoot(roots) {
@@ -228,7 +228,7 @@ func BenchmarkStack1TB(b *testing.B) {
 func TestBuildVerifyProof(t *testing.T) {
 	// test some known proofs
 	var sector [renterhost.SectorSize]byte
-	fastrand.Read(sector[:])
+	frand.Read(sector[:])
 	sectorRoot := SectorRoot(&sector)
 	segmentRoots := make([]crypto.Hash, SegmentsPerSector)
 	for i := range segmentRoots {
@@ -296,8 +296,8 @@ func TestBuildVerifyProof(t *testing.T) {
 
 	// test some random proofs against VerifyProof
 	for i := 0; i < 5; i++ {
-		start := fastrand.Intn(SegmentsPerSector - 1)
-		end := start + fastrand.Intn(SegmentsPerSector-start) + 1
+		start := frand.Intn(SegmentsPerSector - 1)
+		end := start + frand.Intn(SegmentsPerSector-start) + 1
 		proof := BuildProof(&sector, start, end, nil)
 		if !VerifyProof(proof, sector[start*SegmentSize:end*SegmentSize], start, end, sectorRoot) {
 			t.Errorf("BuildProof constructed an incorrect proof for range %v-%v", start, end)
@@ -350,7 +350,7 @@ func TestBuildVerifySectorRangeProof(t *testing.T) {
 	// test some known proofs
 	sectorRoots := make([]crypto.Hash, 16)
 	for i := range sectorRoots {
-		fastrand.Read(sectorRoots[i][:])
+		frand.Read(sectorRoots[i][:])
 	}
 	metaRoot := MetaRoot(sectorRoots)
 
@@ -439,7 +439,7 @@ func TestBuildVerifySectorRangeProof(t *testing.T) {
 
 func BenchmarkBuildProof(b *testing.B) {
 	var sector [renterhost.SectorSize]byte
-	fastrand.Read(sector[:])
+	frand.Read(sector[:])
 
 	benchRange := func(start, end int) func(*testing.B) {
 		return func(b *testing.B) {
@@ -458,7 +458,7 @@ func BenchmarkBuildProof(b *testing.B) {
 
 func BenchmarkBuildProofPrecalc(b *testing.B) {
 	var sector [renterhost.SectorSize]byte
-	fastrand.Read(sector[:])
+	frand.Read(sector[:])
 	root := SectorRoot(&sector)
 
 	// precalculate left-hand nodes to depth 4
@@ -506,7 +506,7 @@ func BenchmarkBuildProofPrecalc(b *testing.B) {
 
 func BenchmarkVerifyProof(b *testing.B) {
 	var sector [renterhost.SectorSize]byte
-	fastrand.Read(sector[:])
+	frand.Read(sector[:])
 	root := SectorRoot(&sector)
 
 	benchRange := func(start, end int) func(*testing.B) {
@@ -530,13 +530,13 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 	const numSectors = 12
 	sectorRoots := make([]crypto.Hash, numSectors)
 	for i := range sectorRoots {
-		fastrand.Read(sectorRoots[i][:])
+		frand.Read(sectorRoots[i][:])
 	}
 	oldRoot := MetaRoot(sectorRoots)
 
 	var newSector12, newSector13 [renterhost.SectorSize]byte
-	fastrand.Read(newSector12[:])
-	fastrand.Read(newSector13[:])
+	frand.Read(newSector12[:])
+	frand.Read(newSector13[:])
 	actions := []renterhost.RPCWriteAction{
 		{Type: renterhost.RPCWriteActionSwap, A: 6, B: 11},
 		{Type: renterhost.RPCWriteActionTrim, A: 1},
@@ -586,13 +586,13 @@ func TestBuildVerifyDiffProofAppend(t *testing.T) {
 	const numSectors = 15
 	sectorRoots := make([]crypto.Hash, numSectors)
 	for i := range sectorRoots {
-		fastrand.Read(sectorRoots[i][:])
+		frand.Read(sectorRoots[i][:])
 	}
 	oldRoot := MetaRoot(sectorRoots)
 
 	var newSector15, newSector16 [renterhost.SectorSize]byte
-	fastrand.Read(newSector15[:])
-	fastrand.Read(newSector16[:])
+	frand.Read(newSector15[:])
+	frand.Read(newSector16[:])
 	actions := []renterhost.RPCWriteAction{
 		{Type: renterhost.RPCWriteActionAppend, Data: newSector15[:]},
 		{Type: renterhost.RPCWriteActionSwap, A: 3, B: 15},
@@ -641,7 +641,7 @@ func TestBuildVerifyDiffProofTrim(t *testing.T) {
 	const numSectors = 15
 	sectorRoots := make([]crypto.Hash, numSectors)
 	for i := range sectorRoots {
-		fastrand.Read(sectorRoots[i][:])
+		frand.Read(sectorRoots[i][:])
 	}
 	oldRoot := MetaRoot(sectorRoots)
 
@@ -694,12 +694,12 @@ func BenchmarkBuildDiffProof(b *testing.B) {
 	const numSectors = 12
 	sectorRoots := make([]crypto.Hash, numSectors)
 	for i := range sectorRoots {
-		fastrand.Read(sectorRoots[i][:])
+		frand.Read(sectorRoots[i][:])
 	}
 
 	var newSector12, newSector13 [renterhost.SectorSize]byte
-	fastrand.Read(newSector12[:])
-	fastrand.Read(newSector13[:])
+	frand.Read(newSector12[:])
+	frand.Read(newSector13[:])
 	actions := []renterhost.RPCWriteAction{
 		{Type: renterhost.RPCWriteActionSwap, A: 6, B: 11},
 		{Type: renterhost.RPCWriteActionTrim, A: 1},
@@ -719,11 +719,11 @@ func BenchmarkVerifyDiffProof(b *testing.B) {
 	const numSectors = 12
 	sectorRoots := make([]crypto.Hash, numSectors)
 	for i := range sectorRoots {
-		fastrand.Read(sectorRoots[i][:])
+		frand.Read(sectorRoots[i][:])
 	}
 	var newSector12, newSector13 [renterhost.SectorSize]byte
-	fastrand.Read(newSector12[:])
-	fastrand.Read(newSector13[:])
+	frand.Read(newSector12[:])
+	frand.Read(newSector13[:])
 	actions := []renterhost.RPCWriteAction{
 		{Type: renterhost.RPCWriteActionSwap, A: 6, B: 11},
 		{Type: renterhost.RPCWriteActionTrim, A: 1},

@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
 )
@@ -39,14 +39,14 @@ func TestReedSolomon(t *testing.T) {
 	// 3-of-10 code
 	rsc := NewRSCode(3, 10)
 	chunkSize := 3 * merkle.SegmentSize
-	data := fastrand.Bytes(chunkSize * 4)
+	data := frand.Bytes(chunkSize * 4)
 	shards := encodeAlloc(rsc, data)
 	// delete 7 random shards
 	partialShards := make([][]byte, len(shards))
 	for i := range partialShards {
 		partialShards[i] = append([]byte(nil), shards[i]...)
 	}
-	for _, i := range fastrand.Perm(len(partialShards))[:7] {
+	for _, i := range frand.Perm(len(partialShards))[:7] {
 		partialShards[i] = make([]byte, 0, len(partialShards[i]))
 	}
 	// reconstruct
@@ -58,7 +58,7 @@ func TestReedSolomon(t *testing.T) {
 	}
 
 	// delete 7 random shards
-	for _, i := range fastrand.Perm(len(partialShards))[:7] {
+	for _, i := range frand.Perm(len(partialShards))[:7] {
 		partialShards[i] = make([]byte, 0, len(partialShards[i]))
 	}
 	// recover
@@ -69,11 +69,11 @@ func TestReedSolomon(t *testing.T) {
 	// 7-of-7 code (simple redundancy)
 	rsc = NewRSCode(7, 7)
 	chunkSize = 7 * merkle.SegmentSize
-	data = fastrand.Bytes(chunkSize * 10)
+	data = frand.Bytes(chunkSize * 10)
 	shards = encodeAlloc(rsc, data)
 	// delete a random shard
 	partialShards = append([][]byte(nil), shards...)
-	partialShards[fastrand.Intn(len(partialShards))] = nil
+	partialShards[frand.Intn(len(partialShards))] = nil
 	// reconstruct should fail
 	if err := rsc.Reconstruct(partialShards); err == nil {
 		t.Error("Reconstruct should have failed with missing shard")
@@ -92,16 +92,16 @@ func TestReedSolomonPartial(t *testing.T) {
 	// 3-of-10 code
 	rsc := NewRSCode(3, 10)
 	const chunkSize = 3 * merkle.SegmentSize
-	data := fastrand.Bytes(chunkSize * 10)
+	data := frand.Bytes(chunkSize * 10)
 	shards := encodeAlloc(rsc, data)
 
 	// pick a random segment from three shards
-	segIndex := fastrand.Intn(len(shards[0]) / merkle.SegmentSize)
+	segIndex := frand.Intn(len(shards[0]) / merkle.SegmentSize)
 	partialShards := make([][]byte, len(shards))
 	for i := range partialShards {
 		partialShards[i] = make([]byte, 0, merkle.SegmentSize)
 	}
-	for _, i := range fastrand.Perm(len(partialShards))[:3] {
+	for _, i := range frand.Perm(len(partialShards))[:3] {
 		partialShards[i] = shards[i][segIndex*merkle.SegmentSize:][:merkle.SegmentSize]
 	}
 
@@ -115,7 +115,7 @@ func TestReedSolomonPartial(t *testing.T) {
 func BenchmarkReedSolomon(b *testing.B) {
 	makeShards := func(m, n int) ([]byte, [][]byte) {
 		chunkSize := m * merkle.SegmentSize
-		data := fastrand.Bytes(chunkSize * (renterhost.SectorSize / chunkSize))
+		data := frand.Bytes(chunkSize * (renterhost.SectorSize / chunkSize))
 		shards := make([][]byte, n)
 		for i := range shards {
 			shards[i] = make([]byte, len(data)/m)

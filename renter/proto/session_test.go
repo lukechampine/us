@@ -9,7 +9,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/internal/ghost"
 	"lukechampine.com/us/merkle"
@@ -87,7 +87,7 @@ func TestSession(t *testing.T) {
 	defer host.Close()
 
 	var sector [renterhost.SectorSize]byte
-	fastrand.Read(sector[:])
+	frand.Read(sector[:])
 	sectorRoot := merkle.SectorRoot(&sector)
 
 	err := renter.Write([]renterhost.RPCWriteAction{{
@@ -130,7 +130,7 @@ func BenchmarkWrite(b *testing.B) {
 	defer renter.Close()
 	defer host.Close()
 
-	sector := fastrand.Bytes(renterhost.SectorSize)
+	sector := frand.Bytes(renterhost.SectorSize)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -153,7 +153,7 @@ func BenchmarkRead(b *testing.B) {
 	defer host.Close()
 
 	var sector [renterhost.SectorSize]byte
-	fastrand.Read(sector[:])
+	frand.Read(sector[:])
 	sectorRoot := merkle.SectorRoot(&sector)
 	err := renter.Write([]renterhost.RPCWriteAction{{
 		Type: renterhost.RPCWriteActionAppend,

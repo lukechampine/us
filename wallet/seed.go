@@ -8,8 +8,8 @@ import (
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	mnemonics "gitlab.com/NebulousLabs/entropy-mnemonics"
-	"gitlab.com/NebulousLabs/fastrand"
 	"golang.org/x/crypto/blake2b"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/ed25519"
 )
 
@@ -91,6 +91,6 @@ func SeedFromPhrase(phrase string) (Seed, error) {
 // NewSeed returns a random Seed.
 func NewSeed() Seed {
 	var entropy [16]byte
-	fastrand.Read(entropy[:])
+	frand.Read(entropy[:])
 	return SeedFromEntropy(entropy)
 }

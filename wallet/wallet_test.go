@@ -5,7 +5,7 @@ import (
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 )
 
 func TestStandardAddress(t *testing.T) {
@@ -13,8 +13,8 @@ func TestStandardAddress(t *testing.T) {
 		Key: make([]byte, 32),
 	}
 	for i := 0; i < 100; i++ {
-		fastrand.Read(pk.Algorithm[:])
-		fastrand.Read(pk.Key)
+		frand.Read(pk.Algorithm[:])
+		frand.Read(pk.Key)
 		if StandardAddress(pk) != StandardUnlockConditions(pk).UnlockHash() {
 			t.Error("mismatch:", pk)
 		}

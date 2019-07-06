@@ -15,7 +15,7 @@ import (
 	"github.com/aead/chacha20/chacha"
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
@@ -247,7 +247,7 @@ func NewMetaFile(filename string, mode os.FileMode, size int64, hosts []hostdb.H
 		hostIndex: hostIndex,
 		filename:  filename,
 	}
-	fastrand.Read(m.MasterKey[:])
+	frand.Read(m.MasterKey[:])
 	return m
 }
 

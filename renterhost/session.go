@@ -10,9 +10,9 @@ import (
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/chacha20poly1305"
+	"lukechampine.com/frand"
 )
 
 // MinMessageSize is the minimum size of an RPC message. If an encoded message
@@ -85,7 +85,7 @@ func (s *Session) VerifyChallenge(sig []byte, hv HashVerifier) bool {
 func (s *Session) writeMessage(obj ProtocolObject) error {
 	// generate random nonce
 	nonce := make([]byte, 256)[:s.aead.NonceSize()] // avoid heap alloc
-	fastrand.Read(nonce)
+	frand.Read(nonce)
 
 	// pad short messages to MinMessageSize
 	msgSize := 8 + s.aead.NonceSize() + obj.marshalledSize() + s.aead.Overhead()
@@ -241,7 +241,7 @@ func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (*Session, error) {
 		aead:     aead,
 		isRenter: false,
 	}
-	fastrand.Read(s.challenge[:])
+	frand.Read(s.challenge[:])
 	// hack: cast challenge to Specifier to make it a ProtocolObject
 	if err := s.writeMessage((*Specifier)(&s.challenge)); err != nil {
 		return nil, err

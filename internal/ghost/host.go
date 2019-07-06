@@ -6,7 +6,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renterhost"
@@ -72,7 +72,7 @@ func New(addr string) (*Host, error) {
 	h := &Host{
 		addr:      modules.NetAddress(l.Addr().String()),
 		listener:  l,
-		secretKey: ed25519.NewKeyFromSeed(fastrand.Bytes(ed25519.SeedSize)),
+		secretKey: ed25519.NewKeyFromSeed(frand.Bytes(ed25519.SeedSize)),
 		contracts: make(map[types.FileContractID]*hostContract),
 	}
 	go h.listen()

@@ -9,7 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
@@ -180,7 +180,7 @@ func (h *Host) rpcLock(s *session) error {
 	s.contract = contract
 
 	var newChallenge [16]byte
-	fastrand.Read(newChallenge[:])
+	frand.Read(newChallenge[:])
 	s.sess.SetChallenge(newChallenge)
 	resp := &renterhost.RPCLockResponse{
 		Acquired:     true,

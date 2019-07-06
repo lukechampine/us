@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 )
 
 func TestTaxAdjustedPayout(t *testing.T) {
@@ -27,7 +27,7 @@ func TestTaxAdjustedPayout(t *testing.T) {
 
 func BenchmarkTaxAdjustedPayout(b *testing.B) {
 	b.ReportAllocs()
-	target := types.NewCurrency(fastrand.BigIntn(types.SiacoinPrecision.Big()))
+	target := types.NewCurrency(frand.BigIntn(types.SiacoinPrecision.Big()))
 	for i := 0; i < b.N; i++ {
 		taxAdjustedPayout(target)
 	}

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
 )
@@ -14,9 +14,9 @@ import (
 func TestCopySection(t *testing.T) {
 	// construct "encrypted" sectors
 	sectors := map[crypto.Hash][]byte{
-		{0}: fastrand.Bytes(1024),
-		{1}: fastrand.Bytes(1024),
-		{2}: fastrand.Bytes(1024),
+		{0}: frand.Bytes(1024),
+		{1}: frand.Bytes(1024),
+		{2}: frand.Bytes(1024),
 	}
 	// construct shard from sector data
 	slices := []SectorSlice{

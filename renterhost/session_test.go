@@ -12,50 +12,50 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
 	"golang.org/x/crypto/chacha20poly1305"
+	"lukechampine.com/frand"
 )
 
 var randomTxn = func() types.Transaction {
 	txn := types.Transaction{
 		SiacoinInputs: []types.SiacoinInput{{
 			UnlockConditions: types.UnlockConditions{
-				Timelock:           types.BlockHeight(fastrand.Uint64n(10)),
-				PublicKeys:         []types.SiaPublicKey{{Key: fastrand.Bytes(32)}},
-				SignaturesRequired: fastrand.Uint64n(10),
+				Timelock:           types.BlockHeight(frand.Uint64n(10)),
+				PublicKeys:         []types.SiaPublicKey{{Key: frand.Bytes(32)}},
+				SignaturesRequired: frand.Uint64n(10),
 			},
 		}},
 		SiacoinOutputs: []types.SiacoinOutput{{
-			Value: types.SiacoinPrecision.Mul64(fastrand.Uint64n(100)),
+			Value: types.SiacoinPrecision.Mul64(frand.Uint64n(100)),
 		}},
 		FileContracts: []types.FileContract{{
-			FileSize:    fastrand.Uint64n(100),
-			WindowStart: types.BlockHeight(fastrand.Uint64n(100)),
-			WindowEnd:   types.BlockHeight(fastrand.Uint64n(100)),
-			Payout:      types.SiacoinPrecision.Mul64(fastrand.Uint64n(100)),
+			FileSize:    frand.Uint64n(100),
+			WindowStart: types.BlockHeight(frand.Uint64n(100)),
+			WindowEnd:   types.BlockHeight(frand.Uint64n(100)),
+			Payout:      types.SiacoinPrecision.Mul64(frand.Uint64n(100)),
 			ValidProofOutputs: []types.SiacoinOutput{{
-				Value: types.SiacoinPrecision.Mul64(fastrand.Uint64n(100)),
+				Value: types.SiacoinPrecision.Mul64(frand.Uint64n(100)),
 			}},
 			MissedProofOutputs: []types.SiacoinOutput{{
-				Value: types.SiacoinPrecision.Mul64(fastrand.Uint64n(100)),
+				Value: types.SiacoinPrecision.Mul64(frand.Uint64n(100)),
 			}},
-			RevisionNumber: fastrand.Uint64n(100),
+			RevisionNumber: frand.Uint64n(100),
 		}},
 		FileContractRevisions: []types.FileContractRevision{{
 			UnlockConditions: types.UnlockConditions{
-				Timelock:           types.BlockHeight(fastrand.Uint64n(10)),
-				PublicKeys:         []types.SiaPublicKey{{Key: fastrand.Bytes(32)}},
-				SignaturesRequired: fastrand.Uint64n(10),
+				Timelock:           types.BlockHeight(frand.Uint64n(10)),
+				PublicKeys:         []types.SiaPublicKey{{Key: frand.Bytes(32)}},
+				SignaturesRequired: frand.Uint64n(10),
 			},
-			NewRevisionNumber: fastrand.Uint64n(100),
-			NewFileSize:       fastrand.Uint64n(100),
-			NewWindowStart:    types.BlockHeight(fastrand.Uint64n(100)),
-			NewWindowEnd:      types.BlockHeight(fastrand.Uint64n(100)),
+			NewRevisionNumber: frand.Uint64n(100),
+			NewFileSize:       frand.Uint64n(100),
+			NewWindowStart:    types.BlockHeight(frand.Uint64n(100)),
+			NewWindowEnd:      types.BlockHeight(frand.Uint64n(100)),
 			NewValidProofOutputs: []types.SiacoinOutput{{
-				Value: types.SiacoinPrecision.Mul64(fastrand.Uint64n(100)),
+				Value: types.SiacoinPrecision.Mul64(frand.Uint64n(100)),
 			}},
 			NewMissedProofOutputs: []types.SiacoinOutput{{
-				Value: types.SiacoinPrecision.Mul64(fastrand.Uint64n(100)),
+				Value: types.SiacoinPrecision.Mul64(frand.Uint64n(100)),
 			}},
 		}},
 		StorageProofs: []types.StorageProof{{
@@ -63,38 +63,38 @@ var randomTxn = func() types.Transaction {
 		}},
 		SiafundInputs: []types.SiafundInput{{
 			UnlockConditions: types.UnlockConditions{
-				Timelock:           types.BlockHeight(fastrand.Uint64n(10)),
-				PublicKeys:         []types.SiaPublicKey{{Key: fastrand.Bytes(32)}},
-				SignaturesRequired: fastrand.Uint64n(10),
+				Timelock:           types.BlockHeight(frand.Uint64n(10)),
+				PublicKeys:         []types.SiaPublicKey{{Key: frand.Bytes(32)}},
+				SignaturesRequired: frand.Uint64n(10),
 			},
 		}},
 		SiafundOutputs: []types.SiafundOutput{{
-			Value:      types.SiacoinPrecision.Mul64(fastrand.Uint64n(100)),
-			ClaimStart: types.SiacoinPrecision.Mul64(fastrand.Uint64n(100)),
+			Value:      types.SiacoinPrecision.Mul64(frand.Uint64n(100)),
+			ClaimStart: types.SiacoinPrecision.Mul64(frand.Uint64n(100)),
 		}},
-		MinerFees:     []types.Currency{types.SiacoinPrecision.Mul64(fastrand.Uint64n(100))},
-		ArbitraryData: [][]byte{fastrand.Bytes(100)},
+		MinerFees:     []types.Currency{types.SiacoinPrecision.Mul64(frand.Uint64n(100))},
+		ArbitraryData: [][]byte{frand.Bytes(100)},
 		TransactionSignatures: []types.TransactionSignature{{
 			CoveredFields:  types.CoveredFields{MinerFees: []uint64{1, 2, 3}},
-			PublicKeyIndex: fastrand.Uint64n(10),
-			Timelock:       types.BlockHeight(fastrand.Uint64n(10)),
-			Signature:      fastrand.Bytes(64),
+			PublicKeyIndex: frand.Uint64n(10),
+			Timelock:       types.BlockHeight(frand.Uint64n(10)),
+			Signature:      frand.Bytes(64),
 		}},
 	}
-	fastrand.Read(txn.SiacoinInputs[0].ParentID[:])
-	fastrand.Read(txn.SiacoinInputs[0].UnlockConditions.PublicKeys[0].Algorithm[:])
-	fastrand.Read(txn.SiacoinOutputs[0].UnlockHash[:])
-	fastrand.Read(txn.FileContracts[0].FileMerkleRoot[:])
-	fastrand.Read(txn.FileContracts[0].UnlockHash[:])
-	fastrand.Read(txn.FileContractRevisions[0].ParentID[:])
-	fastrand.Read(txn.FileContractRevisions[0].NewFileMerkleRoot[:])
-	fastrand.Read(txn.FileContractRevisions[0].NewUnlockHash[:])
-	fastrand.Read(txn.StorageProofs[0].ParentID[:])
-	fastrand.Read(txn.StorageProofs[0].Segment[:])
-	fastrand.Read(txn.StorageProofs[0].HashSet[0][:])
-	fastrand.Read(txn.SiafundInputs[0].ParentID[:])
-	fastrand.Read(txn.SiafundOutputs[0].UnlockHash[:])
-	fastrand.Read(txn.TransactionSignatures[0].ParentID[:])
+	frand.Read(txn.SiacoinInputs[0].ParentID[:])
+	frand.Read(txn.SiacoinInputs[0].UnlockConditions.PublicKeys[0].Algorithm[:])
+	frand.Read(txn.SiacoinOutputs[0].UnlockHash[:])
+	frand.Read(txn.FileContracts[0].FileMerkleRoot[:])
+	frand.Read(txn.FileContracts[0].UnlockHash[:])
+	frand.Read(txn.FileContractRevisions[0].ParentID[:])
+	frand.Read(txn.FileContractRevisions[0].NewFileMerkleRoot[:])
+	frand.Read(txn.FileContractRevisions[0].NewUnlockHash[:])
+	frand.Read(txn.StorageProofs[0].ParentID[:])
+	frand.Read(txn.StorageProofs[0].Segment[:])
+	frand.Read(txn.StorageProofs[0].HashSet[0][:])
+	frand.Read(txn.SiafundInputs[0].ParentID[:])
+	frand.Read(txn.SiafundOutputs[0].UnlockHash[:])
+	frand.Read(txn.TransactionSignatures[0].ParentID[:])
 	return txn
 }()
 
@@ -296,7 +296,7 @@ func TestFormContract(t *testing.T) {
 
 func TestChallenge(t *testing.T) {
 	var s Session
-	fastrand.Read(s.challenge[:])
+	frand.Read(s.challenge[:])
 	sig := s.SignChallenge(dummyKey{})
 	if !s.VerifyChallenge(sig, dummyKey{}) {
 		t.Fatal("challenge was not signed/verified correctly")
@@ -334,8 +334,8 @@ func TestEncoding(t *testing.T) {
 		},
 		&RPCLockRequest{
 			ContractID: randomTxn.FileContractRevisions[0].ParentID,
-			Signature:  fastrand.Bytes(64),
-			Timeout:    fastrand.Uint64n(100),
+			Signature:  frand.Bytes(64),
+			Timeout:    frand.Uint64n(100),
 		},
 		&RPCLockResponse{
 			Revision:   randomTxn.FileContractRevisions[0],
@@ -343,35 +343,35 @@ func TestEncoding(t *testing.T) {
 		},
 		&RPCReadRequest{
 			Sections:             []RPCReadRequestSection{{}},
-			NewRevisionNumber:    fastrand.Uint64n(100),
+			NewRevisionNumber:    frand.Uint64n(100),
 			NewValidProofValues:  randomTxn.MinerFees,
 			NewMissedProofValues: randomTxn.MinerFees,
-			Signature:            fastrand.Bytes(64),
+			Signature:            frand.Bytes(64),
 		},
 		&RPCReadResponse{
-			Signature:   fastrand.Bytes(64),
-			Data:        fastrand.Bytes(1024),
+			Signature:   frand.Bytes(64),
+			Data:        frand.Bytes(1024),
 			MerkleProof: randomTxn.StorageProofs[0].HashSet,
 		},
 		&RPCSectorRootsRequest{
-			RootOffset:           fastrand.Uint64n(100),
-			NumRoots:             fastrand.Uint64n(100),
-			NewRevisionNumber:    fastrand.Uint64n(100),
+			RootOffset:           frand.Uint64n(100),
+			NumRoots:             frand.Uint64n(100),
+			NewRevisionNumber:    frand.Uint64n(100),
 			NewValidProofValues:  randomTxn.MinerFees,
 			NewMissedProofValues: randomTxn.MinerFees,
-			Signature:            fastrand.Bytes(64),
+			Signature:            frand.Bytes(64),
 		},
 		&RPCSectorRootsResponse{
 			SectorRoots: randomTxn.StorageProofs[0].HashSet,
 			MerkleProof: randomTxn.StorageProofs[0].HashSet,
-			Signature:   fastrand.Bytes(64),
+			Signature:   frand.Bytes(64),
 		},
 		&RPCSettingsResponse{
-			Settings: fastrand.Bytes(100),
+			Settings: frand.Bytes(100),
 		},
 		&RPCWriteRequest{
-			Actions:              []RPCWriteAction{{Data: fastrand.Bytes(1024)}},
-			NewRevisionNumber:    fastrand.Uint64n(100),
+			Actions:              []RPCWriteAction{{Data: frand.Bytes(1024)}},
+			NewRevisionNumber:    frand.Uint64n(100),
 			NewValidProofValues:  randomTxn.MinerFees,
 			NewMissedProofValues: randomTxn.MinerFees,
 		},
@@ -381,7 +381,7 @@ func TestEncoding(t *testing.T) {
 			NewMerkleRoot:    randomTxn.FileContractRevisions[0].NewFileMerkleRoot,
 		},
 		&RPCWriteResponse{
-			Signature: fastrand.Bytes(64),
+			Signature: frand.Bytes(64),
 		},
 	}
 	for _, o := range objs {
@@ -443,7 +443,7 @@ func BenchmarkWriteMessage(b *testing.B) {
 func BenchmarkReadMessage(b *testing.B) {
 	b.Run("ID", func(b *testing.B) {
 		obj := newSpecifier("Hello, World!")
-		fastrand.Read(obj[:])
+		frand.Read(obj[:])
 
 		var buf bytes.Buffer
 		aead, _ := chacha20poly1305.New(make([]byte, 32))
@@ -479,8 +479,8 @@ func BenchmarkReadMessage(b *testing.B) {
 	})
 	b.Run("ReadResponse", func(b *testing.B) {
 		resp := &RPCReadResponse{
-			Signature:   fastrand.Bytes(64),
-			Data:        fastrand.Bytes(SectorSize),
+			Signature:   frand.Bytes(64),
+			Data:        frand.Bytes(SectorSize),
 			MerkleProof: make([]crypto.Hash, 10),
 		}
 

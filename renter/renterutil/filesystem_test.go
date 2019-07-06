@@ -11,7 +11,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/internal/ghost"
@@ -56,7 +56,7 @@ func createHostWithContract(tb testing.TB) (*ghost.Host, *renter.Contract) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	contractPath := filepath.Join(os.TempDir(), tb.Name()+"-"+hex.EncodeToString(fastrand.Bytes(6))+".contract")
+	contractPath := filepath.Join(os.TempDir(), tb.Name()+"-"+hex.EncodeToString(frand.Bytes(6))+".contract")
 	if err := renter.SaveContract(contractRevision, key, contractPath); err != nil {
 		tb.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestFileSystemBasic(t *testing.T) {
 	defer cleanup()
 
 	// create metafile
-	metaName := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	metaName := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
 	pf, err := fs.Create(metaName, 2)
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +109,7 @@ func TestFileSystemBasic(t *testing.T) {
 	sizes := []int{64, 127, 12, 4096, 253}
 	var data []byte
 	for i, size := range sizes {
-		d := fastrand.Bytes(size)
+		d := frand.Bytes(size)
 		if _, err := pf.Write(d); err != nil {
 			t.Fatal(err)
 		}
@@ -256,24 +256,24 @@ func TestFileSystemUploadDir(t *testing.T) {
 	}
 
 	// create three metafiles
-	metaName1 := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	metaName1 := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
 	pf1, err := fs.Create(metaName1, 2)
 	check(err)
-	data1 := fastrand.Bytes(renterhost.SectorSize - 256)
+	data1 := frand.Bytes(renterhost.SectorSize - 256)
 	_, err = pf1.Write(data1)
 	check(err)
 
-	metaName2 := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	metaName2 := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
 	pf2, err := fs.Create(metaName2, 2)
 	check(err)
-	data2 := fastrand.Bytes(renterhost.SectorSize - 256)
+	data2 := frand.Bytes(renterhost.SectorSize - 256)
 	_, err = pf2.Write(data2)
 	check(err)
 
-	metaName3 := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	metaName3 := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
 	pf3, err := fs.Create(metaName3, 2)
 	check(err)
-	data3 := fastrand.Bytes(renterhost.SectorSize - 256)
+	data3 := frand.Bytes(renterhost.SectorSize - 256)
 	_, err = pf3.Write(data3)
 	check(err)
 
@@ -320,13 +320,13 @@ func TestFileSystemLargeWrite(t *testing.T) {
 	defer cleanup()
 
 	// create metafile
-	metaName := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	metaName := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
 	pf, err := fs.Create(metaName, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// write just over 1 sector
-	data := fastrand.Bytes(renterhost.SectorSize + 1)
+	data := frand.Bytes(renterhost.SectorSize + 1)
 	if _, err = pf.Write(data); err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func TestFileSystemTruncate(t *testing.T) {
 	defer cleanup()
 
 	// create metafile
-	metaName := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	metaName := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
 	pf, err := fs.Create(metaName, 2)
 	if err != nil {
 		t.Fatal(err)
@@ -423,7 +423,7 @@ func TestFileSystemRandomAccess(t *testing.T) {
 	defer cleanup()
 
 	// create metafile
-	metaName := t.Name() + "-" + hex.EncodeToString(fastrand.Bytes(6))
+	metaName := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
 	pf, err := fs.Create(metaName, 2)
 	if err != nil {
 		t.Fatal(err)
@@ -465,7 +465,7 @@ func TestFileSystemRandomAccess(t *testing.T) {
 
 	// write a full chunk, then a few more overlapping writes, using Seek
 	// instead of WriteAt
-	data := fastrand.Bytes(renterhost.SectorSize * 2)
+	data := frand.Bytes(renterhost.SectorSize * 2)
 	if _, err := pf.Seek(0, io.SeekStart); err != nil {
 		t.Fatal(err)
 	} else if _, err := pf.Write(data); err != nil {

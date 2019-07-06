@@ -11,7 +11,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"gitlab.com/NebulousLabs/fastrand"
+	"lukechampine.com/frand"
 )
 
 func TestWatchOnlyWallet(t *testing.T) {
@@ -170,7 +170,7 @@ func TestWatchOnlyWalletThreadSafety(t *testing.T) {
 	cs.ConsensusSetSubscribe(w, store.ConsensusChangeID(), nil)
 
 	randomAddr := func() (addr types.UnlockHash) {
-		fastrand.Read(addr[:])
+		frand.Read(addr[:])
 		return
 	}
 	addr := randomAddr()
@@ -197,7 +197,7 @@ func TestWatchOnlyWalletThreadSafety(t *testing.T) {
 	for _, fn := range funcs {
 		go func(fn func()) {
 			for i := 0; i < 10; i++ {
-				time.Sleep(time.Duration(fastrand.Intn(10)) * time.Millisecond)
+				time.Sleep(time.Duration(frand.Intn(10)) * time.Millisecond)
 				fn()
 			}
 			wg.Done()
