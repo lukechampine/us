@@ -2,8 +2,6 @@
 package proto // import "lukechampine.com/us/renter/proto"
 
 import (
-	"time"
-
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
@@ -122,32 +120,4 @@ func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool)
 		return err
 	}
 	return nil
-}
-
-// DialStats records metrics about dialing a host.
-type DialStats struct {
-	DialStart     time.Time `json:"dialStart"`
-	ProtocolStart time.Time `json:"protocolStart"`
-	ProtocolEnd   time.Time `json:"protocolEnd"`
-}
-
-// DownloadStats records metrics about downloading sector data from a host.
-type DownloadStats struct {
-	Bytes         int64          `json:"bytes"`
-	Cost          types.Currency `json:"cost"`
-	ProtocolStart time.Time      `json:"protocolStart"`
-	ProtocolEnd   time.Time      `json:"protocolEnd"`
-	TransferStart time.Time      `json:"transferStart"`
-	TransferEnd   time.Time      `json:"transferEnd"`
-}
-
-// UploadStats records metrics about uploading sector data to a host.
-type UploadStats struct {
-	Bytes         int64          `json:"bytes"`
-	Cost          types.Currency `json:"cost"`
-	Collateral    types.Currency `json:"collateral"`
-	ProtocolStart time.Time      `json:"protocolStart"`
-	ProtocolEnd   time.Time      `json:"protocolEnd"`
-	TransferStart time.Time      `json:"transferStart"`
-	TransferEnd   time.Time      `json:"transferEnd"`
 }

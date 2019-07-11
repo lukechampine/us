@@ -413,7 +413,7 @@ func migrateRemote(op *Operation, newcontracts, oldcontracts renter.ContractSet,
 		}
 
 		// download chunk shards in parallel and reconstruct
-		shards, _, _, err := DownloadChunkShards(oldhosts, chunkIndex, m.MinShards, op.cancel)
+		shards, _, err := DownloadChunkShards(oldhosts, chunkIndex, m.MinShards, op.cancel)
 		if err != nil {
 			op.die(err)
 			return

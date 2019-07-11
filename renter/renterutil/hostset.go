@@ -87,12 +87,11 @@ func NewHostSet(hkr renter.HostKeyResolver, currentHeight types.BlockHeight) *Ho
 //
 // The shards returned by DownloadChunkShards are only valid until the next
 // call to Sector on the shard's corresponding proto.Downloader.
-func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minShards int, cancel <-chan struct{}) (shards [][]byte, shardLen int, stats []DownloadStatsUpdate, err error) {
+func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minShards int, cancel <-chan struct{}) (shards [][]byte, shardLen int, err error) {
 	errNoHost := errors.New("no downloader for this host")
 	type result struct {
 		shardIndex int
 		shard      []byte
-		stats      DownloadStatsUpdate
 		err        error
 	}
 	// spawn minShards goroutines that receive download requests from
@@ -113,10 +112,6 @@ func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minS
 				} else {
 					res.shard, res.err = host.DownloadAndDecrypt(chunkIndex)
 					res.err = errors.Wrap(res.err, host.HostKey().ShortKey())
-					res.stats = DownloadStatsUpdate{
-						Host:  host.HostKey(),
-						Stats: host.Downloader.LastDownloadStats(),
-					}
 				}
 				resChan <- res
 			}
@@ -139,7 +134,7 @@ func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minS
 	for len(goodRes) < minShards && len(badRes) <= len(hosts)-minShards {
 		select {
 		case <-cancel:
-			return nil, 0, nil, ErrCanceled
+			return nil, 0, ErrCanceled
 
 		case res := <-resChan:
 			if res.err == nil {
@@ -160,14 +155,12 @@ func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minS
 				errStrings = append(errStrings, r.err.Error())
 			}
 		}
-		return nil, 0, nil, errors.New("too many hosts did not supply their shard:\n" + strings.Join(errStrings, "\n"))
+		return nil, 0, errors.New("too many hosts did not supply their shard:\n" + strings.Join(errStrings, "\n"))
 	}
 
 	shards = make([][]byte, len(hosts))
-	stats = make([]DownloadStatsUpdate, 0, len(goodRes))
 	for _, r := range goodRes {
 		shards[r.shardIndex] = r.shard
-		stats = append(stats, r.stats)
 	}
 
 	// determine shardLen
@@ -186,5 +179,5 @@ func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minS
 		}
 	}
 
-	return shards, shardLen, stats, nil
+	return shards, shardLen, nil
 }

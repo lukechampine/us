@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"lukechampine.com/us/hostdb"
-	"lukechampine.com/us/renter/proto"
 )
 
 // assume metafiles have this extension
@@ -98,25 +97,6 @@ type DirSkipUpdate struct {
 type MigrateSkipUpdate struct {
 	Host hostdb.HostPublicKey
 	Err  error
-}
-
-// DialStatsUpdate records metrics about dialing a host.
-type DialStatsUpdate struct {
-	Host  hostdb.HostPublicKey `json:"host"`
-	Stats proto.DialStats      `json:"stats"`
-}
-
-// DownloadStatsUpdate records metrics about downloading sector data from a
-// host.
-type DownloadStatsUpdate struct {
-	Host  hostdb.HostPublicKey `json:"host"`
-	Stats proto.DownloadStats  `json:"stats"`
-}
-
-// UploadStatsUpdate records metrics about uploading sector data to a host.
-type UploadStatsUpdate struct {
-	Host  hostdb.HostPublicKey `json:"host"`
-	Stats proto.UploadStats    `json:"stats"`
 }
 
 // FileIter is an iterator that returns the next filepath and the filepath of

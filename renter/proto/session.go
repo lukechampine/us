@@ -29,25 +29,10 @@ type Session struct {
 	host     hostdb.ScannedHost
 	height   types.BlockHeight
 	contract ContractEditor
-
-	// stats
-	dialStats  DialStats
-	lastDStats DownloadStats
-	lastUStats UploadStats
 }
 
 // HostKey returns the public key of the host.
 func (s *Session) HostKey() hostdb.HostPublicKey { return s.host.PublicKey }
-
-// DialStats returns the metrics of the initial connection to the host.
-func (s *Session) DialStats() DialStats { return s.dialStats }
-
-// LastDownloadStats returns the metrics of the most recent successful
-// download.
-func (s *Session) LastDownloadStats() DownloadStats { return s.lastDStats }
-
-// LastUploadStats returns the metrics of the most recent successful upload.
-func (s *Session) LastUploadStats() UploadStats { return s.lastUStats }
 
 func (s *Session) extendDeadline(d time.Duration) {
 	_ = s.conn.SetDeadline(time.Now().Add(d))
