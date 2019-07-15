@@ -285,7 +285,7 @@ func (fs *PseudoFS) flushSectors() error {
 			}})
 			fs.hosts.release(hostKey)
 			if err != nil {
-				errChan <- err
+				errChan <- errors.Wrap(err, hostKey.ShortKey())
 				return
 			}
 			errChan <- nil
@@ -431,7 +431,7 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 				if err == nil {
 					shards[shardIndex] = buf.Bytes()
 				}
-				respChan <- err
+				respChan <- errors.Wrap(err, hosts[shardIndex].HostKey().ShortKey())
 			}
 		}()
 		reqChan <- reqIndex

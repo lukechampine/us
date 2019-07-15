@@ -26,7 +26,7 @@ type HostSet struct {
 	currentHeight types.BlockHeight
 }
 
-// Close closes all of the Downloaders in the set.
+// Close closes all of the sessions in the set.
 func (set *HostSet) Close() error {
 	for _, ls := range set.sessions {
 		ls.mu.Lock()
