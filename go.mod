@@ -10,6 +10,6 @@ require (
 	gitlab.com/NebulousLabs/Sia v1.4.1
 	gitlab.com/NebulousLabs/entropy-mnemonics v0.0.0-20181018051301-7532f67e3500
 	golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4
-	lukechampine.com/frand v1.0.0
+	lukechampine.com/frand v1.0.1
 	lukechampine.com/walrus v0.4.0
 )
