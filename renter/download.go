@@ -144,8 +144,7 @@ func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 	}
 	data := d.buf.Bytes()
 	// decrypt segments
-	xchachaNonce := append(s.Nonce[:], make([]byte, 4)...)
-	d.Key.XORKeyStream(data, xchachaNonce, uint64(s.SegmentIndex))
+	d.Key.XORKeyStream(data, s.Nonce[:], uint64(s.SegmentIndex))
 	return data, nil
 }
 
