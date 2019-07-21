@@ -139,6 +139,9 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 	// no open file; create/open a metafile on disk
 	var m *renter.MetaFile
 	if flag&os.O_CREATE == os.O_CREATE {
+		if len(fs.hosts.sessions) < minShards {
+			return nil, errors.New("minShards cannot be greater than the number of hosts")
+		}
 		if flag&os.O_TRUNC == os.O_TRUNC {
 			// remove existing file
 			for fd, f := range fs.files {
