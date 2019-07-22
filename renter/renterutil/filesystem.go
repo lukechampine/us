@@ -162,6 +162,26 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 		if err != nil {
 			return nil, errors.Wrapf(err, "open %v", name)
 		}
+		// check whether we have a session for each of the file's hosts
+		var missing []string
+		for _, hostKey := range m.Hosts {
+			if _, ok := fs.hosts.sessions[hostKey]; !ok {
+				missing = append(missing, hostKey.ShortKey())
+			}
+		}
+		if flag&rwmask == os.O_RDONLY {
+			// only need m.MinShards hosts in order to read
+			if have := len(m.Hosts) - len(missing); have < m.MinShards {
+				return nil, errors.Errorf("insufficient contracts: need a contract from at least %v of these hosts: %v",
+					m.MinShards-have, strings.Join(missing, " "))
+			}
+		} else {
+			// need all hosts in order to write
+			if len(missing) > 0 {
+				return nil, errors.Errorf("insufficient contracts: need a contract from each of these hosts: %v",
+					strings.Join(missing, " "))
+			}
+		}
 	}
 	of := &openMetaFile{
 		name: name,
