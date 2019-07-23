@@ -1,33 +1,30 @@
 package wallet
 
 import (
-	"bytes"
 	"encoding/binary"
-	"errors"
 
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	mnemonics "gitlab.com/NebulousLabs/entropy-mnemonics"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
 	"lukechampine.com/us/ed25519"
 )
 
 // A Seed generates addresses deterministically from some initial entropy.
+//
+// Seeds consist of 128 bits of entropy, and are represented to the user as a
+// 12-word BIP39 mnemonic seed phrase. Internally, this entropy is hashed into a
+// siad-compatible seed before it is used to derive keys. This means that Seeds
+// can be imported into a siad wallet. (The reverse, however, is not possible.)
 type Seed struct {
 	entropy  [16]byte
 	siadSeed modules.Seed
 }
 
-// String implements fmt.Stringer by encoding the seed as a mnemonic phrase.
-// Note that these phrases are shorter than standard siad wallet seed phrases.
+// String implements fmt.Stringer by encoding the seed as a 12-word BIP39
+// mnemonic phrase.
 func (s Seed) String() string {
-	checksum := s.siadSeed[:4] // nice
-	phrase, err := mnemonics.ToPhrase(append(s.entropy[:], checksum...), mnemonics.English)
-	if err != nil {
-		panic(err)
-	}
-	return phrase.String()
+	return encodeBIP39Phrase(s.entropy)
 }
 
 // SiadSeed returns a Sia-compatible form of the Seed. This form can be imported
@@ -73,19 +70,11 @@ func SeedFromEntropy(entropy [16]byte) Seed {
 
 // SeedFromPhrase returns the Seed derived from the supplied phrase.
 func SeedFromPhrase(phrase string) (Seed, error) {
-	entropyAndChecksum, err := mnemonics.FromString(phrase, mnemonics.English)
+	entropy, err := decodeBIP39Phrase(phrase)
 	if err != nil {
 		return Seed{}, err
-	} else if len(entropyAndChecksum) != 20 {
-		return Seed{}, errors.New("invalid phrase length")
 	}
-	var entropy [16]byte
-	copy(entropy[:], entropyAndChecksum[:16])
-	s := SeedFromEntropy(entropy)
-	if !bytes.Equal(s.siadSeed[:4], entropyAndChecksum[16:]) {
-		return Seed{}, errors.New("phrase has invalid checksum")
-	}
-	return s, nil
+	return SeedFromEntropy(entropy), nil
 }
 
 // NewSeed returns a random Seed.
