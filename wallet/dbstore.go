@@ -6,10 +6,10 @@ import (
 	"os"
 	"time"
 
-	bolt "github.com/coreos/bbolt"
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	bolt "go.etcd.io/bbolt"
 )
 
 // database buckets/keys
