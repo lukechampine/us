@@ -3,7 +3,7 @@ package reedsolomon
 import (
 	"runtime"
 
-	"github.com/klauspost/cpuid"
+	"golang.org/x/sys/cpu"
 )
 
 // Option allows to override processing parameters.
@@ -28,9 +28,9 @@ func init() {
 		defaultOptions.maxGoroutines = 1
 	}
 	// Detect CPU capabilities.
-	defaultOptions.useSSSE3 = cpuid.CPU.SSSE3()
-	defaultOptions.useAVX2 = cpuid.CPU.AVX2()
-	defaultOptions.useSSE2 = cpuid.CPU.SSE2()
+	defaultOptions.useSSE2 = cpu.X86.HasSSE2
+	defaultOptions.useSSSE3 = cpu.X86.HasSSSE3
+	defaultOptions.useAVX2 = cpu.X86.HasAVX2
 }
 
 // WithMaxGoroutines is the maximum number of goroutines number for encoding & decoding.
