@@ -14,24 +14,25 @@ import (
 var errNoHost = errors.New("no record of that host")
 
 type lockedHost struct {
-	s   *proto.Session
-	err error
-	mu  *sync.Mutex
+	reconnect func() error
+	s         *proto.Session
+	mu        sync.Mutex
 }
 
 // A HostSet is a collection of renter-host protocol sessions.
 type HostSet struct {
-	sessions      map[hostdb.HostPublicKey]lockedHost
+	sessions      map[hostdb.HostPublicKey]*lockedHost
 	hkr           renter.HostKeyResolver
 	currentHeight types.BlockHeight
 }
 
 // Close closes all of the sessions in the set.
 func (set *HostSet) Close() error {
-	for _, ls := range set.sessions {
-		ls.mu.Lock()
-		if ls.s != nil {
-			ls.s.Close()
+	for _, lh := range set.sessions {
+		lh.mu.Lock()
+		if lh.s != nil {
+			lh.s.Close()
+			lh.s = nil
 		}
 	}
 	return nil
@@ -43,7 +44,7 @@ func (set *HostSet) acquire(host hostdb.HostPublicKey) (*proto.Session, error) {
 		return nil, errNoHost
 	}
 	ls.mu.Lock()
-	if err := ls.err; err != nil {
+	if err := ls.reconnect(); err != nil {
 		ls.mu.Unlock()
 		return nil, err
 	}
@@ -54,22 +55,29 @@ func (set *HostSet) release(host hostdb.HostPublicKey) {
 	set.sessions[host].mu.Unlock()
 }
 
-// AddHost adds a host to the set, using the provided contract to establish a
-// protocol session. If a session cannot be established, the error is returned,
-// but the host is still added to the set, and the error is exposed via the
-// acquire method.
-func (set *HostSet) AddHost(c proto.ContractEditor) error {
+// AddHost adds a host to the set for later use.
+func (set *HostSet) AddHost(c proto.ContractEditor) {
 	hostKey := c.Revision().HostKey()
-	var s *proto.Session
-	hostIP, err := set.hkr.ResolveHostKey(hostKey)
-	if err != nil {
-		err = errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
-	} else {
-		s, err = proto.NewSession(hostIP, c, set.currentHeight)
-		err = errors.Wrapf(err, "%v", hostKey.ShortKey())
+	lh := new(lockedHost)
+	// lazy connection function
+	lh.reconnect = func() error {
+		// close and reopen session
+		//
+		// TODO: this is obviously inefficient; we should instead reuse sessions
+		// if they are already open, and attempt to keep them open even when
+		// quiescent (though not indefinitely)
+		if lh.s != nil {
+			lh.s.Close()
+			lh.s = nil
+		}
+		hostIP, err := set.hkr.ResolveHostKey(hostKey)
+		if err != nil {
+			return errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
+		}
+		lh.s, err = proto.NewSession(hostIP, c, set.currentHeight)
+		return errors.Wrapf(err, "%v", hostKey.ShortKey())
 	}
-	set.sessions[hostKey] = lockedHost{s: s, err: err, mu: new(sync.Mutex)}
-	return err
+	set.sessions[hostKey] = lh
 }
 
 // NewHostSet creates an empty HostSet using the provided resolver and current
@@ -78,7 +86,7 @@ func NewHostSet(hkr renter.HostKeyResolver, currentHeight types.BlockHeight) *Ho
 	return &HostSet{
 		hkr:           hkr,
 		currentHeight: currentHeight,
-		sessions:      make(map[hostdb.HostPublicKey]lockedHost),
+		sessions:      make(map[hostdb.HostPublicKey]*lockedHost),
 	}
 }
 
