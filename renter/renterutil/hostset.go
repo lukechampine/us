@@ -72,10 +72,10 @@ func (set *HostSet) AddHost(c proto.ContractEditor) {
 		}
 		hostIP, err := set.hkr.ResolveHostKey(hostKey)
 		if err != nil {
-			return errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
+			return errors.Wrap(err, "could not resolve host key")
 		}
 		lh.s, err = proto.NewSession(hostIP, c, set.currentHeight)
-		return errors.Wrapf(err, "%v", hostKey.ShortKey())
+		return err
 	}
 	set.sessions[hostKey] = lh
 }

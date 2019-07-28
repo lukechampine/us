@@ -392,10 +392,12 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	}
 
 	hosts := make([]*renter.ShardDownloader, len(f.m.Hosts))
+	errs := make([]error, len(f.m.Hosts))
 	var nHosts int
 	for i, hostKey := range f.m.Hosts {
 		s, err := fs.hosts.acquire(hostKey)
 		if err != nil {
+			errs[i] = err
 			continue
 		}
 		defer fs.hosts.release(hostKey)
@@ -426,6 +428,10 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	for ; reqIndex < f.m.MinShards; reqIndex++ {
 		go func() {
 			for shardIndex := range reqChan {
+				if err := errs[shardIndex]; err != nil {
+					respChan <- errors.Wrap(err, f.m.Hosts[shardIndex].ShortKey())
+					continue
+				}
 				var buf bytes.Buffer
 				err := hosts[shardIndex].CopySection(&buf, offset, length)
 				if err == nil {
