@@ -28,7 +28,8 @@ func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, hos
 
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host.
-func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
+func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (_ ContractRevision, err error) {
+	defer wrapErr(&err, "RenewContract")
 	if endHeight < startHeight {
 		return ContractRevision{}, errors.New("end height must be greater than start height")
 	}

@@ -51,7 +51,8 @@ func (s *Session) call(rpcID renterhost.Specifier, req, resp renterhost.Protocol
 // Lock calls the Lock RPC, locking the supplied contract and synchronizing its
 // state with the host's most recent revision. Subsequent RPCs will modify the
 // supplied contract.
-func (s *Session) Lock(contract ContractEditor) error {
+func (s *Session) Lock(contract ContractEditor) (err error) {
+	defer wrapErr(&err, "Lock")
 	req := &renterhost.RPCLockRequest{
 		ContractID: contract.Revision().ID(),
 		Signature:  s.sess.SignChallenge(contract.Key()),
@@ -73,7 +74,7 @@ func (s *Session) Lock(contract ContractEditor) error {
 	rev := ContractRevision{Revision: resp.Revision}
 	copy(rev.Signatures[:], resp.Signatures)
 	if err := contract.SetRevision(rev); err != nil {
-		return err
+		return errors.Wrap(err, "couldn't set revision")
 	}
 	if !resp.Acquired {
 		return errors.New("contract is locked by another party")
@@ -86,7 +87,8 @@ func (s *Session) Lock(contract ContractEditor) error {
 //
 // It is typically not necessary to manually unlock a contract, as the host will
 // automatically unlock any locked contracts when the connection closes.
-func (s *Session) Unlock() error {
+func (s *Session) Unlock() (err error) {
+	defer wrapErr(&err, "Unlock")
 	if s.contract == nil {
 		return errors.New("no contract locked")
 	}
@@ -95,20 +97,22 @@ func (s *Session) Unlock() error {
 }
 
 // Settings calls the Settings RPC, returning the host's reported settings.
-func (s *Session) Settings() (hostdb.HostSettings, error) {
+func (s *Session) Settings() (_ hostdb.HostSettings, err error) {
+	defer wrapErr(&err, "Settings")
 	s.extendDeadline(10 * time.Second)
 	var resp renterhost.RPCSettingsResponse
 	if err := s.call(renterhost.RPCSettingsID, nil, &resp); err != nil {
 		return hostdb.HostSettings{}, err
 	} else if err := json.Unmarshal(resp.Settings, &s.host.HostSettings); err != nil {
-		return hostdb.HostSettings{}, err
+		return hostdb.HostSettings{}, errors.Wrap(err, "couldn't unmarshal json")
 	}
 	return s.host.HostSettings, nil
 }
 
 // SectorRoots calls the SectorRoots RPC, returning the requested range of
 // sector Merkle roots of the currently-locked contract.
-func (s *Session) SectorRoots(offset, n int) ([]crypto.Hash, error) {
+func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
+	defer wrapErr(&err, "SectorRoots")
 	rev := s.contract.Revision().Revision
 	totalSectors := int(rev.NewFileSize / renterhost.SectorSize)
 	if offset < 0 || n < 0 || offset+n > totalSectors {
@@ -149,7 +153,7 @@ func (s *Session) SectorRoots(offset, n int) ([]crypto.Hash, error) {
 	sigs[0].Signature = req.Signature
 	sigs[1].Signature = resp.Signature
 	if err := s.contract.SetRevision(ContractRevision{rev, sigs}); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "couldn't set revision")
 	}
 	if !merkle.VerifySectorRangeProof(resp.MerkleProof, resp.SectorRoots, offset, offset+n, totalSectors, rev.NewFileMerkleRoot) {
 		return nil, ErrInvalidMerkleProof
@@ -159,7 +163,8 @@ func (s *Session) SectorRoots(offset, n int) ([]crypto.Hash, error) {
 
 // Read calls the Read RPC, writing the requested sections of sector data to w.
 // Merkle proofs are always requested.
-func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection) error {
+func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection) (err error) {
+	defer wrapErr(&err, "Read")
 	rev := s.contract.Revision().Revision
 
 	// calculate price
@@ -170,8 +175,9 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	sectorAccessPrice := s.host.SectorAccessPrice.Mul64(uint64(len(sectorAccesses)))
 	var bandwidth uint64
 	for _, sec := range sections {
-		proofHashes := merkle.ProofSize(merkle.SegmentsPerSector, int(sec.Offset), int(sec.Offset+sec.Length))
-		proofHashes = 2 * bits.Len64(merkle.SegmentsPerSector) // siad host uses worst-case size
+		// TODO: siad host uses worst-case size. This should be:
+		// proofHashes := merkle.ProofSize(merkle.SegmentsPerSector, int(sec.Offset), int(sec.Offset+sec.Length))
+		proofHashes := 2 * bits.Len64(merkle.SegmentsPerSector)
 		bandwidth += uint64(sec.Length) + uint64(proofHashes)*crypto.HashSize
 	}
 	if bandwidth < renterhost.MinMessageSize {
@@ -200,7 +206,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 		Signature:            renterSig,
 	}
 	if err := s.sess.WriteRequest(renterhost.RPCReadID, req); err != nil {
-		return err
+		return errors.Wrap(err, "couldn't write RPC ID")
 	}
 
 	// host will now stream back responses; ensure we send RPCLoopReadStop
@@ -226,7 +232,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 				return ErrInvalidMerkleProof
 			}
 			if _, err := w.Write(resp.Data); err != nil {
-				return err
+				return errors.Wrap(err, "couldn't write sector data")
 			}
 		}
 		// If the host sent a signature, exit the loop; they won't be sending
@@ -250,7 +256,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	sigs[0].Signature = renterSig
 	sigs[1].Signature = hostSig
 	if err := s.contract.SetRevision(ContractRevision{rev, sigs}); err != nil {
-		return err
+		return errors.Wrap(err, "couldn't set revision")
 	}
 
 	return nil
@@ -258,7 +264,8 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 
 // Write implements the Write RPC, except for ActionUpdate. A Merkle proof is
 // always requested.
-func (s *Session) Write(actions []renterhost.RPCWriteAction) error {
+func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
+	defer wrapErr(&err, "Write")
 	rev := s.contract.Revision().Revision
 
 	// calculate the new Merkle root set and sectors uploaded/stored
@@ -323,13 +330,13 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) error {
 		NewMissedProofValues: newMissed,
 	}
 	if err := s.sess.WriteRequest(renterhost.RPCWriteID, req); err != nil {
-		return err
+		return errors.Wrap(err, "couldn't write RPC ID")
 	}
 
 	// read and verify Merkle proof
 	var merkleResp renterhost.RPCWriteMerkleProof
 	if err := s.sess.ReadResponse(&merkleResp, 4096); err != nil {
-		return err
+		return errors.Wrap(err, "couldn't read Merkle proof response")
 	}
 	numSectors := int(rev.NewFileSize / renterhost.SectorSize)
 	proofHashes := merkleResp.OldSubtreeHashes
@@ -349,32 +356,34 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) error {
 		Signature: s.contract.Key().SignHash(renterhost.HashRevision(rev)),
 	}
 	if err := s.sess.WriteResponse(renterSig, nil); err != nil {
-		return err
+		return errors.Wrap(err, "couldn't write signature response")
 	}
 	var hostSig renterhost.RPCWriteResponse
 	if err := s.sess.ReadResponse(&hostSig, 4096); err != nil {
-		return err
+		return errors.Wrap(err, "couldn't read signature response")
 	}
 
 	sigs := s.contract.Revision().Signatures
 	sigs[0].Signature = renterSig.Signature
 	sigs[1].Signature = hostSig.Signature
 	if err := s.contract.SetRevision(ContractRevision{rev, sigs}); err != nil {
-		return err
+		return errors.Wrap(err, "couldn't set revision")
 	}
 
 	return nil
 }
 
 // Close gracefully terminates the session and closes the underlying connection.
-func (s *Session) Close() error {
+func (s *Session) Close() (err error) {
+	defer wrapErr(&err, "Close")
 	return s.sess.Close()
 }
 
 // NewSession initiates a new renter-host protocol session with the specified
 // host. The supplied contract will be locked and synchronized with the host.
 // The host's settings will also be requested.
-func NewSession(hostIP modules.NetAddress, contract ContractEditor, currentHeight types.BlockHeight) (*Session, error) {
+func NewSession(hostIP modules.NetAddress, contract ContractEditor, currentHeight types.BlockHeight) (_ *Session, err error) {
+	defer wrapErr(&err, "NewSession")
 	s, err := NewUnlockedSession(hostIP, contract.Revision().HostKey(), currentHeight)
 	if err != nil {
 		return nil, err
@@ -392,7 +401,8 @@ func NewSession(hostIP modules.NetAddress, contract ContractEditor, currentHeigh
 
 // NewUnlockedSession initiates a new renter-host protocol session with the specified
 // host, without locking an associated contract or requesting the host's settings.
-func NewUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (*Session, error) {
+func NewUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (_ *Session, err error) {
+	defer wrapErr(&err, "NewUnlockedSession")
 	conn, err := net.Dial("tcp", string(hostIP))
 	if err != nil {
 		return nil, err

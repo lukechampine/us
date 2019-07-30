@@ -34,7 +34,8 @@ func FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, host 
 
 // FormContract forms a contract with a host. The resulting contract will have
 // renterPayout coins in the renter output.
-func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
+func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (_ ContractRevision, err error) {
+	defer wrapErr(&err, "FormContract")
 	if endHeight < startHeight {
 		return ContractRevision{}, errors.New("end height must be greater than start height")
 	}

@@ -10,6 +10,10 @@ import (
 	"lukechampine.com/us/hostdb"
 )
 
+func wrapErr(err *error, fnName string) {
+	*err = errors.Wrap(*err, fnName)
+}
+
 type (
 	// A Wallet provides addresses and outputs, and can sign transactions.
 	Wallet interface {
@@ -87,7 +91,8 @@ func (c ContractRevision) IsValid() bool {
 // host. If the host is well-behaved, there is no incentive for the renter to
 // submit revision transactions. But if the host misbehaves, submitting the
 // revision ensures that the host will lose the collateral it committed.
-func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool) error {
+func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool) (err error) {
+	defer wrapErr(&err, "SubmitContractRevision")
 	// construct a transaction containing the signed revision
 	txn := types.Transaction{
 		FileContractRevisions: []types.FileContractRevision{c.Revision},

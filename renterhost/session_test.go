@@ -2,13 +2,13 @@ package renterhost
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"io/ioutil"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -151,7 +151,7 @@ func TestSession(t *testing.T) {
 			defer hs.Close()
 			for {
 				id, err := hs.ReadID()
-				if err == ErrRenterClosed {
+				if errors.Cause(err) == ErrRenterClosed {
 					return nil
 				} else if err != nil {
 					return err
@@ -232,7 +232,7 @@ func TestFormContract(t *testing.T) {
 			defer hs.Close()
 			for {
 				id, err := hs.ReadID()
-				if err == ErrRenterClosed {
+				if errors.Cause(err) == ErrRenterClosed {
 					return nil
 				} else if err != nil {
 					return err

@@ -52,7 +52,7 @@ func (h *Host) handleConn(conn net.Conn) error {
 	for {
 		s.extendDeadline(time.Hour)
 		id, err := s.sess.ReadID()
-		if err == renterhost.ErrRenterClosed {
+		if errors.Cause(err) == renterhost.ErrRenterClosed {
 			return nil
 		} else if err != nil {
 			return errors.Wrap(err, "could not read RPC ID")

@@ -15,6 +15,10 @@ import (
 	"lukechampine.com/frand"
 )
 
+func wrapErr(err *error, fnName string) {
+	*err = errors.Wrap(*err, fnName)
+}
+
 // MinMessageSize is the minimum size of an RPC message. If an encoded message
 // would be smaller than MinMessageSize, the sender MAY pad it with random data.
 // This hinders traffic analysis by obscuring the true sizes of messages.
@@ -144,6 +148,7 @@ func (s *Session) readMessage(obj ProtocolObject, maxLen uint64) error {
 // WriteRequest sends an encrypted RPC request, comprising an RPC ID and a
 // request object.
 func (s *Session) WriteRequest(rpcID Specifier, req ProtocolObject) (err error) {
+	defer wrapErr(&err, "WriteRequest")
 	err = s.writeMessage(&rpcID)
 	if err == nil && req != nil {
 		err = s.writeMessage(req)
@@ -154,6 +159,7 @@ func (s *Session) WriteRequest(rpcID Specifier, req ProtocolObject) (err error) 
 // ReadID reads an RPC request ID. If the renter sends the session termination
 // signal, ReadID returns ErrRenterClosed.
 func (s *Session) ReadID() (rpcID Specifier, err error) {
+	defer wrapErr(&err, "ReadID")
 	err = s.readMessage(&rpcID, MinMessageSize)
 	if rpcID == loopExit {
 		err = ErrRenterClosed
@@ -162,14 +168,16 @@ func (s *Session) ReadID() (rpcID Specifier, err error) {
 }
 
 // ReadRequest reads an RPC request using the new loop protocol.
-func (s *Session) ReadRequest(req ProtocolObject, maxLen uint64) error {
+func (s *Session) ReadRequest(req ProtocolObject, maxLen uint64) (err error) {
+	defer wrapErr(&err, "ReadRequest")
 	return s.readMessage(req, maxLen)
 }
 
 // WriteResponse writes an RPC response object or error. Either resp or err must
 // be nil. If err is an *RPCError, it is sent directly; otherwise, a generic
 // RPCError is created from err's Error string.
-func (s *Session) WriteResponse(resp ProtocolObject, err error) error {
+func (s *Session) WriteResponse(resp ProtocolObject, err error) (e error) {
+	defer wrapErr(&e, "WriteResponse")
 	re, ok := err.(*RPCError)
 	if err != nil && !ok {
 		re = &RPCError{Description: err.Error()}
@@ -179,7 +187,8 @@ func (s *Session) WriteResponse(resp ProtocolObject, err error) error {
 
 // ReadResponse reads an RPC response. If the response is an error, it is
 // returned directly.
-func (s *Session) ReadResponse(resp ProtocolObject, maxLen uint64) error {
+func (s *Session) ReadResponse(resp ProtocolObject, maxLen uint64) (err error) {
+	defer wrapErr(&err, "ReadResponse")
 	rr := rpcResponse{nil, resp}
 	if err := s.readMessage(&rr, maxLen); err != nil {
 		return err
@@ -190,7 +199,8 @@ func (s *Session) ReadResponse(resp ProtocolObject, maxLen uint64) error {
 }
 
 // Close gracefully terminates the RPC loop and closes the connection.
-func (s *Session) Close() error {
+func (s *Session) Close() (err error) {
+	defer wrapErr(&err, "Close")
 	if s.closed {
 		return nil
 	}
@@ -207,7 +217,8 @@ func hashKeys(k1, k2 [32]byte) crypto.Hash {
 
 // NewHostSession conducts the hosts's half of the renter-host protocol
 // handshake, returning a Session that can be used to handle RPC requests.
-func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (*Session, error) {
+func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (_ *Session, err error) {
+	defer wrapErr(&err, "NewHostSession")
 	var req loopKeyExchangeRequest
 	if err := req.readFrom(conn); err != nil {
 		return nil, err
@@ -253,7 +264,9 @@ func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (*Session, error) {
 // handshake, returning a Session that can be used to make RPC requests.
 //
 // Note that hostdb.HostPublicKey implements the HashVerifier interface.
-func NewRenterSession(conn io.ReadWriteCloser, hv HashVerifier) (*Session, error) {
+func NewRenterSession(conn io.ReadWriteCloser, hv HashVerifier) (_ *Session, err error) {
+	defer wrapErr(&err, "NewRenterSession")
+
 	xsk, xpk := crypto.GenerateX25519KeyPair()
 	req := &loopKeyExchangeRequest{
 		PublicKey: xpk,
