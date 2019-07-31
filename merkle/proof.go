@@ -225,8 +225,10 @@ func sectorsChanged(actions []renterhost.RPCWriteAction, numSectors int) []int {
 			newNumSectors++
 
 		case renterhost.RPCWriteActionTrim:
-			newNumSectors -= int(action.A)
-			sectorsChanged[newNumSectors] = struct{}{}
+			for i := 0; i < int(action.A); i++ {
+				newNumSectors--
+				sectorsChanged[newNumSectors] = struct{}{}
+			}
 
 		case renterhost.RPCWriteActionSwap:
 			sectorsChanged[int(action.A)] = struct{}{}
@@ -328,9 +330,8 @@ func modifyProofRanges(proofIndices []int, actions []renterhost.RPCWriteAction, 
 			numSectors++
 
 		case renterhost.RPCWriteActionTrim:
-			n := int(action.A)
-			proofIndices = proofIndices[:len(proofIndices)-n]
-			numSectors -= n
+			proofIndices = proofIndices[:len(proofIndices)-int(action.A)]
+			numSectors -= int(action.A)
 
 		case renterhost.RPCWriteActionSwap:
 		case renterhost.RPCWriteActionUpdate:

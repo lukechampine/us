@@ -343,7 +343,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	leafHashes := merkleResp.OldLeafHashes
 	oldRoot, newRoot := rev.NewFileMerkleRoot, merkleResp.NewMerkleRoot
 	if !merkle.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot) {
-		err := errors.New("invalid Merkle proof for old root")
+		err := errors.New("invalid Merkle proof")
 		s.sess.WriteResponse(nil, err)
 		return err
 	}
