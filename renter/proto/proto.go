@@ -8,6 +8,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/renterhost"
 )
 
 func wrapErr(err *error, fnName string) {
@@ -69,10 +70,14 @@ func (c ContractRevision) HostKey() hostdb.HostPublicKey {
 	return hostdb.HostKeyFromSiaPublicKey(c.Revision.UnlockConditions.PublicKeys[1])
 }
 
-// RenterFunds returns the funds remaining in the contract's Renter payout as
-// of the most recent revision.
+// RenterFunds returns the funds remaining in the contract's Renter payout.
 func (c ContractRevision) RenterFunds() types.Currency {
 	return c.Revision.NewValidProofOutputs[0].Value
+}
+
+// NumSectors returns the number of sectors covered by the contract.
+func (c ContractRevision) NumSectors() int {
+	return int(c.Revision.NewFileSize / renterhost.SectorSize)
 }
 
 // IsValid returns false if the ContractRevision has the wrong number of
