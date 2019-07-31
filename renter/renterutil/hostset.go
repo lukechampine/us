@@ -28,12 +28,13 @@ type HostSet struct {
 
 // Close closes all of the sessions in the set.
 func (set *HostSet) Close() error {
-	for _, lh := range set.sessions {
+	for hostKey, lh := range set.sessions {
 		lh.mu.Lock()
 		if lh.s != nil {
 			lh.s.Close()
 			lh.s = nil
 		}
+		delete(set.sessions, hostKey)
 	}
 	return nil
 }
@@ -159,9 +160,7 @@ func DownloadChunkShards(hosts []*renter.ShardDownloader, chunkIndex int64, minS
 	if len(goodRes) < minShards {
 		var errStrings []string
 		for _, r := range badRes {
-			if r.err != errNoHost {
-				errStrings = append(errStrings, r.err.Error())
-			}
+			errStrings = append(errStrings, r.err.Error())
 		}
 		return nil, 0, errors.New("too many hosts did not supply their shard:\n" + strings.Join(errStrings, "\n"))
 	}
