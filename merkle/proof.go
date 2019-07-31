@@ -370,7 +370,7 @@ func modifyLeaves(leafHashes []crypto.Hash, actions []renterhost.RPCWriteAction,
 		if i > 0 && index == indices[i-1] {
 			continue // remove duplicates
 		}
-		indexMap[index] = i
+		indexMap[index] = len(indexMap)
 	}
 	leafHashes = append([]crypto.Hash(nil), leafHashes...)
 	var sector [renterhost.SectorSize]byte
