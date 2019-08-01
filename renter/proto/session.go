@@ -342,8 +342,12 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	proofHashes := merkleResp.OldSubtreeHashes
 	leafHashes := merkleResp.OldLeafHashes
 	oldRoot, newRoot := rev.NewFileMerkleRoot, merkleResp.NewMerkleRoot
-	if !merkle.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot) {
-		err := errors.New("invalid Merkle proof")
+	// TODO: we skip the Merkle proof if the resulting contract is empty (i.e.
+	// if all sectors were deleted) because the proof algorithm chokes on this
+	// edge case. Need to investigate what proofs siad hosts are producing (are
+	// they valid?) and reconcile those with our Merkle algorithms.
+	if newFileSize > 0 && !merkle.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot) {
+		err := ErrInvalidMerkleProof
 		s.sess.WriteResponse(nil, err)
 		return err
 	}
