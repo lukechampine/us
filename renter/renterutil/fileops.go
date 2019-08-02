@@ -397,7 +397,7 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	for i, hostKey := range f.m.Hosts {
 		s, err := fs.hosts.acquire(hostKey)
 		if err != nil {
-			errs[i] = err
+			errs[i] = errors.Wrap(err, hostKey.ShortKey())
 			continue
 		}
 		defer fs.hosts.release(hostKey)
@@ -409,7 +409,14 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 		nHosts++
 	}
 	if nHosts < f.m.MinShards {
-		return 0, errors.Errorf("insufficient hosts to recover file data (needed %v, got %v)", f.m.MinShards, nHosts)
+		var errStrings []string
+		for _, err := range errs {
+			if err != nil {
+				errStrings = append(errStrings, err.Error())
+			}
+		}
+		return 0, errors.Errorf("insufficient hosts to recover file data (needed %v, got %v):\n%v",
+			f.m.MinShards, nHosts, strings.Join(errStrings, "\n"))
 	}
 
 	start := (off / f.m.MinChunkSize()) * merkle.SegmentSize
@@ -429,15 +436,17 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 		go func() {
 			for shardIndex := range reqChan {
 				if err := errs[shardIndex]; err != nil {
-					respChan <- errors.Wrap(err, f.m.Hosts[shardIndex].ShortKey())
+					respChan <- err
 					continue
 				}
 				var buf bytes.Buffer
 				err := hosts[shardIndex].CopySection(&buf, offset, length)
-				if err == nil {
-					shards[shardIndex] = buf.Bytes()
+				if err != nil {
+					respChan <- errors.Wrap(err, hosts[shardIndex].HostKey().ShortKey())
+					continue
 				}
-				respChan <- errors.Wrap(err, hosts[shardIndex].HostKey().ShortKey())
+				shards[shardIndex] = buf.Bytes()
+				respChan <- nil
 			}
 		}()
 		reqChan <- reqIndex
