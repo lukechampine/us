@@ -276,7 +276,7 @@ func (fs *PseudoFS) flushSectors() error {
 			sector := sb.Finish()
 			h, err := fs.hosts.acquire(hostKey)
 			if err != nil {
-				errChan <- err
+				errChan <- errors.Wrap(err, hostKey.ShortKey())
 				return
 			}
 			err = h.Write([]renterhost.RPCWriteAction{{
