@@ -6,6 +6,7 @@ import (
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/frand"
 )
 
 func TestSeedPhrase(t *testing.T) {
@@ -18,10 +19,19 @@ func TestSeedPhrase(t *testing.T) {
 			t.Fatal("seed loaded from phrase does not match")
 		}
 	}
-	phrase := strings.Fields(NewSeed().String())
-	phrase[len(phrase)-1] = phrase[0]
-	if _, err := SeedFromPhrase(strings.Join(phrase, " ")); err == nil {
-		t.Fatal("expected invalid checksum error")
+	// generate random phrases; about 1 in 16 should have a valid checksum
+	phrase := make([]string, 12)
+	valid := 0
+	for i := 0; i < 1000; i++ {
+		for j := range phrase {
+			phrase[j] = bip39EnglishWordList[frand.Intn(len(bip39EnglishWordList))]
+		}
+		if _, err := SeedFromPhrase(strings.Join(phrase, " ")); err == nil {
+			valid++
+		}
+	}
+	if valid < (1000/16)-20 || (1000/16)+20 < valid {
+		t.Error("expected number of randomly-valid phrases to fall in [42,82); got", valid)
 	}
 }
 
