@@ -23,7 +23,7 @@ type EphemeralStore struct {
 	ccid   modules.ConsensusChangeID
 }
 
-// ApplyConsensusChange implements Store.
+// ApplyConsensusChange implements ChainStore.
 func (s *EphemeralStore) ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) {
 	for _, o := range reverted.Outputs {
 		delete(s.outputs, o.ID)

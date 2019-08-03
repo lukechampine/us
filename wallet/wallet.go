@@ -68,7 +68,6 @@ type ProcessedConsensusChange struct {
 	BlockRewards        []BlockReward
 	FileContracts       []FileContract
 	BlockCount          int
-	CCID                modules.ConsensusChangeID
 }
 
 // StandardUnlockConditions are the unlock conditions for a standard address:

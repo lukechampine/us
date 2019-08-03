@@ -150,44 +150,33 @@ func (s *BoltDBStore) ApplyConsensusChange(reverted, applied ProcessedConsensusC
 			}
 		}
 
+		// helper function for inserting value at next sequence number
+		seqBytes := make([]byte, 8)
+		putSeq := func(b *bolt.Bucket, val []byte) error {
+			seq, _ := tx.Bucket(bucketBlockRewards).NextSequence()
+			binary.BigEndian.PutUint64(seqBytes, seq)
+			return b.Put(seqBytes, val)
+		}
+
 		for _, o := range applied.Outputs {
 			tx.Bucket(bucketOutputs).Put(o.ID[:], encoding.Marshal(o))
 		}
-		if len(applied.BlockRewards) > 0 {
-			seq, _ := tx.Bucket(bucketBlockRewards).NextSequence()
-			seqBytes := make([]byte, 8)
-			for _, br := range applied.BlockRewards {
-				binary.BigEndian.PutUint64(seqBytes, seq)
-				tx.Bucket(bucketBlockRewards).Put(seqBytes, encoding.Marshal(br))
-				seq++
-			}
+		for _, br := range applied.BlockRewards {
+			putSeq(tx.Bucket(bucketBlockRewards), encoding.Marshal(br))
 		}
-		if len(applied.FileContracts) > 0 {
-			seq, _ := tx.Bucket(bucketFileContracts).NextSequence()
-			seqBytes := make([]byte, 8)
-			for _, fc := range applied.FileContracts {
-				binary.BigEndian.PutUint64(seqBytes, seq)
-				tx.Bucket(bucketFileContracts).Put(seqBytes, encoding.Marshal(fc))
-				seq++
-			}
+		for _, fc := range applied.FileContracts {
+			putSeq(tx.Bucket(bucketFileContracts), encoding.Marshal(fc))
 		}
 		for _, txn := range applied.Transactions {
 			txid := txn.ID()
 			tx.Bucket(bucketTxns).Put(txid[:], encoding.Marshal(txn))
 			tx.Bucket(bucketLimbo).Delete(txid[:])
-			seq, _ := tx.Bucket(bucketTxnsRecentIndex).NextSequence()
-			seqBytes := make([]byte, 8)
-			binary.BigEndian.PutUint64(seqBytes, seq)
-			tx.Bucket(bucketTxnsRecentIndex).Put(seqBytes, txid[:])
+			putSeq(tx.Bucket(bucketTxnsRecentIndex), txid[:])
 		}
 		for addr, txids := range applied.AddressTransactions {
 			addrTxnsBucket, _ := tx.Bucket(bucketTxnsAddrIndex).CreateBucketIfNotExists(addr[:])
-			seq, _ := addrTxnsBucket.NextSequence()
-			seqBytes := make([]byte, 8)
 			for _, txid := range txids {
-				binary.BigEndian.PutUint64(seqBytes, seq)
-				addrTxnsBucket.Put(seqBytes, txid[:])
-				seq++
+				putSeq(addrTxnsBucket, txid[:])
 			}
 		}
 
