@@ -24,7 +24,6 @@ type ChainStore interface {
 
 // A Store stores information needed by a generic wallet.
 type Store interface {
-	ChainStore
 	BlockRewards(n int) []BlockReward
 	ConsensusChangeID() modules.ConsensusChangeID
 	ChainHeight() types.BlockHeight

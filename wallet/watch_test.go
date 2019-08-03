@@ -28,7 +28,7 @@ func TestWatchOnlyWallet(t *testing.T) {
 
 	w := NewWatchOnlyWallet(store)
 	cs := new(mockCS)
-	cs.ConsensusSetSubscribe(w, store.ConsensusChangeID(), nil)
+	cs.ConsensusSetSubscribe(w.ConsensusSetSubscriber(store), store.ConsensusChangeID(), nil)
 
 	// initial balance should be zero
 	if !w.Balance(false).IsZero() {
@@ -167,7 +167,7 @@ func TestWatchOnlyWalletThreadSafety(t *testing.T) {
 	store := NewEphemeralWatchOnlyStore()
 	w := NewWatchOnlyWallet(store)
 	cs := new(mockCS)
-	cs.ConsensusSetSubscribe(w, store.ConsensusChangeID(), nil)
+	cs.ConsensusSetSubscribe(w.ConsensusSetSubscriber(store), store.ConsensusChangeID(), nil)
 
 	randomAddr := func() (addr types.UnlockHash) {
 		frand.Read(addr[:])

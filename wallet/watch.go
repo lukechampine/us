@@ -10,16 +10,20 @@ import (
 // A WatchOnlyWallet is an unprivileged wallet that can track spendable outputs,
 // but cannot sign transactions. It is safe for concurrent use.
 type WatchOnlyWallet struct {
-	cs    ChainScanner
 	store WatchOnlyStore
 	mu    sync.Mutex
 }
 
-// ProcessConsensusChange implements modules.ConsensusSetSubscriber.
-func (w *WatchOnlyWallet) ProcessConsensusChange(cc modules.ConsensusChange) {
-	w.mu.Lock()
-	w.cs.ProcessConsensusChange(cc)
-	w.mu.Unlock()
+// ConsensusSetSubscriber returns a modules.ConsensusSetSubscriber for w using
+// the provided ChainStore.
+func (w *WatchOnlyWallet) ConsensusSetSubscriber(store ChainStore) modules.ConsensusSetSubscriber {
+	return lockedChainScanner{
+		cs: ChainScanner{
+			Owner: w.store,
+			Store: store,
+		},
+		mu: &w.mu,
+	}
 }
 
 // Balance returns the siacoin balance of the wallet. If the limbo flag is true,
@@ -182,9 +186,5 @@ func (w *WatchOnlyWallet) Transaction(id types.TransactionID) (types.Transaction
 func NewWatchOnlyWallet(store WatchOnlyStore) *WatchOnlyWallet {
 	return &WatchOnlyWallet{
 		store: store,
-		cs: ChainScanner{
-			Owner: store,
-			Store: store,
-		},
 	}
 }

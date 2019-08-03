@@ -189,7 +189,10 @@ func sendSiacoins(amount types.Currency, dest types.UnlockHash, feePerByte types
 
 func TestSeedWallet(t *testing.T) {
 	// randomly use either the on-disk DB store or the in-memory ephemeral store
-	var store SeedStore
+	var store interface {
+		ChainStore
+		SeedStore
+	}
 	if frand.Intn(2) == 0 {
 		store = NewEphemeralSeedStore()
 	} else {
@@ -204,11 +207,10 @@ func TestSeedWallet(t *testing.T) {
 		defer store.(*BoltDBStore).Close()
 		defer os.RemoveAll(dir)
 	}
-
 	sm := NewSeedManager(Seed{}, store.SeedIndex())
 	w := NewSeedWallet(sm, store)
 	cs := new(mockCS)
-	cs.ConsensusSetSubscribe(w, store.ConsensusChangeID(), nil)
+	cs.ConsensusSetSubscribe(w.ConsensusSetSubscriber(store), store.ConsensusChangeID(), nil)
 
 	// simulate genesis block
 	cs.sendTxn(types.GenesisBlock.Transactions[0])
@@ -383,7 +385,7 @@ func TestSeedWalletThreadSafety(t *testing.T) {
 	sm := NewSeedManager(Seed{}, store.SeedIndex())
 	w := NewSeedWallet(sm, store)
 	cs := new(mockCS)
-	cs.ConsensusSetSubscribe(w, store.ConsensusChangeID(), nil)
+	cs.ConsensusSetSubscribe(w.ConsensusSetSubscriber(store), store.ConsensusChangeID(), nil)
 
 	addr := w.NextAddress()
 	txn := types.Transaction{
