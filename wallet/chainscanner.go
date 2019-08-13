@@ -36,6 +36,13 @@ func (cs ChainScanner) ProcessConsensusChange(cc modules.ConsensusChange) {
 				ID:            diff.ID,
 			})
 		}
+		// Perhaps surprisingly, the same output can appear in
+		// SiacoinOutputDiffs multiple times. This can happen if e.g. the
+		// ConsensusChange contains both a block that spends the output, and a
+		// reverted block that destroys the output. We want clients of
+		// ChainScanner to only see each output once, so delete from the map
+		// here to ensure that we skip any future occurrences of this output.
+		delete(survivingOutputs, diff.ID)
 	}
 	for _, diff := range cc.SiacoinOutputDiffs {
 		if diff.Direction == modules.DiffApply {
