@@ -19,8 +19,18 @@ type ChainScanner struct {
 func (cs ChainScanner) ProcessConsensusChange(cc modules.ConsensusChange) {
 	var reverted, applied ProcessedConsensusChange
 
+	// ignore "ephemeral" outputs (outputs created and spent in the same
+	// ConsensusChange).
+	survivingOutputs := make(map[types.SiacoinOutputID]struct{})
+	for _, diff := range cc.SiacoinOutputDiffs {
+		if _, ok := survivingOutputs[diff.ID]; !ok {
+			survivingOutputs[diff.ID] = struct{}{}
+		} else {
+			delete(survivingOutputs, diff.ID)
+		}
+	}
 	processOutput := func(diff modules.SiacoinOutputDiff, pcc *ProcessedConsensusChange) {
-		if cs.Owner.OwnsAddress(diff.SiacoinOutput.UnlockHash) {
+		if _, ok := survivingOutputs[diff.ID]; ok && cs.Owner.OwnsAddress(diff.SiacoinOutput.UnlockHash) {
 			pcc.Outputs = append(pcc.Outputs, UnspentOutput{
 				SiacoinOutput: diff.SiacoinOutput,
 				ID:            diff.ID,
