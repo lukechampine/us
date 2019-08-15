@@ -53,8 +53,8 @@ type WatchOnlyStore interface {
 	Store
 	AddressOwner
 	Addresses() []types.UnlockHash
-	AddAddress(addr types.UnlockHash, info []byte)
-	AddressInfo(addr types.UnlockHash) []byte
+	AddAddress(info SeedAddressInfo)
+	AddressInfo(addr types.UnlockHash) (SeedAddressInfo, bool)
 	RemoveAddress(addr types.UnlockHash)
 }
 

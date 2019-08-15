@@ -392,17 +392,21 @@ func (s *BoltDBStore) OwnsAddress(addr types.UnlockHash) (owned bool) {
 }
 
 // AddAddress implements WatchOnlyStore.
-func (s *BoltDBStore) AddAddress(addr types.UnlockHash, info []byte) {
+func (s *BoltDBStore) AddAddress(info SeedAddressInfo) {
+	addr := CalculateUnlockHash(info.UnlockConditions)
 	s.update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketAddrs).Put(addr[:], append([]byte(nil), info...))
+		return tx.Bucket(bucketAddrs).Put(addr[:], encoding.Marshal(info))
 	})
 	s.addrs[addr] = struct{}{}
 }
 
 // AddressInfo implements WatchOnlyStore.
-func (s *BoltDBStore) AddressInfo(addr types.UnlockHash) (info []byte) {
+func (s *BoltDBStore) AddressInfo(addr types.UnlockHash) (info SeedAddressInfo, exists bool) {
 	s.view(func(tx *bolt.Tx) error {
-		info = append(info, tx.Bucket(bucketAddrs).Get(addr[:])...)
+		if v := tx.Bucket(bucketAddrs).Get(addr[:]); v != nil {
+			encoding.Unmarshal(v, &info)
+			exists = true
+		}
 		return nil
 	})
 	return

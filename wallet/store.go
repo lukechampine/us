@@ -233,7 +233,7 @@ func NewEphemeralSeedStore() *EphemeralSeedStore {
 // EphemeralWatchOnlyStore implements WatchOnlyStore in-memory.
 type EphemeralWatchOnlyStore struct {
 	EphemeralStore
-	addrs map[types.UnlockHash][]byte
+	addrs map[types.UnlockHash]SeedAddressInfo
 }
 
 // OwnsAddress implements WatchOnlyStore.
@@ -243,13 +243,14 @@ func (s *EphemeralWatchOnlyStore) OwnsAddress(addr types.UnlockHash) bool {
 }
 
 // AddAddress implements WatchOnlyStore.
-func (s *EphemeralWatchOnlyStore) AddAddress(addr types.UnlockHash, info []byte) {
-	s.addrs[addr] = append([]byte(nil), info...)
+func (s *EphemeralWatchOnlyStore) AddAddress(info SeedAddressInfo) {
+	s.addrs[CalculateUnlockHash(info.UnlockConditions)] = info
 }
 
 // AddressInfo implements WatchOnlyStore.
-func (s *EphemeralWatchOnlyStore) AddressInfo(addr types.UnlockHash) (info []byte) {
-	return append(info, s.addrs[addr]...)
+func (s *EphemeralWatchOnlyStore) AddressInfo(addr types.UnlockHash) (SeedAddressInfo, bool) {
+	info, ok := s.addrs[addr]
+	return info, ok
 }
 
 // RemoveAddress implements WatchOnlyStore.
@@ -270,6 +271,6 @@ func (s *EphemeralWatchOnlyStore) Addresses() []types.UnlockHash {
 func NewEphemeralWatchOnlyStore() *EphemeralWatchOnlyStore {
 	return &EphemeralWatchOnlyStore{
 		EphemeralStore: *NewEphemeralStore(),
-		addrs:          make(map[types.UnlockHash][]byte),
+		addrs:          make(map[types.UnlockHash]SeedAddressInfo),
 	}
 }

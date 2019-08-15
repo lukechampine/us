@@ -63,14 +63,14 @@ func (w *WatchOnlyWallet) Addresses() []types.UnlockHash {
 }
 
 // AddAddress adds an address to the wallet.
-func (w *WatchOnlyWallet) AddAddress(addr types.UnlockHash, info []byte) {
+func (w *WatchOnlyWallet) AddAddress(info SeedAddressInfo) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.store.AddAddress(addr, info)
+	w.store.AddAddress(info)
 }
 
 // AddressInfo returns the metadata associated with the specified address.
-func (w *WatchOnlyWallet) AddressInfo(addr types.UnlockHash) (info []byte) {
+func (w *WatchOnlyWallet) AddressInfo(addr types.UnlockHash) (SeedAddressInfo, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.store.AddressInfo(addr)

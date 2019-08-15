@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/frand"
 )
@@ -54,7 +53,7 @@ func TestWatchOnlyWallet(t *testing.T) {
 		KeyIndex:         0,
 	}
 	addr := addrInfo.UnlockConditions.UnlockHash()
-	w.AddAddress(addr, encoding.Marshal(addrInfo))
+	w.AddAddress(addrInfo)
 
 	// should have an address now
 	addresses = w.Addresses()
@@ -94,10 +93,11 @@ func TestWatchOnlyWallet(t *testing.T) {
 	}
 
 	// fetch the unlock conditions we stored earlier
-	var uc types.UnlockConditions
-	if err := encoding.Unmarshal(w.AddressInfo(addr), &uc); err != nil {
-		t.Fatal(err)
+	info, ok := w.AddressInfo(addr)
+	if !ok {
+		t.Fatal("missing address info")
 	}
+	uc := info.UnlockConditions
 
 	inputs := make([]ValuedInput, len(outputs))
 	for i, o := range outputs {
@@ -169,16 +169,20 @@ func TestWatchOnlyWalletThreadSafety(t *testing.T) {
 	cs := new(mockCS)
 	cs.ConsensusSetSubscribe(w.ConsensusSetSubscriber(store), store.ConsensusChangeID(), nil)
 
-	randomAddr := func() (addr types.UnlockHash) {
-		frand.Read(addr[:])
-		return
+	seed := NewSeed()
+	randomAddrInfo := func() SeedAddressInfo {
+		index := frand.Uint64n(10)
+		return SeedAddressInfo{
+			UnlockConditions: StandardUnlockConditions(seed.PublicKey(index)),
+			KeyIndex:         index,
+		}
 	}
-	addr := randomAddr()
-	w.AddAddress(addr, nil)
+	info := randomAddrInfo()
+	w.AddAddress(info)
 
 	txn := types.Transaction{
 		SiacoinOutputs: []types.SiacoinOutput{
-			{UnlockHash: addr, Value: types.SiacoinPrecision.Div64(2)},
+			{UnlockHash: CalculateUnlockHash(info.UnlockConditions), Value: types.SiacoinPrecision.Div64(2)},
 		},
 	}
 
@@ -187,8 +191,8 @@ func TestWatchOnlyWalletThreadSafety(t *testing.T) {
 	funcs := []func(){
 		func() { cs.sendTxn(txn) },
 		func() { _ = w.Balance(true) },
-		func() { w.AddAddress(randomAddr(), nil) },
-		func() { w.RemoveAddress(randomAddr()) },
+		func() { w.AddAddress(randomAddrInfo()) },
+		func() { w.RemoveAddress(CalculateUnlockHash(randomAddrInfo().UnlockConditions)) },
 		func() { _ = w.Addresses() },
 		func() { _ = w.Transactions(-1) },
 	}
