@@ -22,8 +22,13 @@ type ChainStore interface {
 	ApplyConsensusChange(reverted, applied ProcessedConsensusChange, id modules.ConsensusChangeID)
 }
 
-// A Store stores information needed by a generic wallet.
+// A Store stores information needed by a wallet.
 type Store interface {
+	AddressOwner
+	Addresses() []types.UnlockHash
+	AddAddress(info SeedAddressInfo)
+	AddressInfo(addr types.UnlockHash) (SeedAddressInfo, bool)
+	RemoveAddress(addr types.UnlockHash)
 	BlockRewards(n int) []BlockReward
 	ConsensusChangeID() modules.ConsensusChangeID
 	ChainHeight() types.BlockHeight
@@ -34,28 +39,12 @@ type Store interface {
 	RemoveFromLimbo(id types.TransactionID)
 	Memo(txid types.TransactionID) []byte
 	SetMemo(txid types.TransactionID, memo []byte)
+	SeedIndex() uint64
+	SetSeedIndex(index uint64)
 	Transaction(id types.TransactionID) (types.Transaction, bool)
 	Transactions(n int) []types.TransactionID
 	TransactionsByAddress(addr types.UnlockHash, n int) []types.TransactionID
 	UnspentOutputs() []UnspentOutput
-}
-
-// A SeedStore stores information needed by a SeedWallet.
-type SeedStore interface {
-	Store
-	SeedIndex() uint64
-	SetSeedIndex(index uint64)
-}
-
-// A WatchOnlyStore stores information needed by a WatchOnlyWallet. For
-// convenience, it also implements AddressOwner.
-type WatchOnlyStore interface {
-	Store
-	AddressOwner
-	Addresses() []types.UnlockHash
-	AddAddress(info SeedAddressInfo)
-	AddressInfo(addr types.UnlockHash) (SeedAddressInfo, bool)
-	RemoveAddress(addr types.UnlockHash)
 }
 
 // A ProcessedConsensusChange is a condensation of a modules.ConsensusChange,

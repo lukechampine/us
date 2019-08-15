@@ -191,10 +191,10 @@ func TestSeedWallet(t *testing.T) {
 	// randomly use either the on-disk DB store or the in-memory ephemeral store
 	var store interface {
 		ChainStore
-		SeedStore
+		Store
 	}
 	if frand.Intn(2) == 0 {
-		store = NewEphemeralSeedStore()
+		store = NewEphemeralStore()
 	} else {
 		dir, err := ioutil.TempDir("", t.Name())
 		if err != nil {
@@ -381,7 +381,7 @@ func TestSeedWallet(t *testing.T) {
 }
 
 func TestSeedWalletThreadSafety(t *testing.T) {
-	store := NewEphemeralSeedStore()
+	store := NewEphemeralStore()
 	sm := NewSeedManager(Seed{}, store.SeedIndex())
 	w := NewSeedWallet(sm, store)
 	cs := new(mockCS)

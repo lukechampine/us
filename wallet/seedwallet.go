@@ -38,7 +38,7 @@ func (info SeedAddressInfo) MarshalJSON() ([]byte, error) {
 // SeedWallets can only handle siacoins, not siafunds.
 type SeedWallet struct {
 	sm    *SeedManager
-	store SeedStore
+	store Store
 	mu    sync.Mutex
 }
 
@@ -269,7 +269,7 @@ func (w *SeedWallet) ConsensusChangeID() modules.ConsensusChangeID {
 }
 
 // NewSeedWallet intializes a SeedWallet using the provided seed and store.
-func NewSeedWallet(sm *SeedManager, store SeedStore) *SeedWallet {
+func NewSeedWallet(sm *SeedManager, store Store) *SeedWallet {
 	return &SeedWallet{
 		sm:    sm,
 		store: store,

@@ -164,7 +164,7 @@ func TestWatchOnlyWallet(t *testing.T) {
 }
 
 func TestWatchOnlyWalletThreadSafety(t *testing.T) {
-	store := NewEphemeralWatchOnlyStore()
+	store := NewEphemeralStore()
 	w := NewWatchOnlyWallet(store)
 	cs := new(mockCS)
 	cs.ConsensusSetSubscribe(w.ConsensusSetSubscriber(store), store.ConsensusChangeID(), nil)

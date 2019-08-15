@@ -67,8 +67,7 @@ var (
 	}
 )
 
-// BoltDBStore implements SeedStore and WatchOnlyStore with a Bolt key-value
-// database.
+// BoltDBStore implements Store with a Bolt key-value database.
 type BoltDBStore struct {
 	db    *bolt.DB
 	addrs map[types.UnlockHash]struct{}
@@ -366,7 +365,7 @@ func (s *BoltDBStore) ConsensusChangeID() (ccid modules.ConsensusChangeID) {
 	return
 }
 
-// SeedIndex implements SeedStore.
+// SeedIndex implements Store.
 func (s *BoltDBStore) SeedIndex() (index uint64) {
 	s.view(func(tx *bolt.Tx) error {
 		index = binary.LittleEndian.Uint64(tx.Bucket(bucketMeta).Get(keySeedIndex))
@@ -375,7 +374,7 @@ func (s *BoltDBStore) SeedIndex() (index uint64) {
 	return
 }
 
-// SetSeedIndex implements SeedStore.
+// SetSeedIndex implements Store.
 func (s *BoltDBStore) SetSeedIndex(index uint64) {
 	s.update(func(tx *bolt.Tx) error {
 		indexBytes := make([]byte, 8)
@@ -385,22 +384,38 @@ func (s *BoltDBStore) SetSeedIndex(index uint64) {
 	})
 }
 
-// OwnsAddress implements WatchOnlyStore.
+// OwnsAddress implements Store.
 func (s *BoltDBStore) OwnsAddress(addr types.UnlockHash) (owned bool) {
 	_, ok := s.addrs[addr]
 	return ok
 }
 
-// AddAddress implements WatchOnlyStore.
+// AddAddress implements Store.
 func (s *BoltDBStore) AddAddress(info SeedAddressInfo) {
 	addr := CalculateUnlockHash(info.UnlockConditions)
 	s.update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketAddrs).Put(addr[:], encoding.Marshal(info))
+		if err := tx.Bucket(bucketAddrs).Put(addr[:], encoding.Marshal(info)); err != nil {
+			return err
+		}
+
+		// update seedIndex
+		//
+		// NOTE: this algorithm will skip certain indices if they are inserted
+		// out-of-order. However, it runs in constant time and it will never
+		// mistakenly reuse an index. The trade-off seems worth it.
+		index := binary.LittleEndian.Uint64(tx.Bucket(bucketMeta).Get(keySeedIndex))
+		index++
+		if index <= info.KeyIndex {
+			index = info.KeyIndex + 1
+		}
+		indexBytes := make([]byte, 8)
+		binary.LittleEndian.PutUint64(indexBytes, index)
+		return tx.Bucket(bucketMeta).Put(keySeedIndex, indexBytes)
 	})
 	s.addrs[addr] = struct{}{}
 }
 
-// AddressInfo implements WatchOnlyStore.
+// AddressInfo implements Store.
 func (s *BoltDBStore) AddressInfo(addr types.UnlockHash) (info SeedAddressInfo, exists bool) {
 	s.view(func(tx *bolt.Tx) error {
 		if v := tx.Bucket(bucketAddrs).Get(addr[:]); v != nil {
@@ -412,7 +427,7 @@ func (s *BoltDBStore) AddressInfo(addr types.UnlockHash) (info SeedAddressInfo, 
 	return
 }
 
-// RemoveAddress implements WatchOnlyStore.
+// RemoveAddress implements Store.
 func (s *BoltDBStore) RemoveAddress(addr types.UnlockHash) {
 	s.update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketAddrs).Delete(addr[:])
@@ -420,7 +435,7 @@ func (s *BoltDBStore) RemoveAddress(addr types.UnlockHash) {
 	delete(s.addrs, addr)
 }
 
-// Addresses implements WatchOnlyStore.
+// Addresses implements Store.
 func (s *BoltDBStore) Addresses() []types.UnlockHash {
 	addrs := make([]types.UnlockHash, 0, len(s.addrs))
 	for addr := range s.addrs {

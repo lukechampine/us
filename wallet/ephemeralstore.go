@@ -9,6 +9,7 @@ import (
 
 // EphemeralStore implements Store in-memory.
 type EphemeralStore struct {
+	addrs         map[types.UnlockHash]SeedAddressInfo
 	outputs       map[types.SiacoinOutputID]UnspentOutput
 	blockrewards  []BlockReward
 	filecontracts []FileContract
@@ -19,8 +20,9 @@ type EphemeralStore struct {
 	txnsRecentIndex []types.TransactionID
 	memos           map[types.TransactionID][]byte
 
-	height int
-	ccid   modules.ConsensusChangeID
+	seedIndex uint64
+	height    int
+	ccid      modules.ConsensusChangeID
 }
 
 // ApplyConsensusChange implements ChainStore.
@@ -182,6 +184,56 @@ func (s *EphemeralStore) Memo(txid types.TransactionID) []byte {
 	return append([]byte(nil), s.memos[txid]...)
 }
 
+// SeedIndex implements Store.
+func (s *EphemeralStore) SeedIndex() uint64 {
+	return s.seedIndex
+}
+
+// SetSeedIndex implements Store.
+func (s *EphemeralStore) SetSeedIndex(index uint64) {
+	s.seedIndex = index
+}
+
+// OwnsAddress implements Store.
+func (s *EphemeralStore) OwnsAddress(addr types.UnlockHash) bool {
+	_, ok := s.addrs[addr]
+	return ok
+}
+
+// AddAddress implements Store.
+func (s *EphemeralStore) AddAddress(info SeedAddressInfo) {
+	s.addrs[CalculateUnlockHash(info.UnlockConditions)] = info
+	// update seedIndex
+	//
+	// NOTE: this algorithm will skip certain indices if they are inserted
+	// out-of-order. However, it runs in constant time and it will never
+	// mistakenly reuse an index. The trade-off seems worth it.
+	s.seedIndex++
+	if s.seedIndex <= info.KeyIndex {
+		s.seedIndex = info.KeyIndex + 1
+	}
+}
+
+// AddressInfo implements Store.
+func (s *EphemeralStore) AddressInfo(addr types.UnlockHash) (SeedAddressInfo, bool) {
+	info, ok := s.addrs[addr]
+	return info, ok
+}
+
+// RemoveAddress implements Store.
+func (s *EphemeralStore) RemoveAddress(addr types.UnlockHash) {
+	delete(s.addrs, addr)
+}
+
+// Addresses implements Store.
+func (s *EphemeralStore) Addresses() []types.UnlockHash {
+	addrs := make([]types.UnlockHash, 0, len(s.addrs))
+	for addr := range s.addrs {
+		addrs = append(addrs, addr)
+	}
+	return addrs
+}
+
 // ChainHeight implements Store.
 func (s *EphemeralStore) ChainHeight() types.BlockHeight {
 	height := types.BlockHeight(s.height)
@@ -199,78 +251,11 @@ func (s *EphemeralStore) ConsensusChangeID() modules.ConsensusChangeID {
 // NewEphemeralStore returns a new EphemeralStore.
 func NewEphemeralStore() *EphemeralStore {
 	return &EphemeralStore{
+		addrs:         make(map[types.UnlockHash]SeedAddressInfo),
 		outputs:       make(map[types.SiacoinOutputID]UnspentOutput),
 		txns:          make(map[types.TransactionID]types.Transaction),
 		limbo:         make(map[types.TransactionID]LimboTransaction),
 		txnsAddrIndex: make(map[types.UnlockHash][]types.TransactionID),
 		memos:         make(map[types.TransactionID][]byte),
-	}
-}
-
-// EphemeralSeedStore implements SeedStore in-memory.
-type EphemeralSeedStore struct {
-	EphemeralStore
-	seedIndex uint64
-}
-
-// SeedIndex implements SeedStore.
-func (s *EphemeralSeedStore) SeedIndex() uint64 {
-	return s.seedIndex
-}
-
-// SetSeedIndex implements SeedStore.
-func (s *EphemeralSeedStore) SetSeedIndex(index uint64) {
-	s.seedIndex = index
-}
-
-// NewEphemeralSeedStore returns a new EphemeralSeedStore.
-func NewEphemeralSeedStore() *EphemeralSeedStore {
-	return &EphemeralSeedStore{
-		EphemeralStore: *NewEphemeralStore(),
-	}
-}
-
-// EphemeralWatchOnlyStore implements WatchOnlyStore in-memory.
-type EphemeralWatchOnlyStore struct {
-	EphemeralStore
-	addrs map[types.UnlockHash]SeedAddressInfo
-}
-
-// OwnsAddress implements WatchOnlyStore.
-func (s *EphemeralWatchOnlyStore) OwnsAddress(addr types.UnlockHash) bool {
-	_, ok := s.addrs[addr]
-	return ok
-}
-
-// AddAddress implements WatchOnlyStore.
-func (s *EphemeralWatchOnlyStore) AddAddress(info SeedAddressInfo) {
-	s.addrs[CalculateUnlockHash(info.UnlockConditions)] = info
-}
-
-// AddressInfo implements WatchOnlyStore.
-func (s *EphemeralWatchOnlyStore) AddressInfo(addr types.UnlockHash) (SeedAddressInfo, bool) {
-	info, ok := s.addrs[addr]
-	return info, ok
-}
-
-// RemoveAddress implements WatchOnlyStore.
-func (s *EphemeralWatchOnlyStore) RemoveAddress(addr types.UnlockHash) {
-	delete(s.addrs, addr)
-}
-
-// Addresses implements WatchOnlyStore.
-func (s *EphemeralWatchOnlyStore) Addresses() []types.UnlockHash {
-	addrs := make([]types.UnlockHash, 0, len(s.addrs))
-	for addr := range s.addrs {
-		addrs = append(addrs, addr)
-	}
-	return addrs
-}
-
-// NewEphemeralWatchOnlyStore returns a new EphemeralWatchOnlyStore.
-func NewEphemeralWatchOnlyStore() *EphemeralWatchOnlyStore {
-	return &EphemeralWatchOnlyStore{
-		EphemeralStore: *NewEphemeralStore(),
-		addrs:          make(map[types.UnlockHash]SeedAddressInfo),
 	}
 }

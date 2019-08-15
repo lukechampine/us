@@ -10,7 +10,7 @@ import (
 // A WatchOnlyWallet is an unprivileged wallet that can track spendable outputs,
 // but cannot sign transactions. It is safe for concurrent use.
 type WatchOnlyWallet struct {
-	store WatchOnlyStore
+	store Store
 	mu    sync.Mutex
 }
 
@@ -81,6 +81,15 @@ func (w *WatchOnlyWallet) RemoveAddress(addr types.UnlockHash) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.store.RemoveAddress(addr)
+}
+
+// SeedIndex returns the lowest seed index whose associated address is not
+// tracked by the wallet; in other words, the index that should be used to
+// generate a new address.
+func (w *WatchOnlyWallet) SeedIndex() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.store.SeedIndex()
 }
 
 // UnspentOutputs returns the spendable outputs tracked by the wallet. If the
@@ -183,7 +192,7 @@ func (w *WatchOnlyWallet) Transaction(id types.TransactionID) (types.Transaction
 }
 
 // NewWatchOnlyWallet intializes a WatchOnlyWallet using the provided store.
-func NewWatchOnlyWallet(store WatchOnlyStore) *WatchOnlyWallet {
+func NewWatchOnlyWallet(store Store) *WatchOnlyWallet {
 	return &WatchOnlyWallet{
 		store: store,
 	}
