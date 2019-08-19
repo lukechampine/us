@@ -64,8 +64,3 @@ func BenchmarkSeedPhrase(b *testing.B) {
 		_ = s.String()
 	}
 }
-
-func BenchmarkParallelGen(b *testing.B) {
-	b.ReportAllocs()
-	_ = NewSeedManager(NewSeed(), uint64(b.N))
-}

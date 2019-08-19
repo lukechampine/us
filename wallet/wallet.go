@@ -2,7 +2,10 @@ package wallet
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"time"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
@@ -224,6 +227,34 @@ func (txn *LimboTransaction) UnmarshalSia(r io.Reader) error {
 	err := encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&txn.Transaction, &since)
 	txn.LimboSince = time.Unix(since, 0)
 	return err
+}
+
+// A SeedAddressInfo contains the unlock conditions and key index for an
+// address derived from a seed.
+type SeedAddressInfo struct {
+	UnlockConditions types.UnlockConditions `json:"unlockConditions"`
+	KeyIndex         uint64                 `json:"keyIndex"`
+}
+
+// UnlockHash is a convenience method that returns the address derived from
+// info's UnlockConditions.
+func (info SeedAddressInfo) UnlockHash() types.UnlockHash {
+	return CalculateUnlockHash(info.UnlockConditions)
+}
+
+// MarshalJSON implements json.Marshaler.
+func (info SeedAddressInfo) MarshalJSON() ([]byte, error) {
+	uc := info.UnlockConditions
+	pks := make([]string, len(uc.PublicKeys))
+	for i := range pks {
+		pks[i] = strconv.Quote(uc.PublicKeys[i].String())
+	}
+	timeLock := ""
+	if uc.Timelock != 0 {
+		timeLock = fmt.Sprintf(`"timelock":%v,`, uc.Timelock)
+	}
+	return []byte(fmt.Sprintf(`{"unlockConditions":{%s"publicKeys":[%s],"signaturesRequired":%v},"keyIndex":%v}`,
+		timeLock, strings.Join(pks, ","), uc.SignaturesRequired, info.KeyIndex)), nil
 }
 
 // CalculateLimboOutputs returns the outputs the owner would control if all
