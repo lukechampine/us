@@ -17,26 +17,23 @@ type SeedWallet struct {
 	mu    sync.Mutex
 }
 
-type lockedChainScanner struct {
-	cs ChainScanner
-	mu *sync.Mutex
+type seedWalletSubscriber struct {
+	*SeedWallet
+	cs ChainStore
 }
 
-func (lcs lockedChainScanner) ProcessConsensusChange(cc modules.ConsensusChange) {
-	lcs.mu.Lock()
-	lcs.cs.ProcessConsensusChange(cc)
-	lcs.mu.Unlock()
+func (s seedWalletSubscriber) ProcessConsensusChange(cc modules.ConsensusChange) {
+	s.mu.Lock()
+	s.cs.ApplyConsensusChange(FilterConsensusChange(cc, s.store))
+	s.mu.Unlock()
 }
 
 // ConsensusSetSubscriber returns a modules.ConsensusSetSubscriber for w using
 // the provided ChainStore.
 func (w *SeedWallet) ConsensusSetSubscriber(store ChainStore) modules.ConsensusSetSubscriber {
-	return lockedChainScanner{
-		cs: ChainScanner{
-			Owner: w.store,
-			Store: store,
-		},
-		mu: &w.mu,
+	return seedWalletSubscriber{
+		SeedWallet: w,
+		cs:         store,
 	}
 }
 
