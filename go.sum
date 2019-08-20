@@ -82,3 +82,5 @@ lukechampine.com/frand v1.0.1 h1:awSripFy7kz8l2rV9fCgqNhbdJ6D/LHJwC4NCmJXGMg=
 lukechampine.com/frand v1.0.1/go.mod h1:4S/TM2ZgrKejMcKMbeLjISpJMO+/eZ1zu3vYX9dtj3s=
 lukechampine.com/walrus v0.4.0 h1:5CkGyVJkPWt3UKwyArx8fCLcsDrinfD3L65uj/J4gVk=
 lukechampine.com/walrus v0.4.0/go.mod h1:1+7BZNViJzbU9PMZ6+mYP7bPs7URfPxfAtJGQCgzEuw=
+lukechampine.com/walrus v0.5.0 h1:3fdYE7rjXdiCDCDuwb7EqvzmRibPiXHt7/MmCrbHr8A=
+lukechampine.com/walrus v0.5.0/go.mod h1:1+7BZNViJzbU9PMZ6+mYP7bPs7URfPxfAtJGQCgzEuw=
