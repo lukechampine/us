@@ -208,9 +208,8 @@ func (s *EphemeralStore) AddAddress(info SeedAddressInfo) {
 	// NOTE: this algorithm will skip certain indices if they are inserted
 	// out-of-order. However, it runs in constant time and it will never
 	// mistakenly reuse an index. The trade-off seems worth it.
-	s.seedIndex++
-	if s.seedIndex <= info.KeyIndex {
-		s.seedIndex = info.KeyIndex + 1
+	if next := info.KeyIndex + 1; s.seedIndex < next {
+		s.seedIndex = next
 	}
 }
 

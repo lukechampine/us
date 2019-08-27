@@ -404,9 +404,8 @@ func (s *BoltDBStore) AddAddress(info SeedAddressInfo) {
 		// out-of-order. However, it runs in constant time and it will never
 		// mistakenly reuse an index. The trade-off seems worth it.
 		index := binary.LittleEndian.Uint64(tx.Bucket(bucketMeta).Get(keySeedIndex))
-		index++
-		if index <= info.KeyIndex {
-			index = info.KeyIndex + 1
+		if next := info.KeyIndex + 1; index < next {
+			index = next
 		}
 		indexBytes := make([]byte, 8)
 		binary.LittleEndian.PutUint64(indexBytes, index)
