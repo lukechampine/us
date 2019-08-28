@@ -214,6 +214,9 @@ func (c *SHARDClient) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAd
 
 // LookupHost returns the host public key matching the specified prefix.
 func (c *SHARDClient) LookupHost(prefix string) (hostdb.HostPublicKey, error) {
+	if !strings.HasPrefix(prefix, "ed25519:") {
+		prefix = "ed25519:" + prefix
+	}
 	var ha modules.HostAnnouncement
 	var sig crypto.Signature
 	err := c.req("/host/"+prefix, func(resp *http.Response) error {
