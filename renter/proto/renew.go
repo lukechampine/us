@@ -124,7 +124,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		return ContractRevision{}, err
 	}
 
-	s.extendDeadline(60 * time.Second)
+	s.extendDeadline(120 * time.Second)
 	req := &renterhost.RPCFormContractRequest{
 		Transactions: append(parents, txn),
 		RenterKey:    s.contract.Revision().Revision.UnlockConditions.PublicKeys[0],
@@ -134,7 +134,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	}
 
 	var resp renterhost.RPCFormContractAdditions
-	if err := s.sess.ReadResponse(&resp, 4096); err != nil {
+	if err := s.sess.ReadResponse(&resp, 65536); err != nil {
 		return ContractRevision{}, err
 	}
 

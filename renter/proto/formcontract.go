@@ -135,7 +135,7 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	}
 
 	// send request
-	s.extendDeadline(60 * time.Second)
+	s.extendDeadline(120 * time.Second)
 	req := &renterhost.RPCFormContractRequest{
 		Transactions: append(parents, txn),
 		RenterKey:    uc.PublicKeys[0],
@@ -145,7 +145,7 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	}
 
 	var resp renterhost.RPCFormContractAdditions
-	if err := s.sess.ReadResponse(&resp, 4096); err != nil {
+	if err := s.sess.ReadResponse(&resp, 65536); err != nil {
 		return ContractRevision{}, err
 	}
 
