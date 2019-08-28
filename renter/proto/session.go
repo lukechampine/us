@@ -2,6 +2,7 @@ package proto
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/bits"
 	"net"
@@ -19,6 +20,17 @@ import (
 // ErrInvalidMerkleProof is returned by various RPCs when the host supplies an
 // invalid Merkle proof.
 var ErrInvalidMerkleProof = errors.New("host supplied invalid Merkle proof")
+
+// wrapResponseErr formats RPC response errors nicely, wrapping them in either
+// readCtx or rejectCtx depending on whether we encountered an I/O error or the
+// host sent an explicit error message.
+func wrapResponseErr(err error, readCtx, rejectCtx string) error {
+	err = errors.Cause(err)
+	if _, ok := err.(*renterhost.RPCError); ok {
+		return errors.Wrap(err, rejectCtx)
+	}
+	return errors.Wrap(err, readCtx)
+}
 
 // A Session is an ongoing exchange of RPCs via the renter-host protocol.
 type Session struct {
@@ -45,7 +57,8 @@ func (s *Session) call(rpcID renterhost.Specifier, req, resp renterhost.Protocol
 	}
 	// use a maxlen large enough for all RPCs except Read and Write (which don't
 	// use call anyway)
-	return s.sess.ReadResponse(resp, 4096)
+	err := s.sess.ReadResponse(resp, 4096)
+	return wrapResponseErr(err, fmt.Sprintf("couldn't read %v response", rpcID), fmt.Sprintf("host rejected %v request", rpcID))
 }
 
 // Lock calls the Lock RPC, locking the supplied contract and synchronizing its
@@ -218,7 +231,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	var hostSig []byte
 	for _, sec := range sections {
 		if err := s.sess.ReadResponse(&resp, 4096+uint64(sec.Length)); err != nil {
-			return err
+			return wrapResponseErr(err, "couldn't read sector data", "host rejected Read request")
 		}
 		// The host may have sent data, a signature, or both. If they sent data,
 		// validate it.
@@ -247,7 +260,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 		// yet, they should send an empty ReadResponse containing just the
 		// signature.
 		if err := s.sess.ReadResponse(&resp, 4096); err != nil {
-			return err
+			return wrapResponseErr(err, "couldn't read signature", "host rejected Read request")
 		}
 		hostSig = resp.Signature
 	}
@@ -336,7 +349,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	// read and verify Merkle proof
 	var merkleResp renterhost.RPCWriteMerkleProof
 	if err := s.sess.ReadResponse(&merkleResp, 4096); err != nil {
-		return errors.Wrap(err, "couldn't read Merkle proof response")
+		return wrapResponseErr(err, "couldn't read Merkle proof response", "host rejected Write request")
 	}
 	numSectors := int(rev.NewFileSize / renterhost.SectorSize)
 	proofHashes := merkleResp.OldSubtreeHashes
@@ -364,7 +377,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	}
 	var hostSig renterhost.RPCWriteResponse
 	if err := s.sess.ReadResponse(&hostSig, 4096); err != nil {
-		return errors.Wrap(err, "couldn't read signature response")
+		return wrapResponseErr(err, "couldn't read signature response", "host rejected Write signature")
 	}
 
 	sigs := s.contract.Revision().Signatures
