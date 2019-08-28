@@ -278,7 +278,6 @@ func (r *RPCFormContractAdditions) unmarshalBuffer(b *objBuffer) error {
 		(*objTransaction)(&r.Parents[i]).unmarshalBuffer(b)
 	}
 	r.Inputs = make([]types.SiacoinInput, b.readPrefix(sizeofSiacoinInput))
-	b.writePrefix(len(r.Inputs))
 	for i := range r.Inputs {
 		(*objSiacoinInput)(&r.Inputs[i]).unmarshalBuffer(b)
 	}
