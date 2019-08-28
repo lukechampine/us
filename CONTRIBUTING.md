@@ -60,7 +60,7 @@ Message][commit]. Also, prefix each commit message with the package it
 affects, e.g. `proto: Use smaller buffer for partial downloads`. If a commit
 affects multiple packages, use your best judgment to pick the most important
 one, or use `all`. A commit-msg hook is provided to enforce this style; to
-install it, run `ln -s ../../commit-msg.sh .git/hooks/pre-commit`.
+install it, run `ln -s ../../commit-msg.sh .git/hooks/commit-msg`.
 
 Lastly, put any references to issues (e.g. `Fixes #1234`) in the issue body,
 **not** in the commit message. This prevents an issue from being referenced
