@@ -14,7 +14,7 @@ type EphemeralStore struct {
 	blockrewards  []BlockReward
 	filecontracts []FileContract
 
-	txns            map[types.TransactionID]types.Transaction
+	txns            map[types.TransactionID]Transaction
 	limbo           map[types.TransactionID]LimboTransaction
 	txnsAddrIndex   map[types.UnlockHash][]types.TransactionID
 	txnsRecentIndex []types.TransactionID
@@ -116,7 +116,7 @@ func (s *EphemeralStore) TransactionsByAddress(addr types.UnlockHash, n int) []t
 }
 
 // Transaction implements Store.
-func (s *EphemeralStore) Transaction(id types.TransactionID) (types.Transaction, bool) {
+func (s *EphemeralStore) Transaction(id types.TransactionID) (Transaction, bool) {
 	txn, ok := s.txns[id]
 	return txn, ok
 }
@@ -252,7 +252,7 @@ func NewEphemeralStore() *EphemeralStore {
 	return &EphemeralStore{
 		addrs:         make(map[types.UnlockHash]SeedAddressInfo),
 		outputs:       make(map[types.SiacoinOutputID]UnspentOutput),
-		txns:          make(map[types.TransactionID]types.Transaction),
+		txns:          make(map[types.TransactionID]Transaction),
 		limbo:         make(map[types.TransactionID]LimboTransaction),
 		txnsAddrIndex: make(map[types.UnlockHash][]types.TransactionID),
 		memos:         make(map[types.TransactionID][]byte),

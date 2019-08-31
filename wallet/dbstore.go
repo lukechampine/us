@@ -316,7 +316,7 @@ func (s *BoltDBStore) TransactionsByAddress(addr types.UnlockHash, n int) (txids
 }
 
 // Transaction implements Store.
-func (s *BoltDBStore) Transaction(id types.TransactionID) (txn types.Transaction, exists bool) {
+func (s *BoltDBStore) Transaction(id types.TransactionID) (txn Transaction, exists bool) {
 	s.view(func(tx *bolt.Tx) error {
 		if v := tx.Bucket(bucketTxns).Get(id[:]); v != nil {
 			encoding.Unmarshal(v, &txn)

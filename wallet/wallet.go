@@ -44,7 +44,7 @@ type Store interface {
 	SetMemo(txid types.TransactionID, memo []byte)
 	SeedIndex() uint64
 	SetSeedIndex(index uint64)
-	Transaction(id types.TransactionID) (types.Transaction, bool)
+	Transaction(id types.TransactionID) (Transaction, bool)
 	Transactions(n int) []types.TransactionID
 	TransactionsByAddress(addr types.UnlockHash, n int) []types.TransactionID
 	UnspentOutputs() []UnspentOutput
@@ -55,7 +55,7 @@ type Store interface {
 // processed by an atomic unit.
 type ProcessedConsensusChange struct {
 	Outputs             []UnspentOutput
-	Transactions        []types.Transaction
+	Transactions        []Transaction
 	AddressTransactions map[types.UnlockHash][]types.TransactionID
 	BlockRewards        []BlockReward
 	FileContracts       []FileContract
@@ -208,6 +208,29 @@ func (fc *FileContract) UnmarshalSia(r io.Reader) error {
 	return encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&fc.FileContract, &fc.UnlockConditions, &fc.ID)
 }
 
+// A Transaction is an on-chain transaction with additional metadata.
+type Transaction struct {
+	types.Transaction
+	BlockID     types.BlockID
+	BlockHeight types.BlockHeight
+	Timestamp   time.Time
+	FeePerByte  types.Currency
+}
+
+// MarshalSia implements encoding.SiaMarshaler.
+func (txn Transaction) MarshalSia(w io.Writer) error {
+	stamp := txn.Timestamp.Unix()
+	return encoding.NewEncoder(w).EncodeAll(txn.Transaction, txn.BlockID, txn.BlockHeight, stamp, txn.FeePerByte)
+}
+
+// UnmarshalSia implements encoding.SiaUnmarshaler.
+func (txn *Transaction) UnmarshalSia(r io.Reader) error {
+	var stamp int64
+	err := encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&txn.Transaction, &txn.BlockID, &txn.BlockHeight, &stamp, &txn.FeePerByte)
+	txn.Timestamp = time.Unix(stamp, 0)
+	return err
+}
+
 // A LimboTransaction is a transaction that has been broadcast, but has not
 // appeared in a block.
 type LimboTransaction struct {
@@ -294,7 +317,7 @@ func CalculateLimboOutputs(owner AddressOwner, limbo []LimboTransaction, outputs
 // relevant if its UnlockHash is owned by the AddressOwner; a transaction is
 // relevant if any of the UnlockHashes or UnlockConditions appearing in it are
 // owned by the AddressOwner.
-func FilterConsensusChange(cc modules.ConsensusChange, owner AddressOwner) (reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) {
+func FilterConsensusChange(cc modules.ConsensusChange, owner AddressOwner, currentHeight types.BlockHeight) (reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) {
 	// ignore "ephemeral" outputs (outputs created and spent in the same
 	// ConsensusChange).
 	survivingOutputs := make(map[types.SiacoinOutputID]struct{})
@@ -385,8 +408,9 @@ func FilterConsensusChange(cc modules.ConsensusChange, owner AddressOwner) (reve
 		return relevant
 	}
 
-	processTxns := func(txns []types.Transaction, pcc *ProcessedConsensusChange) {
-		for _, txn := range txns {
+	processTxns := func(b types.Block, height types.BlockHeight, pcc *ProcessedConsensusChange) {
+		bid := b.ID()
+		for _, txn := range b.Transactions {
 			addrs := relevantTxn(txn)
 			if len(addrs) == 0 {
 				continue
@@ -398,7 +422,17 @@ func FilterConsensusChange(cc modules.ConsensusChange, owner AddressOwner) (reve
 			for addr := range addrs {
 				pcc.AddressTransactions[addr] = append(pcc.AddressTransactions[addr], txid)
 			}
-			pcc.Transactions = append(pcc.Transactions, txn)
+			var totalFee types.Currency
+			for _, fee := range txn.MinerFees {
+				totalFee = totalFee.Add(fee)
+			}
+			pcc.Transactions = append(pcc.Transactions, Transaction{
+				Transaction: txn,
+				BlockID:     bid,
+				BlockHeight: height,
+				Timestamp:   time.Unix(int64(b.Timestamp), 0),
+				FeePerByte:  totalFee.Div64(uint64(txn.MarshalSiaSize())),
+			})
 
 			for i, fc := range txn.FileContracts {
 				if relevantFileContract(fc.ValidProofOutputs, fc.MissedProofOutputs) {
@@ -465,16 +499,16 @@ func FilterConsensusChange(cc modules.ConsensusChange, owner AddressOwner) (reve
 		}
 	}
 
-	for _, b := range cc.AppliedBlocks {
-		processTxns(b.Transactions, &applied)
+	for i, b := range cc.AppliedBlocks {
+		processTxns(b, types.BlockHeight(int(currentHeight)+i+1), &applied)
 		processMinerPayouts(b, &applied)
+		applied.BlockCount++
 	}
-	for _, b := range cc.RevertedBlocks {
-		processTxns(b.Transactions, &reverted)
+	for i, b := range cc.RevertedBlocks {
+		processTxns(b, types.BlockHeight(int(currentHeight)-i-1), &reverted)
 		processMinerPayouts(b, &reverted)
+		reverted.BlockCount++
 	}
-	applied.BlockCount = len(cc.AppliedBlocks)
-	reverted.BlockCount = len(cc.RevertedBlocks)
 
 	return reverted, applied, cc.ID
 }

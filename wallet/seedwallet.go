@@ -24,7 +24,7 @@ type seedWalletSubscriber struct {
 
 func (s seedWalletSubscriber) ProcessConsensusChange(cc modules.ConsensusChange) {
 	s.mu.Lock()
-	s.cs.ApplyConsensusChange(FilterConsensusChange(cc, s.store))
+	s.cs.ApplyConsensusChange(FilterConsensusChange(cc, s.store, s.store.ChainHeight()))
 	s.mu.Unlock()
 }
 
@@ -219,7 +219,7 @@ func (w *SeedWallet) TransactionsByAddress(addr types.UnlockHash, n int) []types
 
 // Transaction returns the transaction with the specified id. The transaction
 // must be relevant to the wallet.
-func (w *SeedWallet) Transaction(id types.TransactionID) (types.Transaction, bool) {
+func (w *SeedWallet) Transaction(id types.TransactionID) (Transaction, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.store.Transaction(id)

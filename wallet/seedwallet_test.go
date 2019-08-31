@@ -259,6 +259,8 @@ func TestWallet(t *testing.T) {
 		t.Fatal("transaction should exist")
 	} else if len(htx.SiacoinOutputs) != 2 {
 		t.Fatal("transaction should have two outputs")
+	} else if htx.BlockHeight != 1 {
+		t.Fatal("transaction height should be 1")
 	}
 
 	// create an unsigned transaction using available outputs
