@@ -130,6 +130,12 @@ func (priv PrivateKey) PublicKey() PublicKey {
 // with RFC 8032. RFC 8032's private keys correspond to seeds in this
 // package.
 func NewKeyFromSeed(seed []byte) PrivateKey {
+	privateKey := make([]byte, PrivateKeySize)
+	newKeyFromSeed(privateKey, seed)
+	return privateKey
+}
+
+func newKeyFromSeed(privateKey, seed []byte) {
 	if l := len(seed); l != SeedSize {
 		panic("ed25519: bad seed length: " + strconv.Itoa(l))
 	}
@@ -146,9 +152,6 @@ func NewKeyFromSeed(seed []byte) PrivateKey {
 	var publicKeyBytes [32]byte
 	A.ToBytes(&publicKeyBytes)
 
-	privateKey := make([]byte, PrivateKeySize)
 	copy(privateKey, seed)
 	copy(privateKey[32:], publicKeyBytes[:])
-
-	return privateKey
 }
