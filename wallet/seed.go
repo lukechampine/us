@@ -33,31 +33,32 @@ func (s Seed) SiadSeed() modules.Seed {
 	return s.siadSeed
 }
 
-// deriveKey derives the keypair for the specified index. Note that s.siaSeed is
+// deriveKey derives the keypair for the specified index. Note that s.siadSeed is
 // used in the derivation, not s.entropy; this is what allows Seeds to be used
 // with standard siad wallets. s.entropy is only used to provide a shorter seed
 // phrase in the String method.
-func (s Seed) deriveKey(index uint64) ed25519.PrivateKey {
+func (s Seed) deriveKeyPair(index uint64) (keypair [64]byte) {
 	buf := make([]byte, len(s.siadSeed)+8)
-	ss := s.siadSeed // prevent s from escaping to heap
-	n := copy(buf, ss[:])
+	n := copy(buf, s.siadSeed[:])
 	binary.LittleEndian.PutUint64(buf[n:], index)
 	seed := blake2b.Sum256(buf)
-	return ed25519.NewKeyFromSeed(seed[:])
+	copy(keypair[:], ed25519.NewKeyFromSeed(seed[:]))
+	return
 }
 
 // PublicKey derives the types.SiaPublicKey for the specified index.
 func (s Seed) PublicKey(index uint64) types.SiaPublicKey {
-	sk := s.deriveKey(index)
+	key := s.deriveKeyPair(index)
 	return types.SiaPublicKey{
 		Algorithm: types.SignatureEd25519,
-		Key:       sk[len(sk)-ed25519.PublicKeySize:],
+		Key:       key[len(key)-ed25519.PublicKeySize:],
 	}
 }
 
 // SecretKey derives the ed25519 private key for the specified index.
 func (s Seed) SecretKey(index uint64) ed25519.PrivateKey {
-	return s.deriveKey(index)
+	key := s.deriveKeyPair(index)
+	return key[:]
 }
 
 // SeedFromEntropy returns the Seed derived from the supplied entropy.
