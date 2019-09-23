@@ -1,3 +1,4 @@
+github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da h1:KjTM2ks9d14ZYCvmHS9iAKVt9AyzRSqNU1qabPih5BY=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da/go.mod h1:eHEWzANqSiWQsof+nXEI9bUVUyV6F53Fp89EuCh2EAA=
@@ -84,3 +85,5 @@ lukechampine.com/walrus v0.4.0 h1:5CkGyVJkPWt3UKwyArx8fCLcsDrinfD3L65uj/J4gVk=
 lukechampine.com/walrus v0.4.0/go.mod h1:1+7BZNViJzbU9PMZ6+mYP7bPs7URfPxfAtJGQCgzEuw=
 lukechampine.com/walrus v0.5.0 h1:3fdYE7rjXdiCDCDuwb7EqvzmRibPiXHt7/MmCrbHr8A=
 lukechampine.com/walrus v0.5.0/go.mod h1:1+7BZNViJzbU9PMZ6+mYP7bPs7URfPxfAtJGQCgzEuw=
+lukechampine.com/walrus v0.6.0 h1:p2qklxucqvZU21DzgAieQes0aYdQ+C9rb6TGsGVExpM=
+lukechampine.com/walrus v0.6.0/go.mod h1:1+7BZNViJzbU9PMZ6+mYP7bPs7URfPxfAtJGQCgzEuw=
