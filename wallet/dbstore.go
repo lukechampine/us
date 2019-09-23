@@ -214,7 +214,6 @@ func (s *BoltDBStore) AddToLimbo(txn types.Transaction) {
 			LimboSince:  time.Now(),
 		}))
 	})
-	return
 }
 
 // RemoveFromLimbo implements Store.
@@ -222,7 +221,6 @@ func (s *BoltDBStore) RemoveFromLimbo(id types.TransactionID) {
 	s.update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketLimbo).Delete(id[:])
 	})
-	return
 }
 
 // LimboTransactions implements Store.
