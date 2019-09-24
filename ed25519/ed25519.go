@@ -78,6 +78,11 @@ type PrivateKey []byte
 
 // SignHash signs a hash with priv and returns a signature.
 func (priv PrivateKey) SignHash(hash crypto.Hash) []byte {
+	signature := make([]byte, SignatureSize)
+	return signHash(signature, priv, hash)
+}
+
+func signHash(signature []byte, priv PrivateKey, hash crypto.Hash) []byte {
 	if l := len(priv); l != PrivateKeySize {
 		panic("ed25519: bad private key length: " + strconv.Itoa(l))
 	}
@@ -114,7 +119,6 @@ func (priv PrivateKey) SignHash(hash crypto.Hash) []byte {
 	var s [32]byte
 	edwards25519.ScMulAdd(&s, &hramDigestReduced, &expandedSecretKey, &messageDigestReduced)
 
-	signature := make([]byte, SignatureSize)
 	copy(signature[:32], encodedR[:])
 	copy(signature[32:], s[:])
 	return signature
