@@ -106,6 +106,19 @@ func (s *KeySeed) XORKeyStream(msg []byte, nonce []byte, startIndex uint64) {
 	c.XORKeyStream(msg, msg)
 }
 
+// Validate performs basic sanity checks on a MetaIndex.
+func (m *MetaIndex) Validate() error {
+	switch {
+	case m.Version != MetaFileVersion:
+		return errors.Errorf("incompatible version (%v, want %v)", m.Version, MetaFileVersion)
+	case m.MinShards == 0:
+		return errors.Errorf("MinShards cannot be 0")
+	case m.MinShards > len(m.Hosts):
+		return errors.Errorf("MinShards (%v) must not exceed number of hosts (%v)", m.Version, len(m.Hosts))
+	}
+	return nil
+}
+
 // MaxChunkSize returns the maximum amount of file data that can fit into a
 // chunk. A chunk is a buffer of file data pre-erasure coding. When the chunk
 // is encoded, it is split into len(m.Hosts) shards of equal size. Thus the
@@ -380,6 +393,7 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 	}
 	defer zip.Close()
 
+	var haveIndex bool
 	var index MetaIndex
 	var shardSizes []int64
 	tr := tar.NewReader(zip)
@@ -394,6 +408,7 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 			if err := json.NewDecoder(tr).Decode(&index); err != nil {
 				return MetaIndex{}, 0, errors.Wrap(err, "could not decode index")
 			}
+			haveIndex = true
 		} else {
 			// read shard contents, adding each length value
 			numSlices := int(hdr.FileInfo().Size() / SectorSliceSize)
@@ -408,10 +423,11 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 			shardSizes = append(shardSizes, numSegments*merkle.SegmentSize)
 		}
 	}
-	if index.Version == 0 {
+	if !haveIndex {
 		return MetaIndex{}, 0, errors.New("archive does not contain an index")
-	} else if index.Version != MetaFileVersion {
-		return MetaIndex{}, 0, errors.Errorf("incompatible version (%v, want %v)", index.Version, MetaFileVersion)
+	}
+	if err := index.Validate(); err != nil {
+		return MetaIndex{}, 0, errors.Wrap(err, "invalid index")
 	}
 
 	// count full shards
