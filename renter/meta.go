@@ -390,7 +390,7 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 		} else if err != nil {
 			return MetaIndex{}, 0, errors.Wrap(err, "could not read archive entry")
 		}
-		if hdr.Name == "index" {
+		if hdr.Name == indexFilename {
 			if err := json.NewDecoder(tr).Decode(&index); err != nil {
 				return MetaIndex{}, 0, errors.Wrap(err, "could not decode index")
 			}
@@ -407,6 +407,11 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 			}
 			shardSizes = append(shardSizes, numSegments*merkle.SegmentSize)
 		}
+	}
+	if index.Version == 0 {
+		return MetaIndex{}, 0, errors.New("archive does not contain an index")
+	} else if index.Version != MetaFileVersion {
+		return MetaIndex{}, 0, errors.Errorf("incompatible version (%v, want %v)", index.Version, MetaFileVersion)
 	}
 
 	// count full shards
