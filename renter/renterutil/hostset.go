@@ -62,14 +62,28 @@ func (set *HostSet) AddHost(c proto.ContractEditor) {
 	lh := new(lockedHost)
 	// lazy connection function
 	lh.reconnect = func() error {
-		// close and reopen session
+		// even if we have a non-nil Session, the host may have disconnected due
+		// to a timeout. To detect this, send a "ping" message (actually a
+		// Settings request). If it fails, attempt to reconnect.
 		//
-		// TODO: this is obviously inefficient; we should instead reuse sessions
-		// if they are already open, and attempt to keep them open even when
-		// quiescent (though not indefinitely)
+		// NOTE: this is somewhat inefficient; it means we incur an extra
+		// roundtrip every time we call acquire. The alternative would be for
+		// the caller to handle the reconnection logic after calling whatever
+		// RPC it wants to call. That way, we only do extra work if the host has
+		// actually disconnected. The downside is that we need to wrap every RPC
+		// call in reconnection logic (and there's no way to do so generically).
+		// So this feels like a reasonable compromise; if the overhead becomes a
+		// problem, we can make things uglier and faster later.
 		if lh.s != nil {
-			lh.s.Close()
-			lh.s = nil
+			if _, err := lh.s.Settings(); err == nil {
+				// connection is still open; we're done
+				return nil
+			} else {
+				// connection timed out, or some other error occurred; close our
+				// end (just in case) and fallthrough to the reconnection logic
+				lh.s.Close()
+				lh.s = nil
+			}
 		}
 		hostIP, err := set.hkr.ResolveHostKey(hostKey)
 		if err != nil {
