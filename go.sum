@@ -44,9 +44,11 @@ github.com/spf13/viper v1.3.2/go.mod h1:ZiWeW+zYFKm7srdB9IoDzzZXaJaI5eL9QjNiN/DM
 github.com/stretchr/testify v1.2.2/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXfy6kDkUVs=
 github.com/ugorji/go/codec v0.0.0-20181204163529-d75b2dcb6bc8/go.mod h1:VFNgLljTbGfSG7qAOspJ7OScBnGdDN/yBr0sguwnwf0=
 github.com/xordataexchange/crypt v0.0.3-0.20170626215501-b2862e3d0a77/go.mod h1:aYKd//L2LvnjZzWKhF00oedf4jCCReLcmhLdhm1A27Q=
+github.com/xtaci/smux v1.3.3 h1:+vnzZHTLGHrj+LzUZEkKmvu4KkG7fj4jwMPqhawvErg=
 github.com/xtaci/smux v1.3.3/go.mod h1:f+nYm6SpuHMy/SH0zpbvAFHT1QoMcgLOsWcFip5KfPw=
 gitlab.com/NebulousLabs/Sia v1.4.1 h1:Vzx9NFtyG0qF+2oRZLj6uKGakkqlcBGaHstki7UcvBE=
 gitlab.com/NebulousLabs/Sia v1.4.1/go.mod h1:pmBBguXJl2nxajST2OtRv0FOIMSggtn5evGpE9Pju3Y=
+gitlab.com/NebulousLabs/demotemutex v0.0.0-20151003192217-235395f71c40 h1:IbucNi8u1a1ErgVFVgg8pERhSyzYe5l+o8krDMnNjWA=
 gitlab.com/NebulousLabs/demotemutex v0.0.0-20151003192217-235395f71c40/go.mod h1:HfnnxM8isYA7FUlqS5h34XTeiBhPtcuCquVujKsn9aw=
 gitlab.com/NebulousLabs/entropy-mnemonics v0.0.0-20181018051301-7532f67e3500 h1:BUDZfLl/9IRseYl7/GW1DF+11SYCMJ6P4whCBJhtEhQ=
 gitlab.com/NebulousLabs/entropy-mnemonics v0.0.0-20181018051301-7532f67e3500/go.mod h1:4koft3fRXTETovKPTeX/Aggj+ajCGWCcuuBBc598Pcs=
@@ -54,11 +56,13 @@ gitlab.com/NebulousLabs/errors v0.0.0-20171229012116-7ead97ef90b8 h1:gZfMjx7Jr6N
 gitlab.com/NebulousLabs/errors v0.0.0-20171229012116-7ead97ef90b8/go.mod h1:ZkMZ0dpQyWwlENaeZVBiQRjhMEZvk6VTXquzl3FOFP8=
 gitlab.com/NebulousLabs/fastrand v0.0.0-20181126182046-603482d69e40 h1:dizWJqTWjwyD8KGcMOwgrkqu1JIkofYgKkmDeNE7oAs=
 gitlab.com/NebulousLabs/fastrand v0.0.0-20181126182046-603482d69e40/go.mod h1:rOnSnoRyxMI3fe/7KIbVcsHRGxe30OONv8dEgo+vCfA=
+gitlab.com/NebulousLabs/go-upnp v0.0.0-20181011194642-3a71999ed0d3 h1:qXqiXDgeQxspR3reot1pWme00CX1pXbxesdzND+EjbU=
 gitlab.com/NebulousLabs/go-upnp v0.0.0-20181011194642-3a71999ed0d3/go.mod h1:sleOmkovWsDEQVYXmOJhx69qheoMTmCuPYyiCFCihlg=
 gitlab.com/NebulousLabs/merkletree v0.0.0-20190207030457-bc4a11e31a0d h1:ObC0V0W72CGqAliMv63xNEzKI6V0FnKcNHfi4+X5jiY=
 gitlab.com/NebulousLabs/merkletree v0.0.0-20190207030457-bc4a11e31a0d/go.mod h1:xItahGeKIkh9BQfxDEX6O3eWxOxbLBPX738sXm0uVaQ=
 gitlab.com/NebulousLabs/ratelimit v0.0.0-20180716154200-1308156c2eaf h1:B0oWvYNYeov4s6nzoVPN4qxdAanrlR9mx552axpnXmg=
 gitlab.com/NebulousLabs/ratelimit v0.0.0-20180716154200-1308156c2eaf/go.mod h1:vowDA1cdvtWW678ugB7L/yKT2pCN37aH6zYp9NF5Isc=
+gitlab.com/NebulousLabs/threadgroup v0.0.0-20180716154133-88a11db9e46c h1:psW9YBmnyKKCddPncr7mwJCx6n7FzlIs1EWIiSo7fyQ=
 gitlab.com/NebulousLabs/threadgroup v0.0.0-20180716154133-88a11db9e46c/go.mod h1:w05nvlkvHlk3Vfc7mcU29Toic1X0BcYUnKoTHS0ea2Y=
 gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20190703190009-cb822c37bc94 h1:JJFFedB70d+aO54OFq/m8iOp2MhpA3u8dPMjwJx5J40=
 gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20190703190009-cb822c37bc94/go.mod h1:Lhpa9AcbWcYKcc4amZsOHqJdQglnkWrGuUI68XC7U2Q=
@@ -69,6 +73,7 @@ golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACk
 golang.org/x/crypto v0.0.0-20190530122614-20be4c3c3ed5/go.mod h1:yigFU9vqHzYiE8UmvKecakEJjdnWj3jj499lnFckfCI=
 golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4 h1:HuIa8hRrWRSrqYzx1qI49NNxhdi2PrY7gxVSq1JjLDc=
 golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4/go.mod h1:yigFU9vqHzYiE8UmvKecakEJjdnWj3jj499lnFckfCI=
+golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3 h1:0GoQqolDA55aaLxZyTzK/Y2ePZzZTUrRacwib7cNsYQ=
 golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3/go.mod h1:t9HGtf8HONx5eT2rtn7q6eTqICYqUVnKs3thJo3Qplg=
 golang.org/x/sys v0.0.0-20181205085412-a5c9d58dba9a/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
@@ -81,9 +86,5 @@ gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8
 gopkg.in/yaml.v2 v2.2.2/go.mod h1:hI93XBmqTisBFMUTm0b8Fm+jr3Dg1NNxqwp+5A1VGuI=
 lukechampine.com/frand v1.0.1 h1:awSripFy7kz8l2rV9fCgqNhbdJ6D/LHJwC4NCmJXGMg=
 lukechampine.com/frand v1.0.1/go.mod h1:4S/TM2ZgrKejMcKMbeLjISpJMO+/eZ1zu3vYX9dtj3s=
-lukechampine.com/walrus v0.4.0 h1:5CkGyVJkPWt3UKwyArx8fCLcsDrinfD3L65uj/J4gVk=
-lukechampine.com/walrus v0.4.0/go.mod h1:1+7BZNViJzbU9PMZ6+mYP7bPs7URfPxfAtJGQCgzEuw=
-lukechampine.com/walrus v0.5.0 h1:3fdYE7rjXdiCDCDuwb7EqvzmRibPiXHt7/MmCrbHr8A=
-lukechampine.com/walrus v0.5.0/go.mod h1:1+7BZNViJzbU9PMZ6+mYP7bPs7URfPxfAtJGQCgzEuw=
 lukechampine.com/walrus v0.6.0 h1:p2qklxucqvZU21DzgAieQes0aYdQ+C9rb6TGsGVExpM=
 lukechampine.com/walrus v0.6.0/go.mod h1:1+7BZNViJzbU9PMZ6+mYP7bPs7URfPxfAtJGQCgzEuw=
