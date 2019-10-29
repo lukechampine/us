@@ -323,6 +323,8 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 
 	// check that enough funds are available
 	price := s.host.BaseRPCPrice.Add(bandwidthPrice).Add(storagePrice)
+	// NOTE: hosts can be picky about price, so add 5% just to be sure.
+	price = price.MulFloat(1.05)
 	if rev.NewValidProofOutputs[0].Value.Cmp(price) < 0 {
 		return errors.New("contract has insufficient funds to support modification")
 	} else if rev.NewMissedProofOutputs[1].Value.Cmp(collateral) < 0 {
