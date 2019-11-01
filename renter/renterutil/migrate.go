@@ -12,8 +12,31 @@ import (
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renterhost"
 )
+
+// newMigrationShardUploader is like renter.NewShardUploader, but uses the old
+// host's Shard. This is useful for migration, since the new host won't be in
+// the MetaFile yet.
+func newMigrationShardUploader(m *renter.MetaFile, contract *renter.Contract, oldHostKey hostdb.HostPublicKey, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) (*renter.ShardUploader, error) {
+	hostKey := contract.HostKey()
+	// get host IP
+	hostIP, err := hkr.ResolveHostKey(contract.HostKey())
+	if err != nil {
+		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
+	}
+	// create uploader
+	u, err := proto.NewSession(hostIP, contract, currentHeight)
+	if err != nil {
+		return nil, errors.Wrapf(err, "%v: could not initiate upload protocol with host", hostKey.ShortKey())
+	}
+	return &renter.ShardUploader{
+		Uploader: u,
+		Shard:    &m.Shards[m.HostIndex(oldHostKey)],
+		Key:      m.MasterKey,
+	}, nil
+}
 
 // MigrateFile uploads file shards to a new set of hosts. The shards are
 // retrieved by erasure-encoding f.
@@ -90,12 +113,12 @@ outer:
 
 func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, migrations map[hostdb.HostPublicKey]hostdb.HostPublicKey, m *renter.MetaFile, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) {
 	hosts := make([]*renter.ShardUploader, len(m.Hosts))
-	for i, hostKey := range m.Hosts {
+	for i, oldHostKey := range m.Hosts {
 		if op.Canceled() {
 			op.die(ErrCanceled)
 			return
 		}
-		newhost, ok := migrations[hostKey]
+		newhost, ok := migrations[oldHostKey]
 		if !ok {
 			// not migrating this shard
 			continue
@@ -104,7 +127,7 @@ func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, mig
 		if !ok {
 			panic("missing contract for host being migrated")
 		}
-		hu, err := renter.NewShardUploader(m, contract, hkr, currentHeight)
+		hu, err := newMigrationShardUploader(m, contract, oldHostKey, hkr, currentHeight)
 		if err != nil {
 			op.die(err)
 			return
@@ -235,7 +258,7 @@ func migrateRemote(op *Operation, newcontracts renter.ContractSet, migrations ma
 		if !ok {
 			panic("newcontracts does not contain one of the hosts being migrated to")
 		}
-		hu, err := renter.NewShardUploader(m, newContract, hkr, currentHeight)
+		hu, err := newMigrationShardUploader(m, newContract, oldHostKey, hkr, currentHeight)
 		if err != nil {
 			op.die(err)
 			return
