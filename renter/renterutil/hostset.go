@@ -77,12 +77,11 @@ func (set *HostSet) AddHost(c renter.Contract) {
 			if _, err := lh.s.Settings(); err == nil {
 				// connection is still open; we're done
 				return nil
-			} else {
-				// connection timed out, or some other error occurred; close our
-				// end (just in case) and fallthrough to the reconnection logic
-				lh.s.Close()
-				lh.s = nil
 			}
+			// connection timed out, or some other error occurred; close our
+			// end (just in case) and fallthrough to the reconnection logic
+			lh.s.Close()
+			lh.s = nil
 		}
 		hostIP, err := set.hkr.ResolveHostKey(c.HostKey)
 		if err != nil {

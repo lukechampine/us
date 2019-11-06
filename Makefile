@@ -20,6 +20,9 @@ lint:
 		--disable=errcheck \
 		--disable=gochecknoglobals \
 		--disable=funlen \
+		--disable=gocognit \
+		--disable=godox \
+		--disable=wsl \
 		--skip-dirs=internal \
 		./...
 
