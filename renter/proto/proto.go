@@ -6,7 +6,6 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renterhost"
 )
@@ -31,21 +30,6 @@ type (
 		FeeEstimate() (min types.Currency, max types.Currency, err error)
 	}
 )
-
-// A ContractEditor provides an interface for viewing and updating a file
-// contract transaction and the Merkle roots of each sector covered by the
-// contract.
-type ContractEditor interface {
-	// Revision returns the latest revision of the file contract.
-	Revision() ContractRevision
-
-	// SetRevision sets the current revision of the file contract. The revision
-	// signatures do not need to be verified.
-	SetRevision(rev ContractRevision) error
-
-	// Key returns the renter's signing key.
-	Key() ed25519.PrivateKey
-}
 
 // A ContractRevision contains the most recent revision to a file contract and
 // its signatures.

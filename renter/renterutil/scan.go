@@ -66,7 +66,7 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 
 		// create downloader
 		start := time.Now()
-		s, err := proto.NewSession(hostIP, contract, 0)
+		s, err := proto.NewSession(hostIP, hostKey, contract.ID(), contract.Key(), 0)
 		res.Latency = time.Since(start)
 		if err != nil {
 			res.Error = err
@@ -104,12 +104,6 @@ func CheckupContract(contract *renter.Contract, hkr renter.HostKeyResolver) Chec
 	hostKey := contract.HostKey()
 	res := CheckupResult{Host: hostKey}
 
-	numSectors := int(contract.Revision().Revision.NewFileSize / renterhost.SectorSize)
-	if numSectors == 0 {
-		res.Error = errors.New("no sectors stored on host")
-		return res
-	}
-
 	// get host IP
 	hostIP, err := hkr.ResolveHostKey(hostKey)
 	if err != nil {
@@ -120,15 +114,21 @@ func CheckupContract(contract *renter.Contract, hkr renter.HostKeyResolver) Chec
 	// TODO: record settings in CheckupResult, and refuse to continue if
 	// download is too high.
 
-	// create downloader
+	// create session
 	start := time.Now()
-	s, err := proto.NewSession(hostIP, contract, 0)
+	s, err := proto.NewSession(hostIP, hostKey, contract.ID(), contract.Key(), 0)
 	res.Latency = time.Since(start)
 	if err != nil {
 		res.Error = errors.Wrap(err, "could not initiate download protocol")
 		return res
 	}
 	defer s.Close()
+
+	numSectors := s.Revision().NumSectors()
+	if numSectors == 0 {
+		res.Error = errors.New("no sectors stored on host")
+		return res
+	}
 
 	// request a random sector root
 	roots, err := s.SectorRoots(frand.Intn(numSectors), 1)

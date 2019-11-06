@@ -75,7 +75,7 @@ func createTestingFS(tb testing.TB) (*PseudoFS, func()) {
 		h, c := createHostWithContract(tb)
 		hosts[i] = h
 		hkr[h.PublicKey()] = h.Settings().NetAddress
-		hs.AddHost(c)
+		hs.AddHost(c.HostKey(), c.ID(), c.Key())
 	}
 
 	fs := NewFileSystem(os.TempDir(), hs)

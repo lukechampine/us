@@ -12,6 +12,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
@@ -38,13 +39,17 @@ type Session struct {
 	conn    net.Conn
 	readBuf [renterhost.SectorSize]byte
 
-	host     hostdb.ScannedHost
-	height   types.BlockHeight
-	contract ContractEditor
+	host   hostdb.ScannedHost
+	height types.BlockHeight
+	rev    ContractRevision
+	key    ed25519.PrivateKey
 }
 
 // HostKey returns the public key of the host.
 func (s *Session) HostKey() hostdb.HostPublicKey { return s.host.PublicKey }
+
+// Revision returns the most recent revision of the locked contract.
+func (s *Session) Revision() ContractRevision { return s.rev }
 
 func (s *Session) extendDeadline(d time.Duration) {
 	_ = s.conn.SetDeadline(time.Now().Add(d))
@@ -62,13 +67,12 @@ func (s *Session) call(rpcID renterhost.Specifier, req, resp renterhost.Protocol
 }
 
 // Lock calls the Lock RPC, locking the supplied contract and synchronizing its
-// state with the host's most recent revision. Subsequent RPCs will modify the
-// supplied contract.
-func (s *Session) Lock(contract ContractEditor) (err error) {
+// state with the host's most recent revision.
+func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey) (err error) {
 	defer wrapErr(&err, "Lock")
 	req := &renterhost.RPCLockRequest{
-		ContractID: contract.Revision().ID(),
-		Signature:  s.sess.SignChallenge(contract.Key()),
+		ContractID: id,
+		Signature:  s.sess.SignChallenge(key),
 		Timeout:    10e3, // 10 seconds
 	}
 	s.extendDeadline(15 * time.Second)
@@ -78,21 +82,24 @@ func (s *Session) Lock(contract ContractEditor) (err error) {
 	}
 	s.sess.SetChallenge(resp.NewChallenge)
 	// verify claimed revision
+	if len(resp.Signatures) != 2 {
+		return errors.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
+	}
 	revHash := renterhost.HashRevision(resp.Revision)
-	if !contract.Key().PublicKey().VerifyHash(revHash, resp.Signatures[0].Signature) {
+	if !key.PublicKey().VerifyHash(revHash, resp.Signatures[0].Signature) {
 		return errors.New("renter's signature on claimed revision is invalid")
 	} else if !s.host.PublicKey.VerifyHash(revHash, resp.Signatures[1].Signature) {
 		return errors.New("host's signature on claimed revision is invalid")
 	}
-	rev := ContractRevision{Revision: resp.Revision}
-	copy(rev.Signatures[:], resp.Signatures)
-	if err := contract.SetRevision(rev); err != nil {
-		return errors.Wrap(err, "couldn't set revision")
-	}
 	if !resp.Acquired {
 		return errors.New("contract is locked by another party")
 	}
-	s.contract = contract
+	s.rev = ContractRevision{
+		Revision:   resp.Revision,
+		Signatures: [2]types.TransactionSignature{resp.Signatures[0], resp.Signatures[1]},
+	}
+	s.key = key
+
 	return nil
 }
 
@@ -102,11 +109,16 @@ func (s *Session) Lock(contract ContractEditor) (err error) {
 // automatically unlock any locked contracts when the connection closes.
 func (s *Session) Unlock() (err error) {
 	defer wrapErr(&err, "Unlock")
-	if s.contract == nil {
+	if s.key == nil {
 		return errors.New("no contract locked")
 	}
 	s.extendDeadline(10 * time.Second)
-	return s.sess.WriteRequest(renterhost.RPCUnlockID, nil)
+	if err := s.sess.WriteRequest(renterhost.RPCUnlockID, nil); err != nil {
+		return err
+	}
+	s.rev = ContractRevision{}
+	s.key = nil
+	return nil
 }
 
 // Settings calls the Settings RPC, returning the host's reported settings.
@@ -126,25 +138,24 @@ func (s *Session) Settings() (_ hostdb.HostSettings, err error) {
 // sector Merkle roots of the currently-locked contract.
 func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 	defer wrapErr(&err, "SectorRoots")
-	rev := s.contract.Revision().Revision
-	totalSectors := int(rev.NewFileSize / renterhost.SectorSize)
-	if offset < 0 || n < 0 || offset+n > totalSectors {
+	if offset < 0 || n < 0 || offset+n > s.rev.NumSectors() {
 		return nil, errors.New("requested range is out-of-bounds")
 	}
 
 	// calculate price
-	proofHashes := merkle.ProofSize(totalSectors, offset, offset+n)
+	proofHashes := merkle.ProofSize(s.rev.NumSectors(), offset, offset+n)
 	bandwidth := (proofHashes + n) * crypto.HashSize
 	if bandwidth < renterhost.MinMessageSize {
 		bandwidth = renterhost.MinMessageSize
 	}
 	bandwidthPrice := s.host.DownloadBandwidthPrice.Mul64(uint64(bandwidth))
 	price := s.host.BaseRPCPrice.Add(bandwidthPrice)
-	if rev.RenterFunds().Cmp(price) < 0 {
+	if s.rev.RenterFunds().Cmp(price) < 0 {
 		return nil, errors.New("contract has insufficient funds to support sector roots download")
 	}
 
 	// construct new revision
+	rev := s.rev.Revision
 	rev.NewRevisionNumber++
 	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
 
@@ -156,19 +167,16 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 		NewRevisionNumber:    rev.NewRevisionNumber,
 		NewValidProofValues:  newValid,
 		NewMissedProofValues: newMissed,
-		Signature:            s.contract.Key().SignHash(renterhost.HashRevision(rev)),
+		Signature:            s.key.SignHash(renterhost.HashRevision(rev)),
 	}
 	var resp renterhost.RPCSectorRootsResponse
 	if err := s.call(renterhost.RPCSectorRootsID, req, &resp); err != nil {
 		return nil, err
 	}
-	sigs := s.contract.Revision().Signatures
-	sigs[0].Signature = req.Signature
-	sigs[1].Signature = resp.Signature
-	if err := s.contract.SetRevision(ContractRevision{rev, sigs}); err != nil {
-		return nil, errors.Wrap(err, "couldn't set revision")
-	}
-	if !merkle.VerifySectorRangeProof(resp.MerkleProof, resp.SectorRoots, offset, offset+n, totalSectors, rev.NewFileMerkleRoot) {
+	s.rev.Revision = rev
+	s.rev.Signatures[0].Signature = req.Signature
+	s.rev.Signatures[1].Signature = resp.Signature
+	if !merkle.VerifySectorRangeProof(resp.MerkleProof, resp.SectorRoots, offset, offset+n, s.rev.NumSectors(), rev.NewFileMerkleRoot) {
 		return nil, ErrInvalidMerkleProof
 	}
 	return resp.SectorRoots, nil
@@ -178,7 +186,6 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 // Merkle proofs are always requested.
 func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection) (err error) {
 	defer wrapErr(&err, "Read")
-	rev := s.contract.Revision().Revision
 
 	// calculate price
 	sectorAccesses := make(map[crypto.Hash]struct{})
@@ -198,14 +205,15 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	}
 	bandwidthPrice := s.host.DownloadBandwidthPrice.Mul64(bandwidth)
 	price := s.host.BaseRPCPrice.Add(sectorAccessPrice).Add(bandwidthPrice)
-	if s.contract.Revision().RenterFunds().Cmp(price) < 0 {
+	if s.rev.RenterFunds().Cmp(price) < 0 {
 		return errors.New("contract has insufficient funds to support download")
 	}
 
 	// construct new revision
+	rev := s.rev.Revision
 	rev.NewRevisionNumber++
 	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
-	renterSig := s.contract.Key().SignHash(renterhost.HashRevision(rev))
+	renterSig := s.key.SignHash(renterhost.HashRevision(rev))
 
 	// send request
 	s.extendDeadline(60*time.Second + time.Duration(bandwidth)/time.Microsecond)
@@ -265,12 +273,9 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 		hostSig = resp.Signature
 	}
 
-	sigs := s.contract.Revision().Signatures
-	sigs[0].Signature = renterSig
-	sigs[1].Signature = hostSig
-	if err := s.contract.SetRevision(ContractRevision{rev, sigs}); err != nil {
-		return errors.Wrap(err, "couldn't set revision")
-	}
+	s.rev.Revision = rev
+	s.rev.Signatures[0].Signature = renterSig
+	s.rev.Signatures[1].Signature = hostSig
 
 	return nil
 }
@@ -279,7 +284,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 // always requested.
 func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	defer wrapErr(&err, "Write")
-	rev := s.contract.Revision().Revision
+	rev := s.rev.Revision
 
 	// calculate the new Merkle root set and sectors uploaded/stored
 	var uploadBandwidth uint64
@@ -317,7 +322,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 
 	// estimate cost of Merkle proof
 	// TODO: calculate exact sizes
-	proofSize := merkle.DiffProofSize(actions, int(rev.NewFileSize)/renterhost.SectorSize)
+	proofSize := merkle.DiffProofSize(actions, s.rev.NumSectors())
 	downloadBandwidth := uint64(proofSize) * crypto.HashSize
 	bandwidthPrice := s.host.UploadBandwidthPrice.Mul64(uploadBandwidth).Add(s.host.DownloadBandwidthPrice.Mul64(downloadBandwidth))
 
@@ -353,7 +358,6 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	if err := s.sess.ReadResponse(&merkleResp, 4096); err != nil {
 		return wrapResponseErr(err, "couldn't read Merkle proof response", "host rejected Write request")
 	}
-	numSectors := int(rev.NewFileSize / renterhost.SectorSize)
 	proofHashes := merkleResp.OldSubtreeHashes
 	leafHashes := merkleResp.OldLeafHashes
 	oldRoot, newRoot := rev.NewFileMerkleRoot, merkleResp.NewMerkleRoot
@@ -361,7 +365,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	// if all sectors were deleted) because the proof algorithm chokes on this
 	// edge case. Need to investigate what proofs siad hosts are producing (are
 	// they valid?) and reconcile those with our Merkle algorithms.
-	if newFileSize > 0 && !merkle.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot) {
+	if newFileSize > 0 && !merkle.VerifyDiffProof(actions, s.rev.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot) {
 		err := ErrInvalidMerkleProof
 		s.sess.WriteResponse(nil, err)
 		return err
@@ -372,7 +376,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	rev.NewFileSize = newFileSize
 	rev.NewFileMerkleRoot = newRoot
 	renterSig := &renterhost.RPCWriteResponse{
-		Signature: s.contract.Key().SignHash(renterhost.HashRevision(rev)),
+		Signature: s.key.SignHash(renterhost.HashRevision(rev)),
 	}
 	if err := s.sess.WriteResponse(renterSig, nil); err != nil {
 		return errors.Wrap(err, "couldn't write signature response")
@@ -382,12 +386,9 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 		return wrapResponseErr(err, "couldn't read signature response", "host rejected Write signature")
 	}
 
-	sigs := s.contract.Revision().Signatures
-	sigs[0].Signature = renterSig.Signature
-	sigs[1].Signature = hostSig.Signature
-	if err := s.contract.SetRevision(ContractRevision{rev, sigs}); err != nil {
-		return errors.Wrap(err, "couldn't set revision")
-	}
+	s.rev.Revision = rev
+	s.rev.Signatures[0].Signature = renterSig.Signature
+	s.rev.Signatures[1].Signature = hostSig.Signature
 
 	return nil
 }
@@ -401,13 +402,13 @@ func (s *Session) Close() (err error) {
 // NewSession initiates a new renter-host protocol session with the specified
 // host. The supplied contract will be locked and synchronized with the host.
 // The host's settings will also be requested.
-func NewSession(hostIP modules.NetAddress, contract ContractEditor, currentHeight types.BlockHeight) (_ *Session, err error) {
+func NewSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, id types.FileContractID, key ed25519.PrivateKey, currentHeight types.BlockHeight) (_ *Session, err error) {
 	defer wrapErr(&err, "NewSession")
-	s, err := NewUnlockedSession(hostIP, contract.Revision().HostKey(), currentHeight)
+	s, err := NewUnlockedSession(hostIP, hostKey, currentHeight)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.Lock(contract); err != nil {
+	if err := s.Lock(id, key); err != nil {
 		s.Close()
 		return nil, err
 	}

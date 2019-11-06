@@ -168,7 +168,7 @@ func NewShardDownloader(m *MetaFile, contract *Contract, hkr HostKeyResolver) (*
 		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
 	}
 	// create downloader
-	d, err := proto.NewSession(hostIP, contract, 0)
+	d, err := proto.NewSession(hostIP, contract.HostKey(), contract.ID(), contract.Key(), 0)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%v: could not initiate download protocol with host", hostKey.ShortKey())
 	}

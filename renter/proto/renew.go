@@ -9,18 +9,19 @@ import (
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renterhost"
+	"lukechampine.com/us/ed25519"
 )
 
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host.
-func RenewContract(w Wallet, tpool TransactionPool, contract ContractEditor, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
+func RenewContract(w Wallet, tpool TransactionPool, id types.FileContractID, key ed25519.PrivateKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
 	s, err := NewUnlockedSession(host.NetAddress, host.PublicKey, 0)
 	if err != nil {
 		return ContractRevision{}, err
 	}
 	s.host = host
 	defer s.Close()
-	if err := s.Lock(contract); err != nil {
+	if err := s.Lock(id, key); err != nil {
 		return ContractRevision{}, err
 	}
 	return s.RenewContract(w, tpool, renterPayout, startHeight, endHeight)
@@ -61,7 +62,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 
 	// Calculate additional basePrice and baseCollateral. If the contract
 	// height did not increase, basePrice and baseCollateral are zero.
-	currentRevision := s.contract.Revision().Revision
+	currentRevision := s.rev.Revision
 	var basePrice, baseCollateral types.Currency
 	if endHeight+s.host.WindowSize > currentRevision.NewWindowEnd {
 		timeExtension := uint64((endHeight + s.host.WindowSize) - currentRevision.NewWindowEnd)
@@ -127,7 +128,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	s.extendDeadline(120 * time.Second)
 	req := &renterhost.RPCFormContractRequest{
 		Transactions: append(parents, txn),
-		RenterKey:    s.contract.Revision().Revision.UnlockConditions.PublicKeys[0],
+		RenterKey:    s.rev.Revision.UnlockConditions.PublicKeys[0],
 	}
 	if err := s.sess.WriteRequest(renterhost.RPCRenewContractID, req); err != nil {
 		return ContractRevision{}, err
@@ -186,7 +187,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 0,
-		Signature:      s.contract.Key().SignHash(renterhost.HashRevision(initRevision)),
+		Signature:      s.key.SignHash(renterhost.HashRevision(initRevision)),
 	}
 
 	// Send signatures.

@@ -33,18 +33,6 @@ type stubTpool struct{}
 func (stubTpool) AcceptTransactionSet([]types.Transaction) (err error) { return }
 func (stubTpool) FeeEstimate() (min, max types.Currency, err error)    { return }
 
-type contractEditor struct {
-	rev ContractRevision
-	key ed25519.PrivateKey
-}
-
-func (e *contractEditor) Revision() ContractRevision { return e.rev }
-func (e *contractEditor) Key() ed25519.PrivateKey    { return e.key }
-func (e *contractEditor) SetRevision(rev ContractRevision) error {
-	e.rev = rev
-	return nil
-}
-
 // createTestingPair creates a renter and host, initiates a Session between
 // them, and forms and locks a contract.
 func createTestingPair(tb testing.TB) (*Session, *ghost.Host) {
@@ -69,12 +57,11 @@ func createTestingPair(tb testing.TB) (*Session, *ghost.Host) {
 	}
 
 	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
-	contractRevision, err := s.FormContract(stubWallet{}, stubTpool{}, key, types.ZeroCurrency, 0, 0)
+	rev, err := s.FormContract(stubWallet{}, stubTpool{}, key, types.ZeroCurrency, 0, 0)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	contract := &contractEditor{contractRevision, key}
-	err = s.Lock(contract)
+	err = s.Lock(rev.ID(), key)
 	if err != nil {
 		tb.Fatal(err)
 	}
