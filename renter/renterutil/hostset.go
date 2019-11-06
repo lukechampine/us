@@ -9,7 +9,6 @@ import (
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
-	"lukechampine.com/us/ed25519"
 )
 
 var errNoHost = errors.New("no record of that host")
@@ -58,7 +57,7 @@ func (set *HostSet) release(host hostdb.HostPublicKey) {
 }
 
 // AddHost adds a host to the set for later use.
-func (set *HostSet) AddHost(hostKey hostdb.HostPublicKey, id types.FileContractID, key ed25519.PrivateKey) {
+func (set *HostSet) AddHost(c renter.Contract) {
 	lh := new(lockedHost)
 	// lazy connection function
 	lh.reconnect = func() error {
@@ -85,14 +84,14 @@ func (set *HostSet) AddHost(hostKey hostdb.HostPublicKey, id types.FileContractI
 				lh.s = nil
 			}
 		}
-		hostIP, err := set.hkr.ResolveHostKey(hostKey)
+		hostIP, err := set.hkr.ResolveHostKey(c.HostKey)
 		if err != nil {
 			return errors.Wrap(err, "could not resolve host key")
 		}
-		lh.s, err = proto.NewSession(hostIP, hostKey, id, key, set.currentHeight)
+		lh.s, err = proto.NewSession(hostIP, c.HostKey, c.ID, c.Key, set.currentHeight)
 		return err
 	}
-	set.sessions[hostKey] = lh
+	set.sessions[c.HostKey] = lh
 }
 
 // NewHostSet creates an empty HostSet using the provided resolver and current

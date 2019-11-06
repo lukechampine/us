@@ -66,7 +66,7 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 
 		// create downloader
 		start := time.Now()
-		s, err := proto.NewSession(hostIP, hostKey, contract.ID(), contract.Key(), 0)
+		s, err := proto.NewSession(hostIP, hostKey, contract.ID, contract.Key, 0)
 		res.Latency = time.Since(start)
 		if err != nil {
 			res.Error = err
@@ -101,7 +101,7 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 // network metrics. Note that unlike Checkup, CheckupContracts cannot verify
 // the integrity of the downloaded sector.
 func CheckupContract(contract *renter.Contract, hkr renter.HostKeyResolver) CheckupResult {
-	hostKey := contract.HostKey()
+	hostKey := contract.HostKey
 	res := CheckupResult{Host: hostKey}
 
 	// get host IP
@@ -116,7 +116,7 @@ func CheckupContract(contract *renter.Contract, hkr renter.HostKeyResolver) Chec
 
 	// create session
 	start := time.Now()
-	s, err := proto.NewSession(hostIP, hostKey, contract.ID(), contract.Key(), 0)
+	s, err := proto.NewSession(hostIP, hostKey, contract.ID, contract.Key, 0)
 	res.Latency = time.Since(start)
 	if err != nil {
 		res.Error = errors.Wrap(err, "could not initiate download protocol")

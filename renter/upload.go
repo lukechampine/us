@@ -176,15 +176,15 @@ func (u *ShardUploader) Close() error {
 
 // NewShardUploader connects to a host and returns a ShardUploader capable of
 // uploading m's data and writing to one of m's Shard files.
-func NewShardUploader(m *MetaFile, contract *Contract, hkr HostKeyResolver, currentHeight types.BlockHeight) (*ShardUploader, error) {
-	hostKey := contract.HostKey()
+func NewShardUploader(m *MetaFile, c Contract, hkr HostKeyResolver, currentHeight types.BlockHeight) (*ShardUploader, error) {
+	hostKey := c.HostKey
 	// get host IP
-	hostIP, err := hkr.ResolveHostKey(contract.HostKey())
+	hostIP, err := hkr.ResolveHostKey(c.HostKey)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
 	}
 	// create uploader
-	u, err := proto.NewSession(hostIP, contract.HostKey(), contract.ID(), contract.Key(), currentHeight)
+	u, err := proto.NewSession(hostIP, c.HostKey, c.ID, c.Key, currentHeight)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%v: could not initiate upload protocol with host", hostKey.ShortKey())
 	}

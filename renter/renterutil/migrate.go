@@ -19,15 +19,15 @@ import (
 // newMigrationShardUploader is like renter.NewShardUploader, but uses the old
 // host's Shard. This is useful for migration, since the new host won't be in
 // the MetaFile yet.
-func newMigrationShardUploader(m *renter.MetaFile, contract *renter.Contract, oldHostKey hostdb.HostPublicKey, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) (*renter.ShardUploader, error) {
-	hostKey := contract.HostKey()
+func newMigrationShardUploader(m *renter.MetaFile, c renter.Contract, oldHostKey hostdb.HostPublicKey, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) (*renter.ShardUploader, error) {
+	hostKey := c.HostKey
 	// get host IP
-	hostIP, err := hkr.ResolveHostKey(contract.HostKey())
+	hostIP, err := hkr.ResolveHostKey(c.HostKey)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
 	}
 	// create uploader
-	u, err := proto.NewSession(hostIP, contract.HostKey(), contract.ID(), contract.Key(), currentHeight)
+	u, err := proto.NewSession(hostIP, c.HostKey, c.ID, c.Key, currentHeight)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%v: could not initiate upload protocol with host", hostKey.ShortKey())
 	}

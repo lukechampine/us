@@ -160,15 +160,15 @@ func (d *ShardDownloader) Close() error {
 
 // NewShardDownloader connects to a host and returns a ShardDownloader capable
 // of downloading the SectorSlices of m.
-func NewShardDownloader(m *MetaFile, contract *Contract, hkr HostKeyResolver) (*ShardDownloader, error) {
-	hostKey := contract.HostKey()
+func NewShardDownloader(m *MetaFile, c Contract, hkr HostKeyResolver) (*ShardDownloader, error) {
+	hostKey := c.HostKey
 	// get host IP
-	hostIP, err := hkr.ResolveHostKey(contract.HostKey())
+	hostIP, err := hkr.ResolveHostKey(c.HostKey)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
 	}
 	// create downloader
-	d, err := proto.NewSession(hostIP, contract.HostKey(), contract.ID(), contract.Key(), 0)
+	d, err := proto.NewSession(hostIP, c.HostKey, c.ID, c.Key, 0)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%v: could not initiate download protocol with host", hostKey.ShortKey())
 	}

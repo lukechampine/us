@@ -41,7 +41,7 @@ func (hkr testHKR) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAddre
 
 // createTestingPair creates a renter and host, initiates a Session between
 // them, and forms and locks a contract.
-func createHostWithContract(tb testing.TB) (*ghost.Host, *renter.Contract) {
+func createHostWithContract(tb testing.TB) (*ghost.Host, renter.Contract) {
 	host, err := ghost.New(":0")
 	if err != nil {
 		tb.Fatal(err)
@@ -52,16 +52,17 @@ func createHostWithContract(tb testing.TB) (*ghost.Host, *renter.Contract) {
 	}
 
 	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
-	contractRevision, err := proto.FormContract(stubWallet{}, stubTpool{}, key, sh, types.ZeroCurrency, 0, 0)
+	rev, err := proto.FormContract(stubWallet{}, stubTpool{}, key, sh, types.ZeroCurrency, 0, 0)
 	if err != nil {
 		tb.Fatal(err)
+	}
+	contract := renter.Contract{
+		HostKey: rev.HostKey(),
+		ID:      rev.ID(),
+		Key:     key,
 	}
 	contractPath := filepath.Join(os.TempDir(), tb.Name()+"-"+hex.EncodeToString(frand.Bytes(6))+".contract")
-	if err := renter.SaveContract(contractRevision, key, contractPath); err != nil {
-		tb.Fatal(err)
-	}
-	contract, err := renter.LoadContract(contractPath)
-	if err != nil {
+	if err := renter.SaveContract(contract, contractPath); err != nil {
 		tb.Fatal(err)
 	}
 	return host, contract
@@ -75,7 +76,7 @@ func createTestingFS(tb testing.TB) (*PseudoFS, func()) {
 		h, c := createHostWithContract(tb)
 		hosts[i] = h
 		hkr[h.PublicKey()] = h.Settings().NetAddress
-		hs.AddHost(c.HostKey(), c.ID(), c.Key())
+		hs.AddHost(c)
 	}
 
 	fs := NewFileSystem(os.TempDir(), hs)
