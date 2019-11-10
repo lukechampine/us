@@ -294,6 +294,7 @@ func (h *Host) rpcWrite(s *session) error {
 			return err
 		}
 	}
+	_, _ = sectorsGained, sectorsRemoved // TODO: use these
 
 	var storageRevenue, newCollateral types.Currency
 	if len(newRoots) > len(s.contract.sectorRoots) {

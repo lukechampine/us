@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package edwards25519 implements primitives used in the ed25519 signature
+// algorithm.
 package edwards25519
 
 // Group elements are members of the elliptic curve -x^2 + y^2 = 1 + d * x^2 *

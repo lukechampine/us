@@ -1169,11 +1169,11 @@ func TestStandardMatrices(t *testing.T) {
 				r, err := New(i, j, WithCauchyMatrix())
 				if err != nil {
 					// We are not supposed to write to t from goroutines.
-					t.Fatal("creating matrix size", i, j, ":", err)
+					t.Error("creating matrix size", i, j, ":", err)
 				}
 				err = r.Encode(sh)
 				if err != nil {
-					t.Fatal("encoding", i, j, ":", err)
+					t.Error("encoding", i, j, ":", err)
 				}
 				for k := 0; k < j; k++ {
 					// Remove random shard.
@@ -1182,14 +1182,14 @@ func TestStandardMatrices(t *testing.T) {
 				}
 				err = r.Reconstruct(sh)
 				if err != nil {
-					t.Fatal("reconstructing", i, j, ":", err)
+					t.Error("reconstructing", i, j, ":", err)
 				}
 				ok, err := r.Verify(sh)
 				if err != nil {
-					t.Fatal("verifying", i, j, ":", err)
+					t.Error("verifying", i, j, ":", err)
 				}
 				if !ok {
-					t.Fatal(i, j, ok)
+					t.Error(i, j, ok)
 				}
 				for k := range sh {
 					if k == i {
@@ -1197,7 +1197,7 @@ func TestStandardMatrices(t *testing.T) {
 						break
 					}
 					if sh[k][0] != byte(i) {
-						t.Fatal("does not match", i, j, k, sh[0], sh[k])
+						t.Error("does not match", i, j, k, sh[0], sh[k])
 					}
 				}
 			}
@@ -1231,11 +1231,11 @@ func TestCauchyMatrices(t *testing.T) {
 				r, err := New(i, j, WithCauchyMatrix())
 				if err != nil {
 					// We are not supposed to write to t from goroutines.
-					t.Fatal("creating matrix size", i, j, ":", err)
+					t.Error("creating matrix size", i, j, ":", err)
 				}
 				err = r.Encode(sh)
 				if err != nil {
-					t.Fatal("encoding", i, j, ":", err)
+					t.Error("encoding", i, j, ":", err)
 				}
 				for k := 0; k < j; k++ {
 					// Remove random shard.
@@ -1244,14 +1244,14 @@ func TestCauchyMatrices(t *testing.T) {
 				}
 				err = r.Reconstruct(sh)
 				if err != nil {
-					t.Fatal("reconstructing", i, j, ":", err)
+					t.Error("reconstructing", i, j, ":", err)
 				}
 				ok, err := r.Verify(sh)
 				if err != nil {
-					t.Fatal("verifying", i, j, ":", err)
+					t.Error("verifying", i, j, ":", err)
 				}
 				if !ok {
-					t.Fatal(i, j, ok)
+					t.Error(i, j, ok)
 				}
 				for k := range sh {
 					if k == i {
@@ -1259,7 +1259,7 @@ func TestCauchyMatrices(t *testing.T) {
 						break
 					}
 					if sh[k][0] != byte(i) {
-						t.Fatal("does not match", i, j, k, sh[0], sh[k])
+						t.Error("does not match", i, j, k, sh[0], sh[k])
 					}
 				}
 			}
@@ -1292,11 +1292,11 @@ func TestPar1Matrices(t *testing.T) {
 				r, err := New(i, j, WithPAR1Matrix())
 				if err != nil {
 					// We are not supposed to write to t from goroutines.
-					t.Fatal("creating matrix size", i, j, ":", err)
+					t.Error("creating matrix size", i, j, ":", err)
 				}
 				err = r.Encode(sh)
 				if err != nil {
-					t.Fatal("encoding", i, j, ":", err)
+					t.Error("encoding", i, j, ":", err)
 				}
 				for k := 0; k < j; k++ {
 					// Remove random shard.
@@ -1314,14 +1314,14 @@ func TestPar1Matrices(t *testing.T) {
 						}
 						continue
 					}
-					t.Fatal("reconstructing", i, j, ":", err)
+					t.Error("reconstructing", i, j, ":", err)
 				}
 				ok, err := r.Verify(sh)
 				if err != nil {
-					t.Fatal("verifying", i, j, ":", err)
+					t.Error("verifying", i, j, ":", err)
 				}
 				if !ok {
-					t.Fatal(i, j, ok)
+					t.Error(i, j, ok)
 				}
 				for k := range sh {
 					if k == i {
@@ -1329,7 +1329,7 @@ func TestPar1Matrices(t *testing.T) {
 						break
 					}
 					if sh[k][0] != byte(i) {
-						t.Fatal("does not match", i, j, k, sh[0], sh[k])
+						t.Error("does not match", i, j, k, sh[0], sh[k])
 					}
 				}
 			}

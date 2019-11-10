@@ -1,3 +1,5 @@
+// Package wallet contains types and functions relevant to operating a Sia
+// wallet.
 package wallet
 
 import (
