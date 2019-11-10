@@ -40,7 +40,6 @@ type MetaFile struct {
 	MetaIndex
 	Shards    [][]SectorSlice
 	hostIndex map[hostdb.HostPublicKey]int
-	filename  string
 }
 
 // A MetaIndex contains the traditional file metadata for a MetaFile, along with
@@ -143,9 +142,58 @@ func (m *MetaIndex) ErasureCode() ErasureCoder {
 	return NewRSCode(m.MinShards, len(m.Hosts))
 }
 
-// Commit creates a gzipped tar archive containing the metafile's index and
-// shards, writes it to filename. The write is atomic.
-func (m *MetaFile) Commit(filename string) error {
+// HostIndex returns the index of the shard that references data stored on the
+// specified host. If m does not reference any data on the host, HostIndex
+// returns -1.
+func (m *MetaFile) HostIndex(hostKey hostdb.HostPublicKey) int {
+	i, ok := m.hostIndex[hostKey]
+	if !ok {
+		i = -1
+	}
+	return i
+}
+
+// ReplaceHost replaces a host within the metafile. The shards of the replaced
+// host will not be included in the new archive when Close or Archive is called.
+func (m *MetaFile) ReplaceHost(oldHostKey, newHostKey hostdb.HostPublicKey) bool {
+	for i, h := range m.Hosts {
+		if h == oldHostKey {
+			m.Hosts[i] = newHostKey
+			return true
+		}
+	}
+	return false
+}
+
+// NewMetaFile creates a metafile using the specified hosts and erasure-
+// coding parameters.
+func NewMetaFile(mode os.FileMode, size int64, hosts []hostdb.HostPublicKey, minShards int) *MetaFile {
+	if minShards > len(hosts) {
+		panic("minShards cannot be greater than the number of hosts")
+	}
+	hostIndex := make(map[hostdb.HostPublicKey]int)
+	for i, hostKey := range hosts {
+		hostIndex[hostKey] = i
+	}
+	m := &MetaFile{
+		MetaIndex: MetaIndex{
+			Version:   MetaFileVersion,
+			Filesize:  size,
+			Mode:      mode,
+			ModTime:   time.Now(),
+			MinShards: minShards,
+			Hosts:     hosts,
+		},
+		Shards:    make([][]SectorSlice, len(hosts)),
+		hostIndex: hostIndex,
+	}
+	frand.Read(m.MasterKey[:])
+	return m
+}
+
+// WriteMetaFile creates a gzipped tar archive containing m's index and shards,
+// and writes it to filename. The write is atomic.
+func WriteMetaFile(filename string, m *MetaFile) error {
 	f, err := os.Create(filename + "_tmp")
 	if err != nil {
 		return errors.Wrap(err, "could not create archive")
@@ -205,65 +253,6 @@ func (m *MetaFile) Commit(filename string) error {
 	return nil
 }
 
-// Close commits the MetaFile to disk, using the same filename passed to
-// NewMetaFile or ReadMetaFile.
-func (m *MetaFile) Close() error {
-	// TODO: may make sense to drop Close entirely, since it can be misleading;
-	// e.g. if you just want to read a metafile without changing it, Close
-	// results in needless I/O.
-	return m.Commit(m.filename)
-}
-
-// HostIndex returns the index of the shard that references data stored on the
-// specified host. If m does not reference any data on the host, HostIndex
-// returns -1.
-func (m *MetaFile) HostIndex(hostKey hostdb.HostPublicKey) int {
-	i, ok := m.hostIndex[hostKey]
-	if !ok {
-		i = -1
-	}
-	return i
-}
-
-// ReplaceHost replaces a host within the metafile. The shards of the replaced
-// host will not be included in the new archive when Close or Archive is called.
-func (m *MetaFile) ReplaceHost(oldHostKey, newHostKey hostdb.HostPublicKey) bool {
-	for i, h := range m.Hosts {
-		if h == oldHostKey {
-			m.Hosts[i] = newHostKey
-			return true
-		}
-	}
-	return false
-}
-
-// NewMetaFile creates a metafile using the specified hosts and erasure-
-// coding parameters.
-func NewMetaFile(filename string, mode os.FileMode, size int64, hosts []hostdb.HostPublicKey, minShards int) *MetaFile {
-	if minShards > len(hosts) {
-		panic("minShards cannot be greater than the number of hosts")
-	}
-	hostIndex := make(map[hostdb.HostPublicKey]int)
-	for i, hostKey := range hosts {
-		hostIndex[hostKey] = i
-	}
-	m := &MetaFile{
-		MetaIndex: MetaIndex{
-			Version:   MetaFileVersion,
-			Filesize:  size,
-			Mode:      mode,
-			ModTime:   time.Now(),
-			MinShards: minShards,
-			Hosts:     hosts,
-		},
-		Shards:    make([][]SectorSlice, len(hosts)),
-		hostIndex: hostIndex,
-		filename:  filename,
-	}
-	frand.Read(m.MasterKey[:])
-	return m
-}
-
 // ReadMetaFile reads a metafile archive into memory.
 func ReadMetaFile(filename string) (*MetaFile, error) {
 	f, err := os.Open(filename)
@@ -279,7 +268,6 @@ func ReadMetaFile(filename string) (*MetaFile, error) {
 
 	m := &MetaFile{
 		hostIndex: make(map[hostdb.HostPublicKey]int),
-		filename:  filename,
 	}
 	for {
 		hdr, err := tr.Next()

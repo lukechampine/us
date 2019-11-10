@@ -158,7 +158,7 @@ func (fs *PseudoFS) commitChanges(f *openMetaFile) error {
 	if !f.m.ModTime.After(fs.lastCommitTime) {
 		return nil
 	}
-	return f.m.Commit(fs.path(f.name) + metafileExt)
+	return renter.WriteMetaFile(fs.path(f.name)+metafileExt, f.m)
 }
 
 func (fs *PseudoFS) canFit(f *openMetaFile, shardSize int) bool {

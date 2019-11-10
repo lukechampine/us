@@ -62,7 +62,7 @@ func (fs *PseudoFS) Chmod(name string, mode os.FileMode) error {
 	}
 	m.Mode = mode
 	m.ModTime = time.Now()
-	if err := m.Close(); err != nil {
+	if err := renter.WriteMetaFile(path, m); err != nil {
 		return errors.Wrapf(err, "chmod %v", path)
 	}
 	return nil
@@ -155,7 +155,7 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 		for hostKey := range fs.hosts.sessions {
 			hosts = append(hosts, hostKey)
 		}
-		m = renter.NewMetaFile(name, perm, 0, hosts, minShards)
+		m = renter.NewMetaFile(perm, 0, hosts, minShards)
 	} else {
 		var err error
 		m, err = renter.ReadMetaFile(path)
