@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -38,8 +39,7 @@ var _ [SectorSliceSize]struct{} = [unsafe.Sizeof(SectorSlice{})]struct{}{}
 // A MetaFile is a set of metadata that represents a file stored on Sia hosts.
 type MetaFile struct {
 	MetaIndex
-	Shards    [][]SectorSlice
-	hostIndex map[hostdb.HostPublicKey]int
+	Shards [][]SectorSlice
 }
 
 // A MetaIndex contains the traditional file metadata for a MetaFile, along with
@@ -146,11 +146,12 @@ func (m *MetaIndex) ErasureCode() ErasureCoder {
 // specified host. If m does not reference any data on the host, HostIndex
 // returns -1.
 func (m *MetaFile) HostIndex(hostKey hostdb.HostPublicKey) int {
-	i, ok := m.hostIndex[hostKey]
-	if !ok {
-		i = -1
+	for i, hpk := range m.Hosts {
+		if hpk == hostKey {
+			return i
+		}
 	}
-	return i
+	return -1
 }
 
 // ReplaceHost replaces a host within the metafile. The shards of the replaced
@@ -171,10 +172,6 @@ func NewMetaFile(mode os.FileMode, size int64, hosts []hostdb.HostPublicKey, min
 	if minShards > len(hosts) {
 		panic("minShards cannot be greater than the number of hosts")
 	}
-	hostIndex := make(map[hostdb.HostPublicKey]int)
-	for i, hostKey := range hosts {
-		hostIndex[hostKey] = i
-	}
 	m := &MetaFile{
 		MetaIndex: MetaIndex{
 			Version:   MetaFileVersion,
@@ -182,10 +179,9 @@ func NewMetaFile(mode os.FileMode, size int64, hosts []hostdb.HostPublicKey, min
 			Mode:      mode,
 			ModTime:   time.Now(),
 			MinShards: minShards,
-			Hosts:     hosts,
+			Hosts:     append([]hostdb.HostPublicKey(nil), hosts...),
 		},
-		Shards:    make([][]SectorSlice, len(hosts)),
-		hostIndex: hostIndex,
+		Shards: make([][]SectorSlice, len(hosts)),
 	}
 	frand.Read(m.MasterKey[:])
 	return m
@@ -266,9 +262,8 @@ func ReadMetaFile(filename string) (*MetaFile, error) {
 	}
 	tr := tar.NewReader(zip)
 
-	m := &MetaFile{
-		hostIndex: make(map[hostdb.HostPublicKey]int),
-	}
+	m := &MetaFile{}
+	shards := make(map[hostdb.HostPublicKey][]SectorSlice)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -285,9 +280,6 @@ func ReadMetaFile(filename string) (*MetaFile, error) {
 			if err = json.NewDecoder(tr).Decode(&m.MetaIndex); err != nil {
 				return nil, errors.Wrap(err, "could not decode index")
 			}
-			for i, h := range m.MetaIndex.Hosts {
-				m.hostIndex[h] = i
-			}
 		} else {
 			// read shard
 			shard := make([]SectorSlice, hdr.Size/SectorSliceSize)
@@ -301,12 +293,28 @@ func ReadMetaFile(filename string) (*MetaFile, error) {
 				shard[i].NumSegments = binary.LittleEndian.Uint32(buf[36:40])
 				copy(shard[i].Nonce[:], buf[40:64])
 			}
-			m.Shards = append(m.Shards, shard)
+			// shard files can be in any order within the archive, so use name
+			// to determine index
+			hpk := hostdb.HostPublicKey("ed25519:" + strings.TrimSuffix(hdr.Name, ".shard"))
+			shards[hpk] = shard
 		}
 	}
-
 	if err := zip.Close(); err != nil {
 		return nil, errors.Wrap(err, "archive is corrupted")
+	}
+
+	// now that we have the index and all shards in memory, order the shards
+	// according the Hosts list in the index
+	if len(shards) != len(m.Hosts) {
+		return nil, errors.Errorf("invalid metafile: number of shards (%v) does not match number of hosts (%v)", len(shards), len(m.Hosts))
+	}
+	m.Shards = make([][]SectorSlice, len(m.Hosts))
+	for hpk, shard := range shards {
+		i := m.HostIndex(hpk)
+		if i == -1 {
+			return nil, errors.Errorf("invalid shard filename: host %q not present in index", hpk)
+		}
+		m.Shards[i] = shard
 	}
 	return m, nil
 }
