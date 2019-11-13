@@ -1,476 +1,181 @@
 package renterutil
 
 import (
-	"fmt"
 	"io"
-	"os"
-	"path/filepath"
-	"strings"
+	"time"
 
-	"github.com/pkg/errors"
-	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
-	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renterhost"
 )
 
-// newMigrationShardUploader is like renter.NewShardUploader, but uses the old
-// host's Shard. This is useful for migration, since the new host won't be in
-// the MetaFile yet.
-func newMigrationShardUploader(m *renter.MetaFile, c renter.Contract, oldHostKey hostdb.HostPublicKey, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) (*renter.ShardUploader, error) {
-	hostKey := c.HostKey
-	// get host IP
-	hostIP, err := hkr.ResolveHostKey(c.HostKey)
-	if err != nil {
-		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
-	}
-	// create uploader
-	u, err := proto.NewSession(hostIP, c.HostKey, c.ID, c.Key, currentHeight)
-	if err != nil {
-		return nil, errors.Wrapf(err, "%v: could not initiate upload protocol with host", hostKey.ShortKey())
-	}
-	return &renter.ShardUploader{
-		Uploader: u,
-		Shard:    &m.Shards[m.HostIndex(oldHostKey)],
-		Key:      m.MasterKey,
-	}, nil
-}
-
-// MigrateFile uploads file shards to a new set of hosts. The shards are
-// retrieved by erasure-encoding f.
-func MigrateFile(f *os.File, newcontracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
-	op := newOperation()
-	if len(newcontracts) != len(m.Hosts) {
-		op.die(errors.New("new contract set must match size of previous contract set"))
-		return op
-	}
-	migrations := computeMigrations(newcontracts, m.Hosts)
-	if len(migrations) == 0 {
-		op.die(nil)
-		return op
-	}
-	go migrateFile(op, f, newcontracts, migrations, m, hkr, height)
-	return op
-}
-
-// MigrateDirFile runs the MigrateFile process on each metafile in a
-// directory, using it's corresponding file on disk. The directory structure
-// of the files and metafiles must match.
-func MigrateDirFile(newcontracts renter.ContractSet, nextFile FileIter, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
-	op := newOperation()
-	go migrateDirFile(op, newcontracts, nextFile, hkr, height)
-	return op
-}
-
-// MigrateRemote uploads file shards to a new set of hosts. The shards are
-// retrieved by downloading the file from the current set of hosts. (However,
-// MigrateRemote never downloads from hosts that are not in the new set.)
-func MigrateRemote(newcontracts renter.ContractSet, m *renter.MetaFile, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
-	op := newOperation()
-	migrations := computeMigrations(newcontracts, m.Hosts)
-	if len(migrations) == 0 {
-		op.die(nil)
-		return op
-	} else if len(m.Hosts)-len(migrations) < m.MinShards {
-		op.die(errors.New("not enough existing hosts to recover file"))
-		return op
-	}
-	go migrateRemote(op, newcontracts, migrations, m, hkr, height)
-	return op
-}
-
-// MigrateDirRemote runs the MigrateRemote process on each metafile in a
-// directory.
-func MigrateDirRemote(newcontracts renter.ContractSet, nextFile MigrateDirIter, hkr renter.HostKeyResolver, height types.BlockHeight) *Operation {
-	op := newOperation()
-	go migrateDirRemote(op, newcontracts, nextFile, hkr, height)
-	return op
-}
-
-func computeMigrations(contracts renter.ContractSet, hosts []hostdb.HostPublicKey) map[hostdb.HostPublicKey]hostdb.HostPublicKey {
-	migrations := make(map[hostdb.HostPublicKey]hostdb.HostPublicKey)
-	var newhosts []hostdb.HostPublicKey
-outer:
-	for host := range contracts {
-		for _, h := range hosts {
-			if h == host {
-				continue outer
+func replaceHosts(oldHosts []hostdb.HostPublicKey, hs *HostSet) []hostdb.HostPublicKey {
+	isOld := func(h hostdb.HostPublicKey) bool {
+		for i := range oldHosts {
+			if oldHosts[i] == h {
+				return true
 			}
 		}
-		newhosts = append(newhosts, host)
+		return false
 	}
 
-	for _, hostKey := range hosts {
-		if _, ok := contracts[hostKey]; !ok {
-			migrations[hostKey] = newhosts[0]
-			newhosts = newhosts[1:]
+	r := append([]hostdb.HostPublicKey(nil), oldHosts...)
+	for host := range hs.sessions {
+		if !isOld(host) {
+			for i := range r {
+				if !hs.HasHost(r[i]) {
+					r[i] = host
+					break
+				}
+			}
 		}
 	}
-	return migrations
+	return r
 }
 
-func migrateFile(op *Operation, f *os.File, newcontracts renter.ContractSet, migrations map[hostdb.HostPublicKey]hostdb.HostPublicKey, m *renter.MetaFile, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) {
-	hosts := make([]*renter.ShardUploader, len(m.Hosts))
-	for i, oldHostKey := range m.Hosts {
-		if op.Canceled() {
-			op.die(ErrCanceled)
-			return
-		}
-		newhost, ok := migrations[oldHostKey]
-		if !ok {
-			// not migrating this shard
-			continue
-		}
-		contract, ok := newcontracts[newhost]
-		if !ok {
-			panic("missing contract for host being migrated")
-		}
-		hu, err := newMigrationShardUploader(m, contract, oldHostKey, hkr, currentHeight)
-		if err != nil {
-			op.die(err)
-			return
-		}
-		defer hu.Close()
-		hosts[i] = hu
-	}
+// A Migrator facilitates migrating metafiles from one set of hosts to another.
+type Migrator struct {
+	hosts   *HostSet
+	shards  map[hostdb.HostPublicKey]*renter.SectorBuilder
+	onFlush []func() error
+}
 
-	// determine size of each chunk
-	// NOTE: currently we just use the first shard. This works as long as all
-	// shards have the same pattern of slice lengths, but it feels ugly. This
-	// is an inherent flaw in the format, and is a good argument for making
-	// the format chunk-based instead of host-based.
-	shard := m.Shards[0]
-	if len(shard) == 0 {
-		// nothing to do
-		op.die(nil)
-		return
+func (m *Migrator) canFit(shardLen int, oldHosts, newHosts []hostdb.HostPublicKey) bool {
+	for i := range newHosts {
+		if oldHosts[i] == newHosts[i] {
+			continue // not uploading to this host
+		}
+		if m.shards[newHosts[i]].Remaining() < shardLen {
+			return false
+		}
 	}
+	return true
+}
 
-	// for each host we're migrating to, we need to upload a full sector for
-	// each SectorSlice in the file.
-	total := int64(len(migrations)*len(shard)) * renterhost.SectorSize
-	uploaded := int64(0)
-	op.sendUpdate(TransferProgressUpdate{
-		Total:       total,
-		Transferred: uploaded,
-	})
-
-	// upload one chunk at a time
-	//
-	// NOTE: technically, we should be checking for multiple SectorSlices with
-	// the same MerkleRoot, and upload those together in order to save
-	// bandwidth.
-	chunkSizes := make([]int, len(shard))
-	for i, s := range shard {
-		chunkSizes[i] = int(s.NumSegments*merkle.SegmentSize) * m.MinShards
+// NeedsMigrate returns true if at least one of the hosts of f is not present in
+// the Migrator's HostSet.
+func (m *Migrator) NeedsMigrate(f *renter.MetaFile) bool {
+	newHosts := replaceHosts(f.Hosts, m.hosts)
+	for i := range newHosts {
+		if newHosts[i] != f.Hosts[i] {
+			return true
+		}
 	}
-	rsc := m.ErasureCode()
-	chunk := make([]byte, m.MaxChunkSize()) // no chunk will be larger than this
-	shards := make([][]byte, len(hosts))
+	return false
+}
+
+// AddFile uses data read from source to migrate f to the Migrator's new host
+// set. Since the Migrator buffers data internally, the migration may not be
+// complete until the Flush method has been called. onFinish is called on the
+// new metafile when the file has been fully migrated.
+func (m *Migrator) AddFile(f *renter.MetaFile, source io.Reader, onFinish func(*renter.MetaFile) error) error {
+	newHosts := replaceHosts(f.Hosts, m.hosts)
+	newShards := make([][]renter.SectorSlice, len(newHosts))
+
+	chunk := make([]byte, f.MaxChunkSize())
+	shards := make([][]byte, len(f.Hosts))
 	for i := range shards {
-		shards[i] = make([]byte, renterhost.SectorSize)
+		shards[i] = make([]byte, 0, renterhost.SectorSize)
 	}
-	for chunkIndex, chunkSize := range chunkSizes {
-		if op.Canceled() {
-			op.die(ErrCanceled)
-			return
-		}
-		// read chunk
-		n, err := io.ReadFull(f, chunk[:chunkSize])
+
+	for _, ss := range f.Shards[0] {
+		// read next chunk
+		chunkSize := int(ss.NumSegments*merkle.SegmentSize) * f.MinShards
+		n, err := io.ReadFull(source, chunk[:chunkSize])
 		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-			op.die(errors.Wrap(err, "could not read file data"))
-			return
+			return err
 		} else if n == 0 {
-			break
+			break // done
 		}
-
-		// encode the chunk, then encrypt and upload each shard
-		rsc.Encode(chunk[:n], shards)
-		for shardIndex, host := range hosts {
-			if host == nil {
-				// already uploaded to this host
-				continue
-			}
-			_, err := host.EncryptAndUpload(shards[shardIndex], int64(chunkIndex))
-			if err != nil {
-				op.die(errors.Wrap(err, "could not upload sector"))
-				return
-			}
-			uploaded += renterhost.SectorSize
-			op.sendUpdate(TransferProgressUpdate{
-				Total:       total,
-				Transferred: uploaded,
-			})
-		}
-	}
-
-	// finalize new host set
-	for oldHostKey, newHostKey := range migrations {
-		m.ReplaceHost(oldHostKey, newHostKey)
-	}
-	op.die(nil)
-}
-
-func migrateRemote(op *Operation, newcontracts renter.ContractSet, migrations map[hostdb.HostPublicKey]hostdb.HostPublicKey, m *renter.MetaFile, hkr renter.HostKeyResolver, currentHeight types.BlockHeight) {
-	// create a downloader for each old host
-	oldhosts := make([]*renter.ShardDownloader, len(m.Hosts))
-	var errStrings []string
-	for i, hostKey := range m.Hosts {
-		if op.Canceled() {
-			op.die(ErrCanceled)
-			return
-		}
-		// don't download from hosts being migrated from
-		if _, ok := migrations[hostKey]; ok {
-			errStrings = append(errStrings, fmt.Sprintf("%v: host is being migrated away from", hostKey.ShortKey()))
-			continue
-		}
-		// lookup contract
-		contract, ok := newcontracts[hostKey]
-		if !ok {
-			errStrings = append(errStrings, fmt.Sprintf("%v: no contract for host", hostKey.ShortKey()))
-			continue
-		}
-		bd, err := renter.NewShardDownloader(m, contract, hkr)
-		if err != nil {
-			errStrings = append(errStrings, err.Error())
-			continue
-		}
-		defer bd.Close()
-		oldhosts[i] = bd
-	}
-	if len(m.Hosts)-len(errStrings) < m.MinShards {
-		op.die(errors.New("could not connect to enough hosts:\n" + strings.Join(errStrings, "\n")))
-		return
-	}
-
-	// create an uploader for each new host. Only the indices corresponding to
-	// hosts being migrated will be valid.
-	newhosts := make([]*renter.ShardUploader, len(m.Hosts))
-	for oldHostKey, newHostKey := range migrations {
-		if op.Canceled() {
-			op.die(ErrCanceled)
-			return
-		}
-		newContract, ok := newcontracts[newHostKey]
-		if !ok {
-			panic("newcontracts does not contain one of the hosts being migrated to")
-		}
-		hu, err := newMigrationShardUploader(m, newContract, oldHostKey, hkr, currentHeight)
-		if err != nil {
-			op.die(err)
-			return
-		}
-		defer hu.Close()
-		newhosts[m.HostIndex(oldHostKey)] = hu
-	}
-
-	// determine how many bytes will be uploaded
-	var numChunks int64
-	for _, h := range oldhosts {
-		if h == nil {
-			continue
-		}
-		numChunks = int64(len(h.Slices))
-		break
-	}
-	if numChunks == 0 {
-		// nothing to do
-		op.die(nil)
-		return
-	}
-
-	// for each host we're migrating to, we need to upload a full sector for
-	// each SectorSlice in the file.
-	total := int64(len(migrations)) * numChunks * renterhost.SectorSize
-	uploaded := int64(0)
-	op.sendUpdate(TransferProgressUpdate{
-		Total:       total,
-		Transferred: uploaded,
-	})
-
-	// download and reupload each chunk
-	rsc := m.ErasureCode()
-	for chunkIndex := int64(0); chunkIndex < numChunks; chunkIndex++ {
-		if op.Canceled() {
-			op.die(ErrCanceled)
-			return
-		}
-
-		// download chunk shards in parallel and reconstruct
-		shards, _, err := DownloadChunkShards(oldhosts, chunkIndex, m.MinShards, op.cancel)
-		if err != nil {
-			op.die(err)
-			return
-		} else if err := rsc.Reconstruct(shards); err != nil {
-			op.die(err)
-			return
-		}
-
-		// upload shards to their respective new hosts
-		for shardIndex, h := range newhosts {
-			if h == nil {
-				continue
-			}
-			_, err := h.EncryptAndUpload(shards[shardIndex], chunkIndex)
-			if err != nil {
-				op.die(err)
-				return
-			}
-			uploaded += renterhost.SectorSize
-			op.sendUpdate(TransferProgressUpdate{
-				Total:       total,
-				Transferred: uploaded,
-			})
-		}
-	}
-
-	// finalize new host set
-	for oldHostKey, newHostKey := range migrations {
-		m.ReplaceHost(oldHostKey, newHostKey)
-	}
-	op.die(nil)
-}
-
-func migrateDirFile(op *Operation, newcontracts renter.ContractSet, nextFile FileIter, hkr renter.HostKeyResolver, height types.BlockHeight) {
-	for {
-		metaPath, filePath, err := nextFile()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			op.sendUpdate(DirSkipUpdate{Filename: metaPath, Err: err})
-			continue
-		}
-		err = func() error {
-			index, err := renter.ReadMetaIndex(metaPath)
-			if err != nil {
+		// erasure-encode
+		f.ErasureCode().Encode(chunk[:n], shards)
+		// make room if necessary
+		if !m.canFit(len(shards[0]), f.Hosts, newHosts) {
+			if err := m.Flush(); err != nil {
 				return err
 			}
-			// if metafile is already fully migrated, skip it
-			migrations := computeMigrations(newcontracts, index.Hosts)
-			if len(migrations) == 0 {
-				return errors.New("already migrated")
+		}
+		// append to sector builders
+		sliceIndices := make([]int, len(newHosts))
+		for i, hostKey := range newHosts {
+			if hostKey == f.Hosts[i] {
+				continue // no migration necessary
 			}
-			m, err := renter.ReadMetaFile(metaPath)
-			if err != nil {
-				return err
-			}
-			defer renter.WriteMetaFile(metaPath, m)
-
-			f, err := os.Open(filePath)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-
-			op.sendUpdate(DirQueueUpdate{Filename: metaPath, Filesize: m.Filesize})
-			mop := MigrateFile(f, newcontracts, m, hkr, height)
-			// cancel mop if op is canceled
-			done := make(chan struct{})
-			defer close(done)
-			go func() {
-				select {
-				case <-op.cancel:
-					mop.Cancel()
-				case <-done:
+			s := m.shards[hostKey]
+			s.Append(shards[i], f.MasterKey)
+			sliceIndices[i] = len(s.Slices()) - 1
+		}
+		// append to newShards when this sector is flushed (which should be on
+		// the next iteration, unless we've reached the end of the file)
+		m.onFlush = append(m.onFlush, func() error {
+			for i := range newShards {
+				if newHosts[i] != f.Hosts[i] {
+					s := m.shards[newHosts[i]]
+					sliceIndex := sliceIndices[i]
+					newShards[i] = append(newShards[i], s.Slices()[sliceIndex])
 				}
-			}()
-			// forward mop updates to op
-			for u := range mop.Updates() {
-				op.sendUpdate(u)
-			}
-			return mop.Err()
-		}()
-		if err != nil {
-			op.sendUpdate(DirSkipUpdate{Filename: metaPath, Err: err})
-		}
-	}
-	op.die(nil)
-}
-
-func migrateDirRemote(op *Operation, newcontracts renter.ContractSet, nextFile MigrateDirIter, hkr renter.HostKeyResolver, height types.BlockHeight) {
-	for {
-		metaPath, err := nextFile()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			op.sendUpdate(DirSkipUpdate{Filename: metaPath, Err: err})
-			continue
-		}
-		err = func() error {
-			index, err := renter.ReadMetaIndex(metaPath)
-			if err != nil {
-				return err
-			}
-			// if metafile is already fully migrated, skip it
-			migrations := computeMigrations(newcontracts, index.Hosts)
-			if len(migrations) == 0 {
-				return errors.New("already migrated")
-			}
-			m, err := renter.ReadMetaFile(metaPath)
-			if err != nil {
-				return err
-			}
-			defer renter.WriteMetaFile(metaPath, m)
-
-			op.sendUpdate(DirQueueUpdate{Filename: metaPath, Filesize: m.Filesize})
-			mop := MigrateRemote(newcontracts, m, hkr, height)
-			// cancel mop if op is canceled
-			done := make(chan struct{})
-			defer close(done)
-			go func() {
-				select {
-				case <-op.cancel:
-					mop.Cancel()
-				case <-done:
-				}
-			}()
-			// forward mop updates to op
-			for u := range mop.Updates() {
-				op.sendUpdate(u)
-			}
-			return mop.Err()
-		}()
-		if err != nil {
-			op.sendUpdate(DirSkipUpdate{Filename: metaPath, Err: err})
-		}
-	}
-	op.die(nil)
-}
-
-// MigrateDirIter is an iterator that returns the next metafile path. It should
-// return io.EOF to signal the end of iteration.
-type MigrateDirIter func() (string, error)
-
-// NewRecursiveMigrateDirIter returns a MigrateDirIter that iterates over a
-// nested set of directories.
-func NewRecursiveMigrateDirIter(metaDir string) MigrateDirIter {
-	type walkFile struct {
-		name string
-		err  error
-	}
-	fileChan := make(chan walkFile)
-	go func() {
-		filepath.Walk(metaDir, func(name string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if !info.IsDir() {
-				fileChan <- walkFile{name, err}
 			}
 			return nil
 		})
-		close(fileChan)
-	}()
-	return func() (string, error) {
-		wf, ok := <-fileChan
-		if !ok {
-			return "", io.EOF
-		} else if wf.err != nil {
-			return wf.name, wf.err
+	}
+	m.onFlush = append(m.onFlush, func() error {
+		for i := range f.Shards {
+			if newHosts[i] != f.Hosts[i] {
+				f.Shards[i] = newShards[i]
+			}
 		}
-		return wf.name, nil
+		f.Hosts = newHosts
+		f.ModTime = time.Now()
+		return onFinish(f)
+	})
+	return nil
+}
+
+// Flush flushes any un-uploaded migration data to the new hosts. Flush must be
+// called to guarantee that migration is complete.
+func (m *Migrator) Flush() error {
+	for hostKey, s := range m.shards {
+		if s.Len() == 0 {
+			continue
+		}
+		h, err := m.hosts.acquire(hostKey)
+		if err != nil {
+			return err
+		}
+		sector := s.Finish()
+		err = h.Write([]renterhost.RPCWriteAction{{
+			Type: renterhost.RPCWriteActionAppend,
+			Data: sector[:],
+		}})
+		m.hosts.release(hostKey)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, fn := range m.onFlush {
+		if err := fn(); err != nil {
+			return err
+		}
+	}
+	m.onFlush = m.onFlush[:0]
+
+	for _, s := range m.shards {
+		s.Reset()
+	}
+
+	return nil
+}
+
+// NewMigrator creates a Migrator that migrates files to the specified host set.
+func NewMigrator(hosts *HostSet) *Migrator {
+	shards := make(map[hostdb.HostPublicKey]*renter.SectorBuilder)
+	for hostKey := range hosts.sessions {
+		shards[hostKey] = new(renter.SectorBuilder)
+	}
+	return &Migrator{
+		hosts:  hosts,
+		shards: shards,
 	}
 }

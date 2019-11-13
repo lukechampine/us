@@ -26,6 +26,12 @@ type HostSet struct {
 	currentHeight types.BlockHeight
 }
 
+// HasHost returns true if the specified host is in the set.
+func (set *HostSet) HasHost(hostKey hostdb.HostPublicKey) bool {
+	_, ok := set.sessions[hostKey]
+	return ok
+}
+
 // Close closes all of the sessions in the set.
 func (set *HostSet) Close() error {
 	for hostKey, lh := range set.sessions {
