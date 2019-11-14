@@ -378,9 +378,9 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 			return lenp, nil
 		}
 	}
-	// check a pending write that partially overlaps p at the end of the file;
-	// we won't be able to download this data, since it hasn't been uploaded to
-	// hosts yet
+	// check for a pending write that partially overlaps p at the end of the
+	// file; we won't be able to download this data, since it hasn't been
+	// uploaded to hosts yet
 	if off+int64(len(p)) > f.m.Filesize {
 		for _, pw := range f.pendingWrites {
 			if pw.offset <= off+int64(len(p)) && off+int64(len(p)) <= pw.end() {
@@ -509,8 +509,8 @@ func (fs *PseudoFS) fileWriteAt(f *openMetaFile, p []byte, off int64) (int, erro
 		off += f.m.MaxChunkSize()
 	}
 
-	// TODO: we use the same overflow calculation as Write, which is wasteful;
-	// if we overwrite another pendingWrite, we might not overflow.
+	// TODO: this is wasteful; if we overwrite another pendingWrite, we might
+	// not overflow.
 	if shardSize := f.calcShardSize(off, len(p)); !fs.canFit(f, shardSize) {
 		if err := fs.flushSectors(); err != nil {
 			return 0, err

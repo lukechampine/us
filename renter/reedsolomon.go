@@ -15,8 +15,8 @@ import (
 type ErasureCoder interface {
 	// Encode encodes data into shards. The resulting shards do not constitute
 	// a single matrix, but a series of matrices, each with a shard size of
-	// merkletree.Segmentsize. The supplied shards must each have a capacity
-	// of at least len(data)/m.
+	// merkletree.SegmentSize. The supplied shards must each have a capacity
+	// of at least len(data)/m. Encode may alter the len of the shards.
 	Encode(data []byte, shards [][]byte)
 	// Reconstruct recalculates any missing shards in the input. Missing
 	// shards must have the same capacity as a normal shard, but a length of

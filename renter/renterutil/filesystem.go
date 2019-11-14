@@ -27,7 +27,8 @@ func (i pseudoFileInfo) ModTime() time.Time { return i.m.ModTime }
 func (i pseudoFileInfo) IsDir() bool        { return false }
 func (i pseudoFileInfo) Sys() interface{}   { return i.m }
 
-// PseudoFS implements a filesystem by downloading data from Sia hosts.
+// PseudoFS implements a filesystem by uploading and downloading data from Sia
+// hosts.
 type PseudoFS struct {
 	root           string
 	curFD          int

@@ -70,9 +70,7 @@ func (sb *SectorBuilder) Append(data []byte, key KeySeed) {
 	sb.sectorLen += len(sectorSlice)
 }
 
-// Len returns the number of bytes appended to the sector. Note that, due to
-// padding, it is not guaranteed that Len equals the sum of the slices passed
-// to Append.
+// Len returns the number of bytes appended to the sector.
 func (sb *SectorBuilder) Len() int {
 	return sb.sectorLen
 }
