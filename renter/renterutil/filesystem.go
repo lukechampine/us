@@ -348,6 +348,12 @@ var ErrNotReadable = errors.New("file is not readable")
 // ErrAppendOnly is returned for seek operations on append-only files.
 var ErrAppendOnly = errors.New("file is append-only")
 
+// ErrDirectory is returned for operations that are not valid for directories.
+var ErrDirectory = errors.New("file is a directory")
+
+// ErrNotDirectory is returned for operations that are not valid for files.
+var ErrNotDirectory = errors.New("file is not a directory")
+
 const rwmask = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
 
 func (pf PseudoFile) writeable() bool {
@@ -399,7 +405,7 @@ func (pf PseudoFile) Read(p []byte) (int, error) {
 	if f == nil && d == nil {
 		return 0, errInvalidFileDescriptor
 	} else if d != nil {
-		return d.Read(p)
+		return 0, ErrDirectory
 	}
 	return pf.fs.fileRead(f, p)
 }
@@ -415,7 +421,7 @@ func (pf PseudoFile) Write(p []byte) (int, error) {
 	if f == nil && d == nil {
 		return 0, errInvalidFileDescriptor
 	} else if d != nil {
-		return d.Write(p)
+		return 0, ErrDirectory
 	}
 	return pf.fs.fileWrite(f, p)
 }
@@ -431,7 +437,7 @@ func (pf PseudoFile) ReadAt(p []byte, off int64) (int, error) {
 	if f == nil && d == nil {
 		return 0, errInvalidFileDescriptor
 	} else if d != nil {
-		return d.ReadAt(p, off)
+		return 0, ErrDirectory
 	}
 	return pf.fs.fileReadAt(f, p, off)
 }
@@ -447,7 +453,7 @@ func (pf PseudoFile) WriteAt(p []byte, off int64) (int, error) {
 	if f == nil && d == nil {
 		return 0, errInvalidFileDescriptor
 	} else if d != nil {
-		return d.WriteAt(p, off)
+		return 0, ErrDirectory
 	}
 	if pf.appendOnly() && off != f.filesize() {
 		return 0, ErrAppendOnly
@@ -466,7 +472,7 @@ func (pf PseudoFile) Seek(offset int64, whence int) (int64, error) {
 	if f == nil && d == nil {
 		return 0, errInvalidFileDescriptor
 	} else if d != nil {
-		return d.Seek(offset, whence)
+		return 0, ErrDirectory
 	}
 	return pf.fs.fileSeek(f, offset, whence)
 }
@@ -494,7 +500,7 @@ func (pf PseudoFile) Readdir(n int) ([]os.FileInfo, error) {
 	if f == nil && d == nil {
 		return nil, errInvalidFileDescriptor
 	} else if d == nil {
-		return nil, errors.New("not a directory")
+		return nil, ErrNotDirectory
 	}
 	files, err := d.Readdir(n)
 	for i := range files {
@@ -545,7 +551,7 @@ func (pf PseudoFile) Readdirnames(n int) ([]string, error) {
 	if f == nil && d == nil {
 		return nil, errInvalidFileDescriptor
 	} else if d == nil {
-		return nil, errors.New("not a directory")
+		return nil, ErrNotDirectory
 	}
 	dirnames, err := d.Readdirnames(n)
 	if err != nil {
@@ -605,7 +611,7 @@ func (pf PseudoFile) Truncate(size int64) error {
 	if f == nil && d == nil {
 		return errInvalidFileDescriptor
 	} else if d != nil {
-		return d.Truncate(size)
+		return ErrDirectory
 	}
 	return pf.fs.fileTruncate(f, size)
 }
