@@ -150,7 +150,7 @@ type SHARDClient struct {
 }
 
 func (c *SHARDClient) req(route string, fn func(*http.Response) error) error {
-	resp, err := http.Get(fmt.Sprintf("http://%v%v", c.addr, route))
+	resp, err := http.Get(fmt.Sprintf("%v%v", c.addr, route))
 	if err != nil {
 		return err
 	}
@@ -234,6 +234,10 @@ func (c *SHARDClient) LookupHost(prefix string) (hostdb.HostPublicKey, error) {
 // NewSHARDClient returns a SHARDClient that communicates with the SHARD
 // server at the specified address.
 func NewSHARDClient(addr string) *SHARDClient {
+	// use https by default
+	if !strings.HasPrefix(addr, "https://") && !strings.HasPrefix(addr, "http://") {
+		addr = "https://" + addr
+	}
 	return &SHARDClient{addr: addr}
 }
 
