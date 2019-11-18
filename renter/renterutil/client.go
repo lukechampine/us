@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -80,8 +81,17 @@ func (c *SiadClient) SignTransaction(txn *types.Transaction, toSign []crypto.Has
 
 // UnspentOutputs returns the set of outputs tracked by the wallet that are
 // spendable.
-func (c *SiadClient) UnspentOutputs() ([]modules.UnspentOutput, error) {
+func (c *SiadClient) UnspentOutputs(limbo bool) ([]modules.UnspentOutput, error) {
 	wug, err := c.siad.WalletUnspentGet()
+	if !limbo {
+		noLimbo := wug.Outputs[:0]
+		for _, o := range wug.Outputs {
+			if o.ConfirmationHeight != math.MaxUint64 {
+				noLimbo = append(noLimbo, o)
+			}
+		}
+		wug.Outputs = noLimbo
+	}
 	return wug.Outputs, err
 }
 
@@ -345,8 +355,8 @@ outer:
 
 // UnspentOutputs returns the set of outputs tracked by the wallet that are
 // spendable.
-func (c *WalrusClient) UnspentOutputs() ([]modules.UnspentOutput, error) {
-	utxos, err := c.walrus.UnspentOutputs(false)
+func (c *WalrusClient) UnspentOutputs(limbo bool) ([]modules.UnspentOutput, error) {
+	utxos, err := c.walrus.UnspentOutputs(limbo)
 	outputs := make([]modules.UnspentOutput, len(utxos))
 	for i := range outputs {
 		outputs[i] = modules.UnspentOutput{

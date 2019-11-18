@@ -19,7 +19,7 @@ type (
 	Wallet interface {
 		NewWalletAddress() (types.UnlockHash, error)
 		SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error
-		UnspentOutputs() ([]modules.UnspentOutput, error)
+		UnspentOutputs(limbo bool) ([]modules.UnspentOutput, error)
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 		UnlockConditions(addr types.UnlockHash) (types.UnlockConditions, error)
 	}

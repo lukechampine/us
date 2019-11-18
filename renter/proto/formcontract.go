@@ -233,7 +233,10 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 }
 
 func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr types.UnlockHash, w Wallet) ([]crypto.Hash, error) {
-	outputs, err := w.UnspentOutputs()
+	// contract formation generally requires chained transactions, so use
+	// unconfirmed outputs
+	const limbo = true
+	outputs, err := w.UnspentOutputs(limbo)
 	if err != nil {
 		return nil, err
 	}
