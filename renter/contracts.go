@@ -26,9 +26,9 @@ const (
 // A Contract identifies a unique file contract and possess the secret key that
 // can revise it.
 type Contract struct {
-	HostKey hostdb.HostPublicKey
-	ID      types.FileContractID
-	Key     ed25519.PrivateKey
+	HostKey   hostdb.HostPublicKey
+	ID        types.FileContractID
+	RenterKey ed25519.PrivateKey
 }
 
 // SaveContract creates a new contract file using the provided contract.
@@ -43,7 +43,7 @@ func SaveContract(c Contract, filename string) error {
 	buf[11] = ContractVersion
 	copy(buf[12:44], c.HostKey.Ed25519())
 	copy(buf[44:76], c.ID[:])
-	copy(buf[76:108], c.Key[:ed25519.SeedSize])
+	copy(buf[76:108], c.RenterKey[:ed25519.SeedSize])
 	if _, err := f.Write(buf); err != nil {
 		return errors.Wrap(err, "could not write contract header and revision")
 	} else if err := f.Sync(); err != nil {
@@ -68,7 +68,7 @@ func LoadContract(filename string) (c Contract, err error) {
 	version := buf[11]
 	c.HostKey = hostdb.HostKeyFromPublicKey(buf[12:44])
 	copy(c.ID[:], buf[44:76])
-	c.Key = ed25519.NewKeyFromSeed(buf[76:108])
+	c.RenterKey = ed25519.NewKeyFromSeed(buf[76:108])
 
 	if magic != ContractMagic {
 		return Contract{}, errors.Errorf("contract is invalid: wrong magic bytes (%q)", magic)

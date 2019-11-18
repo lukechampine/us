@@ -182,7 +182,7 @@ func NewShardUploader(m *MetaFile, c Contract, hkr HostKeyResolver, currentHeigh
 		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
 	}
 	// create uploader
-	u, err := proto.NewSession(hostIP, c.HostKey, c.ID, c.Key, currentHeight)
+	u, err := proto.NewSession(hostIP, c.HostKey, c.ID, c.RenterKey, currentHeight)
 	if err != nil {
 		return nil, errors.Wrapf(err, "%v: could not initiate upload protocol with host", hostKey.ShortKey())
 	}

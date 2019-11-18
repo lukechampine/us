@@ -93,7 +93,7 @@ func (set *HostSet) AddHost(c renter.Contract) {
 		if err != nil {
 			return errors.Wrap(err, "could not resolve host key")
 		}
-		lh.s, err = proto.NewSession(hostIP, c.HostKey, c.ID, c.Key, set.currentHeight)
+		lh.s, err = proto.NewSession(hostIP, c.HostKey, c.ID, c.RenterKey, set.currentHeight)
 		return err
 	}
 	set.sessions[c.HostKey] = lh

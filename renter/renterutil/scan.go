@@ -66,7 +66,7 @@ func checkup(results chan<- CheckupResult, contracts renter.ContractSet, m *rent
 
 		// create downloader
 		start := time.Now()
-		s, err := proto.NewSession(hostIP, hostKey, contract.ID, contract.Key, 0)
+		s, err := proto.NewSession(hostIP, hostKey, contract.ID, contract.RenterKey, 0)
 		res.Latency = time.Since(start)
 		if err != nil {
 			res.Error = err
@@ -116,7 +116,7 @@ func CheckupContract(contract *renter.Contract, hkr renter.HostKeyResolver) Chec
 
 	// create session
 	start := time.Now()
-	s, err := proto.NewSession(hostIP, hostKey, contract.ID, contract.Key, 0)
+	s, err := proto.NewSession(hostIP, hostKey, contract.ID, contract.RenterKey, 0)
 	res.Latency = time.Since(start)
 	if err != nil {
 		res.Error = errors.Wrap(err, "could not initiate download protocol")

@@ -57,9 +57,9 @@ func createHostWithContract(tb testing.TB) (*ghost.Host, renter.Contract) {
 		tb.Fatal(err)
 	}
 	contract := renter.Contract{
-		HostKey: rev.HostKey(),
-		ID:      rev.ID(),
-		Key:     key,
+		HostKey:   rev.HostKey(),
+		ID:        rev.ID(),
+		RenterKey: key,
 	}
 	contractPath := filepath.Join(os.TempDir(), tb.Name()+"-"+hex.EncodeToString(frand.Bytes(6))+".contract")
 	if err := renter.SaveContract(contract, contractPath); err != nil {
