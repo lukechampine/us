@@ -332,8 +332,13 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	price = price.MulFloat(1.05)
 	if rev.NewValidProofOutputs[0].Value.Cmp(price) < 0 {
 		return errors.New("contract has insufficient funds to support modification")
-	} else if rev.NewMissedProofOutputs[1].Value.Cmp(collateral) < 0 {
-		return errors.New("contract has insufficient collateral to support modification")
+	}
+
+	// cap the collateral to whatever is left; no sense complaining if there is
+	// insufficient collateral, as we agreed to the amount when we formed the
+	// contract
+	if collateral.Cmp(rev.NewMissedProofOutputs[1].Value) > 0 {
+		collateral = rev.NewMissedProofOutputs[1].Value
 	}
 
 	// calculate new revision outputs
