@@ -56,7 +56,16 @@ func (fs *PseudoFS) Chmod(name string, mode os.FileMode) error {
 		return os.Chmod(path, mode)
 	}
 	path += metafileExt
-	// TODO: how does this interact with open files?
+
+	// check for open file
+	for _, of := range fs.files {
+		if of.name == name {
+			of.m.Mode = mode
+			of.m.ModTime = time.Now()
+			return nil
+		}
+	}
+
 	m, err := renter.ReadMetaFile(path)
 	if err != nil {
 		return errors.Wrapf(err, "chmod %v", path)
