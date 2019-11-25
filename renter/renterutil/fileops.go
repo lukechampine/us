@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -265,7 +264,7 @@ func (fs *PseudoFS) flushSectors() error {
 	}
 
 	// upload each sector in parallel
-	errChan := make(chan error)
+	errChan := make(chan *HostError)
 	var numHosts int
 	for hostKey, sb := range fs.sectors {
 		if sb.Len() == 0 {
@@ -276,7 +275,7 @@ func (fs *PseudoFS) flushSectors() error {
 			sector := sb.Finish()
 			h, err := fs.hosts.acquire(hostKey)
 			if err != nil {
-				errChan <- errors.Wrap(err, hostKey.ShortKey())
+				errChan <- &HostError{hostKey, err}
 				return
 			}
 			err = h.Write([]renterhost.RPCWriteAction{{
@@ -285,20 +284,20 @@ func (fs *PseudoFS) flushSectors() error {
 			}})
 			fs.hosts.release(hostKey)
 			if err != nil {
-				errChan <- errors.Wrap(err, hostKey.ShortKey())
+				errChan <- &HostError{hostKey, err}
 				return
 			}
 			errChan <- nil
 		}(hostKey, sb)
 	}
-	var errStrings []string
+	var errs HostErrorSet
 	for i := 0; i < numHosts; i++ {
 		if err := <-errChan; err != nil {
-			errStrings = append(errStrings, err.Error())
+			errs = append(errs, err)
 		}
 	}
-	if len(errStrings) != 0 {
-		return errors.New("could not upload to some hosts:\n" + strings.Join(errStrings, "\n"))
+	if len(errs) != 0 {
+		return errors.Wrap(errs, "could not upload to some hosts")
 	}
 
 	// update files
@@ -392,12 +391,12 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	}
 
 	hosts := make([]*renter.ShardDownloader, len(f.m.Hosts))
-	errs := make([]error, len(f.m.Hosts))
+	unavailableHosts := make(map[hostdb.HostPublicKey]error)
 	var nHosts int
 	for i, hostKey := range f.m.Hosts {
 		s, err := fs.hosts.acquire(hostKey)
 		if err != nil {
-			errs[i] = errors.Wrap(err, hostKey.ShortKey())
+			unavailableHosts[hostKey] = err
 			continue
 		}
 		defer fs.hosts.release(hostKey)
@@ -409,14 +408,12 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 		nHosts++
 	}
 	if nHosts < f.m.MinShards {
-		var errStrings []string
-		for _, err := range errs {
-			if err != nil {
-				errStrings = append(errStrings, err.Error())
-			}
+		errs := make(HostErrorSet, 0, len(unavailableHosts))
+		for hostKey, err := range unavailableHosts {
+			errs = append(errs, &HostError{hostKey, err})
 		}
-		return 0, errors.Errorf("insufficient hosts to recover file data (needed %v, got %v):\n%v",
-			f.m.MinShards, nHosts, strings.Join(errStrings, "\n"))
+		return 0, errors.Wrapf(errs, "insufficient hosts to recover file data (needed %v, got %v)",
+			f.m.MinShards, nHosts)
 	}
 
 	start := (off / f.m.MinChunkSize()) * merkle.SegmentSize
@@ -430,19 +427,20 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	// them
 	shards := make([][]byte, len(hosts))
 	reqChan := make(chan int, f.m.MinShards)
-	respChan := make(chan error, f.m.MinShards)
+	respChan := make(chan *HostError, f.m.MinShards)
 	var reqIndex int
 	for ; reqIndex < f.m.MinShards; reqIndex++ {
 		go func() {
 			for shardIndex := range reqChan {
-				if err := errs[shardIndex]; err != nil {
-					respChan <- err
+				h := hosts[shardIndex]
+				if err := unavailableHosts[h.HostKey()]; err != nil {
+					respChan <- &HostError{h.HostKey(), err}
 					continue
 				}
 				var buf bytes.Buffer
-				err := hosts[shardIndex].CopySection(&buf, offset, length)
+				err := h.CopySection(&buf, offset, length)
 				if err != nil {
-					respChan <- errors.Wrap(err, hosts[shardIndex].HostKey().ShortKey())
+					respChan <- &HostError{h.HostKey(), err}
 					continue
 				}
 				shards[shardIndex] = buf.Bytes()
@@ -452,13 +450,13 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 		reqChan <- reqIndex
 	}
 	var goodShards int
-	var errStrings []string
-	for goodShards < f.m.MinShards && goodShards+len(errStrings) < len(hosts) {
+	var errs HostErrorSet
+	for goodShards < f.m.MinShards && goodShards+len(errs) < len(hosts) {
 		err := <-respChan
 		if err == nil {
 			goodShards++
 		} else {
-			errStrings = append(errStrings, err.Error())
+			errs = append(errs, err)
 			if reqIndex < len(hosts) {
 				reqChan <- reqIndex
 				reqIndex++
@@ -467,7 +465,7 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	}
 	close(reqChan)
 	if goodShards < f.m.MinShards {
-		return 0, errors.New("too many hosts did not supply their shard:\n" + strings.Join(errStrings, "\n"))
+		return 0, errors.Wrap(errs, "too many hosts did not supply their shard")
 	}
 
 	// recover data shards directly into p

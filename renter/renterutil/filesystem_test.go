@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -87,6 +88,44 @@ func createTestingFS(tb testing.TB) (*PseudoFS, func()) {
 		}
 	}
 	return fs, cleanup
+}
+
+func TestHostErrorSet(t *testing.T) {
+	hosts := make([]*ghost.Host, 3)
+	hkr := make(testHKR)
+	hs := NewHostSet(hkr, 0)
+	for i := range hosts {
+		h, c := createHostWithContract(t)
+		hosts[i] = h
+		hkr[h.PublicKey()] = h.Settings().NetAddress
+		hs.AddHost(c)
+		h.Close()
+	}
+
+	fs := NewFileSystem(os.TempDir(), hs)
+	defer func() {
+		fs.Close()
+		for _, h := range hosts {
+			h.Close()
+		}
+	}()
+
+	metaName := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
+	pf, err := fs.Create(metaName, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pf.Write([]byte("foo")); err != nil {
+		t.Fatal(err)
+	}
+	// should get a HostErrorSet when we sync
+	err = pf.Sync()
+	hes, ok := errors.Cause(err).(HostErrorSet)
+	if !ok || hes == nil {
+		t.Fatal("expected HostSetError, got", errors.Cause(err))
+	} else if len(hes) != 3 {
+		t.Fatal("expected HostSetError to have three hosts, got", len(hes))
+	}
 }
 
 func TestFileSystemBasic(t *testing.T) {

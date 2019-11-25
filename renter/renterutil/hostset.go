@@ -1,6 +1,7 @@
 package renterutil
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/pkg/errors"
@@ -11,6 +12,31 @@ import (
 )
 
 var errNoHost = errors.New("no record of that host")
+
+// A HostError associates an error with a given host.
+type HostError struct {
+	HostPublicKey hostdb.HostPublicKey
+	Err           error
+}
+
+// Error implements error.
+func (he HostError) Error() string {
+	return he.HostPublicKey.ShortKey() + ": " + he.Err.Error()
+}
+
+// A HostErrorSet is a collection of errors from various hosts.
+type HostErrorSet []*HostError
+
+// Error implements error.
+func (hes HostErrorSet) Error() string {
+	strs := make([]string, len(hes))
+	for i := range strs {
+		strs[i] = hes[i].Error()
+	}
+	// include a leading newline so that the first error isn't printed on the
+	// same line as the error context
+	return "\n" + strings.Join(strs, "\n")
+}
 
 type lockedHost struct {
 	reconnect func() error
