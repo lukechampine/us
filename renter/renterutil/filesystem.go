@@ -12,7 +12,9 @@ import (
 	"lukechampine.com/us/renter"
 )
 
-var errInvalidFileDescriptor = errors.New("invalid file descriptor")
+// ErrInvalidFileDescriptor is returned when I/O is attempted on an unknown file
+// descriptor.
+var ErrInvalidFileDescriptor = errors.New("invalid file descriptor")
 
 // helper type to implement os.FileInfo for metafiles
 type pseudoFileInfo struct {
@@ -389,12 +391,11 @@ func (pf PseudoFile) Close() error {
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
-		return errInvalidFileDescriptor
+		return ErrInvalidFileDescriptor
 	} else if d != nil {
 		delete(pf.fs.dirs, pf.fd)
 		return d.Close()
 	}
-	f.closed = true
 	// f is only truly deleted if it has no pending writes; otherwise, it sticks
 	// around until the next flush
 	if len(f.pendingWrites) == 0 {
@@ -412,7 +413,7 @@ func (pf PseudoFile) Read(p []byte) (int, error) {
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
-		return 0, errInvalidFileDescriptor
+		return 0, ErrInvalidFileDescriptor
 	} else if d != nil {
 		return 0, ErrDirectory
 	}
@@ -428,7 +429,7 @@ func (pf PseudoFile) Write(p []byte) (int, error) {
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
-		return 0, errInvalidFileDescriptor
+		return 0, ErrInvalidFileDescriptor
 	} else if d != nil {
 		return 0, ErrDirectory
 	}
@@ -444,7 +445,7 @@ func (pf PseudoFile) ReadAt(p []byte, off int64) (int, error) {
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
-		return 0, errInvalidFileDescriptor
+		return 0, ErrInvalidFileDescriptor
 	} else if d != nil {
 		return 0, ErrDirectory
 	}
@@ -460,7 +461,7 @@ func (pf PseudoFile) WriteAt(p []byte, off int64) (int, error) {
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
-		return 0, errInvalidFileDescriptor
+		return 0, ErrInvalidFileDescriptor
 	} else if d != nil {
 		return 0, ErrDirectory
 	}
@@ -479,7 +480,7 @@ func (pf PseudoFile) Seek(offset int64, whence int) (int64, error) {
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
-		return 0, errInvalidFileDescriptor
+		return 0, ErrInvalidFileDescriptor
 	} else if d != nil {
 		return 0, ErrDirectory
 	}
@@ -507,7 +508,7 @@ func (pf PseudoFile) Readdir(n int) ([]os.FileInfo, error) {
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
-		return nil, errInvalidFileDescriptor
+		return nil, ErrInvalidFileDescriptor
 	} else if d == nil {
 		return nil, ErrNotDirectory
 	}
@@ -558,7 +559,7 @@ func (pf PseudoFile) Readdirnames(n int) ([]string, error) {
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
-		return nil, errInvalidFileDescriptor
+		return nil, ErrInvalidFileDescriptor
 	} else if d == nil {
 		return nil, ErrNotDirectory
 	}
@@ -581,7 +582,7 @@ func (pf PseudoFile) Stat() (os.FileInfo, error) {
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
-		return nil, errInvalidFileDescriptor
+		return nil, ErrInvalidFileDescriptor
 	} else if d != nil {
 		return d.Stat()
 	}
@@ -601,7 +602,7 @@ func (pf PseudoFile) Sync() error {
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
-		return errInvalidFileDescriptor
+		return ErrInvalidFileDescriptor
 	} else if d != nil {
 		return d.Sync()
 	}
@@ -618,7 +619,7 @@ func (pf PseudoFile) Truncate(size int64) error {
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
-		return errInvalidFileDescriptor
+		return ErrInvalidFileDescriptor
 	} else if d != nil {
 		return ErrDirectory
 	}
