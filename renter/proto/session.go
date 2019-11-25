@@ -409,7 +409,7 @@ func (s *Session) Close() (err error) {
 // The host's settings will also be requested.
 func NewSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, id types.FileContractID, key ed25519.PrivateKey, currentHeight types.BlockHeight) (_ *Session, err error) {
 	defer wrapErr(&err, "NewSession")
-	s, err := NewUnlockedSession(hostIP, hostKey, currentHeight)
+	s, err := newUnlockedSession(hostIP, hostKey, currentHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -428,6 +428,11 @@ func NewSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, id type
 // host, without locking an associated contract or requesting the host's settings.
 func NewUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (_ *Session, err error) {
 	defer wrapErr(&err, "NewUnlockedSession")
+	return newUnlockedSession(hostIP, hostKey, currentHeight)
+}
+
+// same as above, but without error wrapping, since we call it from NewSession too.
+func newUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (_ *Session, err error) {
 	conn, err := net.Dial("tcp", string(hostIP))
 	if err != nil {
 		return nil, err
