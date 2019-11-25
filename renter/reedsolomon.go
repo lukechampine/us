@@ -57,36 +57,11 @@ func checkShards(shards [][]byte, n int) (shardSize int) {
 }
 
 func (rsc rsCode) Encode(data []byte, shards [][]byte) {
-	chunkSize := rsc.m * merkle.SegmentSize
-	numChunks := len(data) / chunkSize
-	if len(data)%chunkSize != 0 {
-		numChunks++
+	if err := rsc.enc.SplitMulti(data, shards, merkle.SegmentSize); err != nil {
+		panic(err)
 	}
-	checkShards(shards, rsc.n)
-
-	// extend shards to proper len
-	shardSize := numChunks * merkle.SegmentSize
-	for i := range shards {
-		if cap(shards[i]) < shardSize {
-			panic("each shard must have capacity of at least len(data)/m")
-		}
-		shards[i] = shards[i][:shardSize]
-	}
-	// treat shards as a sequence of segments. Iterate over each segment,
-	// copying some data into the data shards, then calling Encode to fill the
-	// parity shards.
-	subshards := make([][]byte, 256)[:rsc.n]
-	buf := bytes.NewBuffer(data)
-	for off := 0; buf.Len() > 0; off += merkle.SegmentSize {
-		for i := 0; i < rsc.m; i++ {
-			copy(shards[i][off:], buf.Next(merkle.SegmentSize))
-		}
-		for i := range subshards {
-			subshards[i] = shards[i][off:][:merkle.SegmentSize]
-		}
-		if err := rsc.enc.Encode(subshards); err != nil {
-			panic(err)
-		}
+	if err := rsc.enc.EncodeMulti(shards, merkle.SegmentSize); err != nil {
+		panic(err)
 	}
 }
 

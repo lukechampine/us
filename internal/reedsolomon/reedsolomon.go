@@ -203,6 +203,31 @@ func (r *ReedSolomon) Encode(shards [][]byte) error {
 	return nil
 }
 
+// EncodeMulti encodes parity shards in blocks of subsize bytes.
+func (r *ReedSolomon) EncodeMulti(shards [][]byte, subsize int) error {
+	if len(shards) != r.Shards {
+		return ErrTooFewShards
+	}
+	if err := checkShards(shards, false); err != nil {
+		return err
+	}
+	inputs, outputs := shards[:r.DataShards], shards[r.DataShards:]
+	for i := 0; i < len(shards[0]); i += subsize {
+		for c := 0; c < r.DataShards; c++ {
+			in := inputs[c][i:][:subsize]
+			for iRow := 0; iRow < r.ParityShards; iRow++ {
+				out := outputs[iRow][i:][:subsize]
+				if c == 0 {
+					galMulSlice(r.parity[iRow][0], in, out, r.o.useSSSE3, r.o.useAVX2)
+				} else {
+					galMulSliceXor(r.parity[iRow][c], in, out, r.o.useSSSE3, r.o.useAVX2)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // ErrInvalidInput is returned if invalid input parameter of Update.
 var ErrInvalidInput = errors.New("invalid input")
 
@@ -801,6 +826,35 @@ func (r *ReedSolomon) Split(data []byte) ([][]byte, error) {
 	}
 
 	return dst, nil
+}
+
+// SplitMulti splits data into blocks of shards, where each block has subsize
+// bytes. The shards must have sufficient capacity to hold the sharded data.
+func (r *ReedSolomon) SplitMulti(data []byte, shards [][]byte, subsize int) error {
+	chunkSize := r.DataShards * subsize
+	numChunks := len(data) / chunkSize
+	if len(data)%chunkSize != 0 {
+		numChunks++
+	}
+
+	// extend shards to proper len
+	shardSize := numChunks * subsize
+	for i := range shards {
+		if cap(shards[i]) < shardSize {
+			return errors.New("each shard must have capacity of at least len(data)/m")
+		}
+		shards[i] = shards[i][:shardSize]
+	}
+
+	// copy data into first DataShards shards, subsize bytes at a time
+	buf := bytes.NewBuffer(data)
+	for off := 0; buf.Len() > 0; off += subsize {
+		for i := 0; i < r.DataShards; i++ {
+			copy(shards[i][off:], buf.Next(subsize))
+		}
+	}
+
+	return nil
 }
 
 // ErrReconstructRequired is returned if too few data shards are intact and a
