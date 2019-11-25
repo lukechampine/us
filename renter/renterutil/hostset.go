@@ -15,13 +15,13 @@ var errNoHost = errors.New("no record of that host")
 
 // A HostError associates an error with a given host.
 type HostError struct {
-	HostPublicKey hostdb.HostPublicKey
-	Err           error
+	HostKey hostdb.HostPublicKey
+	Err     error
 }
 
 // Error implements error.
 func (he HostError) Error() string {
-	return he.HostPublicKey.ShortKey() + ": " + he.Err.Error()
+	return he.HostKey.ShortKey() + ": " + he.Err.Error()
 }
 
 // A HostErrorSet is a collection of errors from various hosts.
