@@ -172,6 +172,8 @@ func BenchmarkReedSolomon(b *testing.B) {
 	}
 
 	b.Run("encode-10-of-40", benchEncode(10, 40))
+	b.Run("encode-20-of-10", benchEncode(20, 40))
+	b.Run("encode-30-of-10", benchEncode(30, 40))
 	b.Run("encode-10-of-10", benchEncode(10, 10))
 
 	b.Run("recover-1-of-10-of-40", benchRecover(10, 40, 1))

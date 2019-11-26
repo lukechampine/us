@@ -60,7 +60,7 @@ func (rsc rsCode) Encode(data []byte, shards [][]byte) {
 	if err := rsc.enc.SplitMulti(data, shards, merkle.SegmentSize); err != nil {
 		panic(err)
 	}
-	if err := rsc.enc.EncodeMulti(shards, merkle.SegmentSize); err != nil {
+	if err := rsc.enc.Encode(shards); err != nil {
 		panic(err)
 	}
 }

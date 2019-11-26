@@ -199,129 +199,12 @@ func (r *ReedSolomon) Encode(shards [][]byte) error {
 	output := shards[r.DataShards:]
 
 	// Do the coding.
-	r.codeSomeShards(r.parity, shards[0:r.DataShards], output, r.ParityShards, len(shards[0]))
-	return nil
-}
-
-// EncodeMulti encodes parity shards in blocks of subsize bytes.
-func (r *ReedSolomon) EncodeMulti(shards [][]byte, subsize int) error {
-	if len(shards) != r.Shards {
-		return ErrTooFewShards
-	}
-	if err := checkShards(shards, false); err != nil {
-		return err
-	}
-	inputs, outputs := shards[:r.DataShards], shards[r.DataShards:]
-	for i := 0; i < len(shards[0]); i += subsize {
-		for c := 0; c < r.DataShards; c++ {
-			in := inputs[c][i:][:subsize]
-			for iRow := 0; iRow < r.ParityShards; iRow++ {
-				out := outputs[iRow][i:][:subsize]
-				if c == 0 {
-					galMulSlice(r.parity[iRow][0], in, out, r.o.useSSSE3, r.o.useAVX2)
-				} else {
-					galMulSliceXor(r.parity[iRow][c], in, out, r.o.useSSSE3, r.o.useAVX2)
-				}
-			}
-		}
-	}
+	r.codeSomeShardsP(r.parity, shards[0:r.DataShards], output, r.ParityShards, len(shards[0]))
 	return nil
 }
 
 // ErrInvalidInput is returned if invalid input parameter of Update.
 var ErrInvalidInput = errors.New("invalid input")
-
-func (r *ReedSolomon) Update(shards [][]byte, newDatashards [][]byte) error {
-	if len(shards) != r.Shards {
-		return ErrTooFewShards
-	}
-
-	if len(newDatashards) != r.DataShards {
-		return ErrTooFewShards
-	}
-
-	err := checkShards(shards, true)
-	if err != nil {
-		return err
-	}
-
-	err = checkShards(newDatashards, true)
-	if err != nil {
-		return err
-	}
-
-	for i := range newDatashards {
-		if newDatashards[i] != nil && shards[i] == nil {
-			return ErrInvalidInput
-		}
-	}
-	for _, p := range shards[r.DataShards:] {
-		if p == nil {
-			return ErrInvalidInput
-		}
-	}
-
-	shardSize := shardSize(shards)
-
-	// Get the slice of output buffers.
-	output := shards[r.DataShards:]
-
-	// Do the coding.
-	r.updateParityShards(r.parity, shards[0:r.DataShards], newDatashards[0:r.DataShards], output, r.ParityShards, shardSize)
-	return nil
-}
-
-func (r *ReedSolomon) updateParityShards(matrixRows, oldinputs, newinputs, outputs [][]byte, outputCount, byteCount int) {
-	if r.o.maxGoroutines > 1 && byteCount > r.o.minSplitSize {
-		r.updateParityShardsP(matrixRows, oldinputs, newinputs, outputs, outputCount, byteCount)
-		return
-	}
-
-	for c := 0; c < r.DataShards; c++ {
-		in := newinputs[c]
-		if in == nil {
-			continue
-		}
-		oldin := oldinputs[c]
-		// oldinputs data will be change
-		sliceXor(in, oldin, r.o.useSSE2)
-		for iRow := 0; iRow < outputCount; iRow++ {
-			galMulSliceXor(matrixRows[iRow][c], oldin, outputs[iRow], r.o.useSSSE3, r.o.useAVX2)
-		}
-	}
-}
-
-func (r *ReedSolomon) updateParityShardsP(matrixRows, oldinputs, newinputs, outputs [][]byte, outputCount, byteCount int) {
-	var wg sync.WaitGroup
-	do := byteCount / r.o.maxGoroutines
-	if do < r.o.minSplitSize {
-		do = r.o.minSplitSize
-	}
-	start := 0
-	for start < byteCount {
-		if start+do > byteCount {
-			do = byteCount - start
-		}
-		wg.Add(1)
-		go func(start, stop int) {
-			for c := 0; c < r.DataShards; c++ {
-				in := newinputs[c]
-				if in == nil {
-					continue
-				}
-				oldin := oldinputs[c]
-				// oldinputs data will be change
-				sliceXor(in[start:stop], oldin[start:stop], r.o.useSSE2)
-				for iRow := 0; iRow < outputCount; iRow++ {
-					galMulSliceXor(matrixRows[iRow][c], oldin[start:stop], outputs[iRow][start:stop], r.o.useSSSE3, r.o.useAVX2)
-				}
-			}
-			wg.Done()
-		}(start, start+do)
-		start += do
-	}
-	wg.Wait()
-}
 
 // Verify returns true if the parity shards contain the right data.
 // The data is the same format as Encode. No data is modified.
@@ -361,6 +244,40 @@ func (r *ReedSolomon) codeSomeShards(matrixRows, inputs, outputs [][]byte, outpu
 			}
 		}
 	}
+}
+
+// Perform the same as codeSomeShards, but split the workload into
+// several goroutines.
+func (r *ReedSolomon) codeSomeShardsP(matrixRows, inputs, outputs [][]byte, outputCount, byteCount int) {
+	var wg sync.WaitGroup
+	do := byteCount / r.o.maxGoroutines
+	if do < r.o.minSplitSize {
+		do = r.o.minSplitSize
+	}
+	// Make sizes divisible by 32
+	do = (do + 31) & (^31)
+	start := 0
+	for start < byteCount {
+		if start+do > byteCount {
+			do = byteCount - start
+		}
+		wg.Add(1)
+		go func(start, stop int) {
+			for c := 0; c < r.DataShards; c++ {
+				in := inputs[c][start:stop]
+				for iRow := 0; iRow < outputCount; iRow++ {
+					if c == 0 {
+						galMulSlice(matrixRows[iRow][c], in, outputs[iRow][start:stop], r.o.useSSSE3, r.o.useAVX2)
+					} else {
+						galMulSliceXor(matrixRows[iRow][c], in, outputs[iRow][start:stop], r.o.useSSSE3, r.o.useAVX2)
+					}
+				}
+			}
+			wg.Done()
+		}(start, start+do)
+		start += do
+	}
+	wg.Wait()
 }
 
 // checkSomeShards is mostly the same as codeSomeShards,
