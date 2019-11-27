@@ -432,15 +432,15 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	for ; reqIndex < f.m.MinShards; reqIndex++ {
 		go func() {
 			for shardIndex := range reqChan {
-				h := hosts[shardIndex]
-				if err := unavailableHosts[h.HostKey()]; err != nil {
-					respChan <- &HostError{h.HostKey(), err}
+				hostKey := f.m.Hosts[shardIndex]
+				if err := unavailableHosts[hostKey]; err != nil {
+					respChan <- &HostError{hostKey, err}
 					continue
 				}
 				var buf bytes.Buffer
-				err := h.CopySection(&buf, offset, length)
+				err := hosts[shardIndex].CopySection(&buf, offset, length)
 				if err != nil {
-					respChan <- &HostError{h.HostKey(), err}
+					respChan <- &HostError{hostKey, err}
 					continue
 				}
 				shards[shardIndex] = buf.Bytes()
