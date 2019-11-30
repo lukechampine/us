@@ -94,8 +94,11 @@ func (f *openMetaFile) commitPendingSlices(sectors map[hostdb.HostPublicKey]*ren
 		return
 	}
 
-	newShards := make([][]renter.SectorSlice, len(f.m.Shards))
 	oldShards := f.m.Shards
+	newShards := make([][]renter.SectorSlice, len(oldShards))
+	for i := range newShards {
+		newShards[i] = oldShards[i][:0]
+	}
 	pending := f.pendingChunks
 	var offset int64
 	for len(oldShards[0])+len(pending) > 0 {
