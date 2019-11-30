@@ -429,6 +429,9 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	// download shards in parallel, stopping when we have any f.m.MinShards of
 	// them
 	shards := make([][]byte, len(hosts))
+	for i := range shards {
+		shards[i] = make([]byte, 0, length)
+	}
 	reqChan := make(chan int, f.m.MinShards)
 	respChan := make(chan *HostError, f.m.MinShards)
 	var reqIndex int
@@ -440,8 +443,8 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 					respChan <- &HostError{hostKey, err}
 					continue
 				}
-				var buf bytes.Buffer
-				err := hosts[shardIndex].CopySection(&buf, offset, length)
+				buf := bytes.NewBuffer(shards[shardIndex])
+				err := hosts[shardIndex].CopySection(buf, offset, length)
 				if err != nil {
 					respChan <- &HostError{hostKey, err}
 					continue
@@ -472,11 +475,6 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	}
 
 	// recover data shards directly into p
-	for i := range shards {
-		if len(shards[i]) == 0 {
-			shards[i] = make([]byte, 0, length)
-		}
-	}
 	skip := int(off % f.m.MinChunkSize())
 	err := f.m.ErasureCode().Recover(bytes.NewBuffer(p[:0]), shards, skip, len(p))
 	if err != nil {
