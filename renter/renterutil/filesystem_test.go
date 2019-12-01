@@ -69,8 +69,8 @@ func createHostWithContract(tb testing.TB) (*ghost.Host, renter.Contract) {
 	return host, contract
 }
 
-func createTestingFS(tb testing.TB) (*PseudoFS, func()) {
-	hosts := make([]*ghost.Host, 3)
+func createTestingFS(tb testing.TB, numHosts int) (*PseudoFS, func()) {
+	hosts := make([]*ghost.Host, numHosts)
 	hkr := make(testHKR)
 	hs := NewHostSet(hkr, 0)
 	for i := range hosts {
@@ -133,7 +133,7 @@ func TestFileSystemBasic(t *testing.T) {
 		t.SkipNow()
 	}
 
-	fs, cleanup := createTestingFS(t)
+	fs, cleanup := createTestingFS(t, 3)
 	defer cleanup()
 
 	// create metafile
@@ -285,7 +285,7 @@ func TestFileSystemUploadDir(t *testing.T) {
 		t.SkipNow()
 	}
 
-	fs, cleanup := createTestingFS(t)
+	fs, cleanup := createTestingFS(t, 3)
 	defer cleanup()
 
 	check := func(err error) {
@@ -356,7 +356,7 @@ func TestFileSystemLargeWrite(t *testing.T) {
 		t.SkipNow()
 	}
 
-	fs, cleanup := createTestingFS(t)
+	fs, cleanup := createTestingFS(t, 3)
 	defer cleanup()
 
 	// create metafile
@@ -402,7 +402,7 @@ func TestFileSystemTruncate(t *testing.T) {
 		t.SkipNow()
 	}
 
-	fs, cleanup := createTestingFS(t)
+	fs, cleanup := createTestingFS(t, 3)
 	defer cleanup()
 
 	// create metafile
@@ -459,7 +459,7 @@ func TestFileSystemRandomAccess(t *testing.T) {
 		t.SkipNow()
 	}
 
-	fs, cleanup := createTestingFS(t)
+	fs, cleanup := createTestingFS(t, 3)
 	defer cleanup()
 
 	// create metafile
@@ -526,5 +526,67 @@ func TestFileSystemRandomAccess(t *testing.T) {
 	}
 	if err := fs.Remove(pf.Name()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func BenchmarkFileSystemWrite(b *testing.B) {
+	const numHosts = 4
+	const minShards = 4
+	fs, cleanup := createTestingFS(b, numHosts)
+	defer cleanup()
+
+	// create metafile
+	metaName := b.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
+	pf, err := fs.Create(metaName, minShards)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer pf.Close()
+
+	buf := make([]byte, renterhost.SectorSize*minShards)
+	b.SetBytes(int64(len(buf)/minShards) * numHosts)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := pf.Write(buf); err != nil {
+			b.Fatal(err)
+		}
+		// don't want to benchmark our cache
+		if err := pf.Sync(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFileSystemRead(b *testing.B) {
+	fs, cleanup := createTestingFS(b, 4)
+	defer cleanup()
+
+	// create metafile
+	metaName := b.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
+	pf, err := fs.Create(metaName, 4)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer pf.Close()
+	// upload initial data
+	buf := make([]byte, renterhost.SectorSize)
+	if _, err := pf.Write(buf); err != nil {
+		b.Fatal(err)
+	}
+	if err := pf.Sync(); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	b.SetBytes(int64(len(buf)))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := pf.Seek(0, io.SeekStart); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := pf.Read(buf); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
