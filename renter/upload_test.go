@@ -1,30 +1,44 @@
 package renter
 
 import (
+	"sync"
 	"testing"
+	"unsafe"
 
+	"lukechampine.com/frand"
+	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
 )
 
 func BenchmarkIdealUpload(b *testing.B) {
-	rsc := NewRSCode(10, 40)
-	shards := make([][]byte, 40)
+	const numHosts = 40
+	const minShards = 30
+	rsc := NewRSCode(minShards, numHosts)
+	data := frand.Bytes(renterhost.SectorSize * minShards)
+	shards := make([][]byte, numHosts)
 	for i := range shards {
 		shards[i] = make([]byte, renterhost.SectorSize)
 	}
-	key := (&MetaFile{}).MasterKey
+	var key KeySeed
 	nonce := make([]byte, 24)
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	b.SetBytes(int64(len(shards[0])) * 10)
+	b.SetBytes(int64(renterhost.SectorSize * numHosts))
 	for i := 0; i < b.N; i++ {
-		for j := 10; j < len(shards); j++ {
+		for j := range shards {
 			shards[j] = shards[j][:0]
 		}
-		rsc.Reconstruct(shards)
+		rsc.Encode(data, shards)
+		var wg sync.WaitGroup
+		wg.Add(len(shards))
 		for i := range shards {
-			key.XORKeyStream(shards[i], nonce, 0)
+			go func(i int) {
+				key.XORKeyStream(shards[i], nonce, 0)
+				merkle.SectorRoot((*[renterhost.SectorSize]byte)(unsafe.Pointer(&shards[i][0])))
+				wg.Done()
+			}(i)
 		}
+		wg.Wait()
 	}
 }
