@@ -29,6 +29,12 @@ func (sb *SectorBuilder) Reset() {
 	sb.slices = nil // can't reuse capacity; Slices shares memory
 }
 
+// SliceForAppend returns a slice into the unused capacity of the sector. This
+// makes it possible to Append to the sector without allocating new memory.
+func (sb *SectorBuilder) SliceForAppend() []byte {
+	return sb.sector[sb.sectorLen:]
+}
+
 // Append appends data to the sector being constructed, encrypting it with the
 // given key and chunkIndex. The data must be a multiple of merkle.SegmentSize.
 //

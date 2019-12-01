@@ -192,10 +192,8 @@ func (fs *PseudoFS) fillSectors(f *openMetaFile) error {
 		return nil
 	}
 
+	// prepare shards
 	shards := make([][]byte, len(f.m.Hosts))
-	for i := range shards {
-		shards[i] = make([]byte, 0, renterhost.SectorSize)
-	}
 
 	// extend each pendingWrite with its unaligned segments, merging writes as appropriate
 	for i := 0; i < len(f.pendingWrites); i++ {
@@ -233,6 +231,9 @@ func (fs *PseudoFS) fillSectors(f *openMetaFile) error {
 			i++
 		}
 		// encode the chunk
+		for i, hostKey := range f.m.Hosts {
+			shards[i] = fs.sectors[hostKey].SliceForAppend()
+		}
 		f.m.ErasureCode().Encode(pw.data, shards)
 
 		// append the shards to each sector
