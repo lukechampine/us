@@ -129,7 +129,7 @@ func (h *Host) rpcFormContract(s *session) error {
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 1,
-		Signature:      h.secretKey.SignHash(crypto.HashObject(initRevision)),
+		Signature:      h.secretKey.SignHash(renterhost.HashRevision(initRevision)),
 	}
 
 	var renterSigs renterhost.RPCFormContractSignatures
@@ -366,7 +366,7 @@ func (h *Host) rpcWrite(s *session) error {
 	}
 	s.contract.rev = newRevision
 	s.contract.sigs[0].Signature = sigResponse.Signature
-	s.contract.sigs[1].Signature = h.secretKey.SignHash(crypto.HashObject(newRevision))
+	copy(s.contract.sigs[1].Signature, h.secretKey.SignHash(renterhost.HashRevision(newRevision)))
 
 	resp := &renterhost.RPCWriteResponse{
 		Signature: s.contract.sigs[1].Signature,
@@ -442,7 +442,7 @@ func (h *Host) rpcSectorRoots(s *session) error {
 	// commit the new revision
 	s.contract.rev = newRevision
 	s.contract.sigs[0].Signature = req.Signature
-	s.contract.sigs[1].Signature = h.secretKey.SignHash(crypto.HashObject(newRevision))
+	s.contract.sigs[1].Signature = h.secretKey.SignHash(renterhost.HashRevision(newRevision))
 
 	// send the response
 	resp := &renterhost.RPCSectorRootsResponse{
@@ -547,7 +547,7 @@ func (h *Host) rpcRead(s *session) error {
 	_ = totalCost // TODO: validate revision
 
 	// commit the new revision
-	hostSig := h.secretKey.SignHash(crypto.HashObject(newRevision))
+	hostSig := h.secretKey.SignHash(renterhost.HashRevision(newRevision))
 	s.contract.rev = newRevision
 	s.contract.sigs[0].Signature = req.Signature
 	s.contract.sigs[1].Signature = hostSig
