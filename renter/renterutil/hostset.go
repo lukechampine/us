@@ -3,6 +3,7 @@ package renterutil
 import (
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -91,22 +92,24 @@ func (set *HostSet) release(host hostdb.HostPublicKey) {
 func (set *HostSet) AddHost(c renter.Contract) {
 	lh := new(lockedHost)
 	// lazy connection function
+	var lastSeen time.Time
 	lh.reconnect = func() error {
-		// even if we have a non-nil Session, the host may have disconnected due
-		// to a timeout. To detect this, send a "ping" message (actually a
-		// Settings request). If it fails, attempt to reconnect.
-		//
-		// NOTE: this is somewhat inefficient; it means we incur an extra
-		// roundtrip every time we call acquire. The alternative would be for
-		// the caller to handle the reconnection logic after calling whatever
-		// RPC it wants to call. That way, we only do extra work if the host has
-		// actually disconnected. The downside is that we need to wrap every RPC
-		// call in reconnection logic (and there's no way to do so generically).
-		// So this feels like a reasonable compromise; if the overhead becomes a
-		// problem, we can make things uglier and faster later.
+		defer func() { lastSeen = time.Now() }()
 		if lh.s != nil {
+			// if it hasn't been long since the last reconnect, assume the
+			// connection is still open
+			if time.Since(lastSeen) < 2*time.Minute {
+				return nil
+			}
+			// otherwise, the connection *might* still be open; test by sending
+			// a "ping" RPC
+			//
+			// NOTE: this is somewhat inefficient; it means we might incur an
+			// extra roundtrip when we don't need to. Better would be for the
+			// caller to handle the reconnection logic after calling whatever
+			// RPC it wants to call; that way, we only do extra work if the host
+			// has actually disconnected. But that feels too burdensome.
 			if _, err := lh.s.Settings(); err == nil {
-				// connection is still open; we're done
 				return nil
 			}
 			// connection timed out, or some other error occurred; close our
