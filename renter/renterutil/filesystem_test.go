@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/pkg/errors"
@@ -61,10 +60,6 @@ func createHostWithContract(tb testing.TB) (*ghost.Host, renter.Contract) {
 		HostKey:   rev.HostKey(),
 		ID:        rev.ID(),
 		RenterKey: key,
-	}
-	contractPath := filepath.Join(os.TempDir(), tb.Name()+"-"+hex.EncodeToString(frand.Bytes(6))+".contract")
-	if err := renter.SaveContract(contract, contractPath); err != nil {
-		tb.Fatal(err)
 	}
 	return host, contract
 }
