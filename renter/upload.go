@@ -2,6 +2,7 @@ package renter
 
 import (
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
@@ -39,11 +40,10 @@ func (sb *SectorBuilder) SliceForAppend() []byte {
 // given key and chunkIndex. The data must be a multiple of merkle.SegmentSize.
 //
 // Each call to Append creates a SectorSlice that is accessible via the Slices
-// method. This SectorSlice reflects the length and checksum of the original
-// (unencrypted) data.
+// method, using the index returned by Append.
 //
 // Append panics if len(data) > sb.Remaining().
-func (sb *SectorBuilder) Append(data []byte, key KeySeed) {
+func (sb *SectorBuilder) Append(data []byte, key KeySeed) int {
 	if len(data)%merkle.SegmentSize != 0 {
 		// NOTE: instead of panicking, we could silently pad the data; however,
 		// this is very dangerous, because the SectorSlice will not record the
@@ -74,6 +74,7 @@ func (sb *SectorBuilder) Append(data []byte, key KeySeed) {
 		Nonce:        nonce,
 	})
 	sb.sectorLen += len(sectorSlice)
+	return len(sb.slices) - 1
 }
 
 // Len returns the number of bytes appended to the sector.
@@ -88,8 +89,7 @@ func (sb *SectorBuilder) Remaining() int {
 }
 
 // Finish fills the remaining capacity of the sector with random bytes and
-// returns it. The MerkleRoot fields of the SectorSlices tracked by sb are
-// also set to the Merkle root of the resulting sector.
+// returns it.
 //
 // After calling Finish, Len returns renterhost.SectorSize and Remaining
 // returns 0; no more data can be appended until Reset is called.
@@ -100,20 +100,19 @@ func (sb *SectorBuilder) Remaining() int {
 func (sb *SectorBuilder) Finish() *[renterhost.SectorSize]byte {
 	frand.Read(sb.sector[sb.sectorLen:])
 	sb.sectorLen = len(sb.sector)
-
-	// set Merkle root of each slice
-	sectorRoot := merkle.SectorRoot(&sb.sector)
-	for i := range sb.slices {
-		sb.slices[i].MerkleRoot = sectorRoot
-	}
-
 	return &sb.sector
+}
+
+// SetMerkleRoot sets the MerkleRoot fields of the SectorSlices tracked by sb.
+func (sb *SectorBuilder) SetMerkleRoot(root crypto.Hash) {
+	for i := range sb.slices {
+		sb.slices[i].MerkleRoot = root
+	}
 }
 
 // Slices returns the SectorSlices present in the sector. One SectorSlice is
 // returned for each call to Append since the last call to Reset. Slices
-// should only be called after calling Finish; otherwise the MerkleRoot field
-// of each SectorSlice will be unset.
+// should only be called after calling SetMerkleRoot.
 func (sb *SectorBuilder) Slices() []SectorSlice {
 	return sb.slices
 }

@@ -242,8 +242,7 @@ func (fs *PseudoFS) fillSectors(f *openMetaFile) error {
 			length: int64(len(shards[0])),
 		}
 		for shardIndex, hostKey := range f.m.Hosts {
-			fs.sectors[hostKey].Append(shards[shardIndex], f.m.MasterKey)
-			pc.sliceIndex = len(fs.sectors[hostKey].Slices()) - 1
+			pc.sliceIndex = fs.sectors[hostKey].Append(shards[shardIndex], f.m.MasterKey)
 			// TODO: may need a separate sliceIndex for each sector...
 		}
 		f.pendingChunks = append(f.pendingChunks, pc)
@@ -291,6 +290,7 @@ func (fs *PseudoFS) flushSectors() error {
 				errChan <- &HostError{hostKey, err}
 				return
 			}
+			sb.SetMerkleRoot(merkle.SectorRoot(sector))
 			errChan <- nil
 		}(hostKey, sb)
 	}
