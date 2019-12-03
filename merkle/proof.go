@@ -3,6 +3,7 @@ package merkle
 import (
 	"math/bits"
 	"sort"
+	"unsafe"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/us/renterhost"
@@ -277,9 +278,29 @@ func BuildDiffProof(actions []renterhost.RPCWriteAction, sectorRoots []crypto.Ha
 	return
 }
 
+func unsafeSectorRoot(sector []byte) crypto.Hash {
+	if len(sector) != renterhost.SectorSize {
+		panic("invalid sector length")
+	}
+	return SectorRoot((*[renterhost.SectorSize]byte)(unsafe.Pointer(&sector[0])))
+}
+
+// PrecomputeAppendRoots computes the SectorRoots of any Append actions in the
+// provided slice.
+func PrecomputeAppendRoots(actions []renterhost.RPCWriteAction) []crypto.Hash {
+	roots := make([]crypto.Hash, 0, len(actions))
+	for _, action := range actions {
+		if action.Type == renterhost.RPCWriteActionAppend {
+			roots = append(roots, unsafeSectorRoot(action.Data))
+		}
+	}
+	return roots
+}
+
 // VerifyDiffProof verifies a proof produced by BuildDiffProof. ActionUpdate is
-// not supported.
-func VerifyDiffProof(actions []renterhost.RPCWriteAction, numLeaves int, treeHashes, leafHashes []crypto.Hash, oldRoot, newRoot crypto.Hash) bool {
+// not supported. If appendRoots is non-nil, it is assumed to contain the
+// precomputed SectorRoots of all Append actions.
+func VerifyDiffProof(actions []renterhost.RPCWriteAction, numLeaves int, treeHashes, leafHashes []crypto.Hash, oldRoot, newRoot crypto.Hash, appendRoots []crypto.Hash) bool {
 	verifyMulti := func(proofIndices []int, treeHashes, leafHashes []crypto.Hash, numLeaves int, root crypto.Hash) bool {
 		var s stack
 		insertRange := func(i, j int) {
@@ -313,7 +334,7 @@ func VerifyDiffProof(actions []renterhost.RPCWriteAction, numLeaves int, treeHas
 	}
 
 	// then modify the proof according to actions and construct the newRoot
-	newLeafHashes := modifyLeaves(leafHashes, actions, numLeaves)
+	newLeafHashes := modifyLeaves(leafHashes, actions, numLeaves, appendRoots)
 	newProofIndices := modifyProofRanges(proofIndices, actions, numLeaves)
 	numLeaves += len(newLeafHashes) - len(leafHashes)
 
@@ -345,7 +366,7 @@ func modifyProofRanges(proofIndices []int, actions []renterhost.RPCWriteAction, 
 
 // modifyLeaves modifies the leaf hashes of a Merkle diff proof to verify a
 // post-modification Merkle diff proof for the specified actions.
-func modifyLeaves(leafHashes []crypto.Hash, actions []renterhost.RPCWriteAction, numSectors int) []crypto.Hash {
+func modifyLeaves(leafHashes []crypto.Hash, actions []renterhost.RPCWriteAction, numSectors int, appendRoots []crypto.Hash) []crypto.Hash {
 	// determine which sector index corresponds to each leaf hash
 	var indices []int
 	for _, action := range actions {
@@ -374,12 +395,16 @@ func modifyLeaves(leafHashes []crypto.Hash, actions []renterhost.RPCWriteAction,
 		indexMap[index] = len(indexMap)
 	}
 	leafHashes = append([]crypto.Hash(nil), leafHashes...)
-	var sector [renterhost.SectorSize]byte
 	for _, action := range actions {
 		switch action.Type {
 		case renterhost.RPCWriteActionAppend:
-			copy(sector[:], action.Data)
-			leafHashes = append(leafHashes, SectorRoot(&sector))
+			var root crypto.Hash
+			if len(appendRoots) > 0 {
+				root, appendRoots = appendRoots[0], appendRoots[1:]
+			} else {
+				root = unsafeSectorRoot(action.Data)
+			}
+			leafHashes = append(leafHashes, root)
 
 		case renterhost.RPCWriteActionTrim:
 			leafHashes = leafHashes[:len(leafHashes)-int(action.A)]

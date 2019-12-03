@@ -577,7 +577,7 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 		SectorRoot(&newSector13),
 	})
 
-	if !VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot) {
+	if !VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot, nil) {
 		t.Error("failed to verify proof produced by BuildDiffProof")
 	}
 }
@@ -632,7 +632,7 @@ func TestBuildVerifyDiffProofAppend(t *testing.T) {
 		SectorRoot(&newSector16),
 	})
 
-	if !VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot) {
+	if !VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot, nil) {
 		t.Error("failed to verify proof produced by BuildDiffProof")
 	}
 }
@@ -685,7 +685,7 @@ func TestBuildVerifyDiffProofTrim(t *testing.T) {
 		sectorRoots[12],
 	})
 
-	if !VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot) {
+	if !VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot, nil) {
 		t.Error("failed to verify proof produced by BuildDiffProof")
 	}
 }
@@ -740,13 +740,51 @@ func BenchmarkVerifyDiffProof(b *testing.B) {
 		sectorRoots[8], sectorRoots[9], sectorRoots[7], SectorRoot(&newSector12),
 		SectorRoot(&newSector13),
 	})
-	if !VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot) {
+	if !VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot, nil) {
 		b.Fatal("failed to verify proof produced by BuildDiffProof")
 	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot)
+		VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot, nil)
+	}
+}
+
+func BenchmarkVerifyPrecomputedDiffProof(b *testing.B) {
+	const numSectors = 12
+	sectorRoots := make([]crypto.Hash, numSectors)
+	for i := range sectorRoots {
+		frand.Read(sectorRoots[i][:])
+	}
+	var newSector12, newSector13 [renterhost.SectorSize]byte
+	frand.Read(newSector12[:])
+	frand.Read(newSector13[:])
+	actions := []renterhost.RPCWriteAction{
+		{Type: renterhost.RPCWriteActionSwap, A: 6, B: 11},
+		{Type: renterhost.RPCWriteActionTrim, A: 1},
+		{Type: renterhost.RPCWriteActionSwap, A: 7, B: 10},
+		{Type: renterhost.RPCWriteActionAppend, Data: newSector12[:]},
+		{Type: renterhost.RPCWriteActionAppend, Data: newSector13[:]},
+	}
+	treeHashes, leafHashes := BuildDiffProof(actions, sectorRoots)
+
+	oldRoot := MetaRoot(sectorRoots)
+	newRoot := MetaRoot([]crypto.Hash{
+		sectorRoots[0], sectorRoots[1], sectorRoots[2], sectorRoots[3],
+		sectorRoots[4], sectorRoots[5], sectorRoots[11], sectorRoots[10],
+		sectorRoots[8], sectorRoots[9], sectorRoots[7], SectorRoot(&newSector12),
+		SectorRoot(&newSector13),
+	})
+	if !VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot, nil) {
+		b.Fatal("failed to verify proof produced by BuildDiffProof")
+	}
+
+	appendRoots := PrecomputeAppendRoots(actions)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot, appendRoots)
 	}
 }
