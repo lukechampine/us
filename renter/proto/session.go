@@ -35,9 +35,10 @@ func wrapResponseErr(err error, readCtx, rejectCtx string) error {
 
 // A Session is an ongoing exchange of RPCs via the renter-host protocol.
 type Session struct {
-	sess    *renterhost.Session
-	conn    net.Conn
-	readBuf [renterhost.SectorSize]byte
+	sess        *renterhost.Session
+	conn        net.Conn
+	readBuf     [renterhost.SectorSize]byte
+	appendRoots []crypto.Hash
 
 	host   hostdb.ScannedHost
 	height types.BlockHeight
@@ -344,6 +345,13 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	// calculate new revision outputs
 	newValid, newMissed := updateRevisionOutputs(&rev, price, collateral)
 
+	// compute appended roots in parallel with I/O
+	precompChan := make(chan struct{})
+	go func() {
+		s.appendRoots = merkle.PrecomputeAppendRoots(actions)
+		close(precompChan)
+	}()
+
 	// send request
 	s.extendDeadline(60*time.Second + time.Duration(uploadBandwidth)/time.Microsecond)
 	req := &renterhost.RPCWriteRequest{
@@ -370,7 +378,8 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	// if all sectors were deleted) because the proof algorithm chokes on this
 	// edge case. Need to investigate what proofs siad hosts are producing (are
 	// they valid?) and reconcile those with our Merkle algorithms.
-	if newFileSize > 0 && !merkle.VerifyDiffProof(actions, s.rev.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot) {
+	<-precompChan
+	if newFileSize > 0 && !merkle.VerifyDiffProof(actions, s.rev.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot, s.appendRoots) {
 		err := ErrInvalidMerkleProof
 		s.sess.WriteResponse(nil, err)
 		return err
@@ -396,6 +405,19 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	s.rev.Signatures[1].Signature = hostSig.Signature
 
 	return nil
+}
+
+// Append calls the Write RPC with a single action, appending the provided
+// sector. It returns the Merkle root of the sector.
+func (s *Session) Append(sector *[renterhost.SectorSize]byte) (crypto.Hash, error) {
+	err := s.Write([]renterhost.RPCWriteAction{{
+		Type: renterhost.RPCWriteActionAppend,
+		Data: sector[:],
+	}})
+	if err != nil {
+		return crypto.Hash{}, err
+	}
+	return s.appendRoots[0], nil
 }
 
 // Close gracefully terminates the session and closes the underlying connection.

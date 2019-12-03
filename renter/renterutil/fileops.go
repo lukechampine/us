@@ -281,16 +281,13 @@ func (fs *PseudoFS) flushSectors() error {
 				errChan <- &HostError{hostKey, err}
 				return
 			}
-			err = h.Write([]renterhost.RPCWriteAction{{
-				Type: renterhost.RPCWriteActionAppend,
-				Data: sector[:],
-			}})
+			root, err := h.Append(sector)
 			fs.hosts.release(hostKey)
 			if err != nil {
 				errChan <- &HostError{hostKey, err}
 				return
 			}
-			sb.SetMerkleRoot(merkle.SectorRoot(sector))
+			sb.SetMerkleRoot(root)
 			errChan <- nil
 		}(hostKey, sb)
 	}
