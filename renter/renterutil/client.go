@@ -1,18 +1,11 @@
 package renterutil
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"io/ioutil"
 	"math"
-	"net/http"
-	"strconv"
 	"strings"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/node/api/client"
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -151,104 +144,6 @@ func NewSiadClient(addr, password string) *SiadClient {
 	c := client.New(addr)
 	c.Password = password
 	return &SiadClient{siad: c}
-}
-
-// A SHARDClient communicates with a SHARD server. It satisfies the
-// renter.HostKeyResolver interface.
-type SHARDClient struct {
-	addr string
-}
-
-func (c *SHARDClient) req(route string, fn func(*http.Response) error) error {
-	resp, err := http.Get(fmt.Sprintf("%v%v", c.addr, route))
-	if err != nil {
-		return err
-	}
-	defer io.Copy(ioutil.Discard, resp.Body)
-	defer resp.Body.Close()
-
-	if !(200 <= resp.StatusCode && resp.StatusCode <= 299) {
-		errString, _ := ioutil.ReadAll(resp.Body)
-		return errors.New(string(errString))
-	}
-	return fn(resp)
-}
-
-// ChainHeight returns the current block height.
-func (c *SHARDClient) ChainHeight() (types.BlockHeight, error) {
-	var height types.BlockHeight
-	err := c.req("/height", func(resp *http.Response) error {
-		return json.NewDecoder(resp.Body).Decode(&height)
-	})
-	return height, err
-}
-
-// Synced returns whether the SHARD server is synced.
-func (c *SHARDClient) Synced() (bool, error) {
-	var synced bool
-	err := c.req("/synced", func(resp *http.Response) error {
-		data, err := ioutil.ReadAll(io.LimitReader(resp.Body, 8))
-		if err != nil {
-			return err
-		}
-		synced, err = strconv.ParseBool(string(data))
-		return err
-	})
-	return synced, err
-}
-
-// ResolveHostKey resolves a host public key to that host's most recently
-// announced network address.
-func (c *SHARDClient) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAddress, error) {
-	var ha modules.HostAnnouncement
-	var sig crypto.Signature
-	err := c.req("/host/"+string(pubkey), func(resp *http.Response) error {
-		if resp.StatusCode == http.StatusNoContent {
-			return ErrNoHostAnnouncement
-		} else if resp.StatusCode == http.StatusGone {
-			return errors.New("ambiguous pubkey")
-		}
-		return encoding.NewDecoder(resp.Body, encoding.DefaultAllocLimit).DecodeAll(&ha, &sig)
-	})
-	if err != nil {
-		return "", err
-	}
-
-	// verify signature
-	if !pubkey.VerifyHash(crypto.HashObject(ha), sig[:]) {
-		return "", errors.New("invalid signature")
-	}
-
-	return ha.NetAddress, err
-}
-
-// LookupHost returns the host public key matching the specified prefix.
-func (c *SHARDClient) LookupHost(prefix string) (hostdb.HostPublicKey, error) {
-	if !strings.HasPrefix(prefix, "ed25519:") {
-		prefix = "ed25519:" + prefix
-	}
-	var ha modules.HostAnnouncement
-	var sig crypto.Signature
-	err := c.req("/host/"+prefix, func(resp *http.Response) error {
-		if resp.ContentLength == 0 {
-			return ErrNoHostAnnouncement
-		}
-		return encoding.NewDecoder(resp.Body, encoding.DefaultAllocLimit).DecodeAll(&ha, &sig)
-	})
-	if err != nil {
-		return "", err
-	}
-	return hostdb.HostKeyFromSiaPublicKey(ha.PublicKey), nil
-}
-
-// NewSHARDClient returns a SHARDClient that communicates with the SHARD
-// server at the specified address.
-func NewSHARDClient(addr string) *SHARDClient {
-	// use https by default
-	if !strings.HasPrefix(addr, "https://") && !strings.HasPrefix(addr, "http://") {
-		addr = "https://" + addr
-	}
-	return &SHARDClient{addr: addr}
 }
 
 // WalrusClient wraps the walrus API. It satisfies the proto.Wallet and
@@ -407,5 +302,4 @@ var (
 		proto.Wallet
 		proto.TransactionPool
 	} = (*WalrusClient)(nil)
-	_ renter.HostKeyResolver = (*SHARDClient)(nil)
 )
