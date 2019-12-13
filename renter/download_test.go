@@ -3,7 +3,9 @@ package renter
 import (
 	"bytes"
 	"io/ioutil"
+	"sync"
 	"testing"
+	"unsafe"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/frand"
@@ -68,7 +70,7 @@ func BenchmarkIdealDownload(b *testing.B) {
 	shards := make([][]byte, 40)
 	for i := range shards {
 		shards[i] = make([]byte, renterhost.SectorSize)
-		if i%2 == 0 {
+		if i%2 == 1 {
 			shards[i] = shards[i][:0]
 		}
 	}
@@ -79,9 +81,16 @@ func BenchmarkIdealDownload(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(renterhost.SectorSize * 10)
 	for i := 0; i < b.N; i++ {
+		var wg sync.WaitGroup
+		wg.Add(len(shards[:10]))
 		for i := range shards[:10] {
-			key.XORKeyStream(shards[i*2], nonce, 0)
+			go func(i int) {
+				key.XORKeyStream(shards[i*2], nonce, 0)
+				merkle.SectorRoot((*[renterhost.SectorSize]byte)(unsafe.Pointer(&shards[i*2][0])))
+				wg.Done()
+			}(i)
 		}
+		wg.Wait()
 		rsc.Recover(ioutil.Discard, shards, 0, renterhost.SectorSize*10)
 	}
 }
