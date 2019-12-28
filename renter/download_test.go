@@ -81,6 +81,11 @@ func BenchmarkIdealDownload(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(renterhost.SectorSize * 10)
 	for i := 0; i < b.N; i++ {
+		for i := range shards {
+			if i%2 == 1 {
+				shards[i] = shards[i][:0]
+			}
+		}
 		var wg sync.WaitGroup
 		wg.Add(len(shards[:10]))
 		for i := range shards[:10] {
