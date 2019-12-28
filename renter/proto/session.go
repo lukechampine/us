@@ -351,6 +351,8 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 		s.appendRoots = merkle.PrecomputeAppendRoots(actions)
 		close(precompChan)
 	}()
+	// ensure that the goroutine has exited before we return
+	defer func() { <-precompChan }()
 
 	// send request
 	s.extendDeadline(60*time.Second + time.Duration(uploadBandwidth)/time.Microsecond)
