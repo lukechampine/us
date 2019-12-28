@@ -453,17 +453,19 @@ func (r *ReedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
 
 	shardSize := shardSize(shards)
 
-	// Quick check: are all of the shards present?  If so, there's
-	// nothing to do.
+	// Quick check: are all of the shards present (or, if dataOnly, all of the
+	// data shards)? If so, there's nothing to do.
 	numberPresent := 0
+	dataPresent := 0
 	for i := 0; i < r.Shards; i++ {
 		if len(shards[i]) != 0 {
 			numberPresent++
+			if i < r.DataShards {
+				dataPresent++
+			}
 		}
 	}
-	if numberPresent == r.Shards {
-		// Cool.  All of the shards data data.  We don't
-		// need to do anything.
+	if numberPresent == r.Shards || (dataOnly && dataPresent == r.DataShards) {
 		return nil
 	}
 
