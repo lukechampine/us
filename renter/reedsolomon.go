@@ -66,12 +66,12 @@ func (rsc rsCode) Encode(data []byte, shards [][]byte) {
 }
 
 func (rsc rsCode) Reconstruct(shards [][]byte) error {
-	return rsc.enc.ReconstructMulti(shards, merkle.SegmentSize)
+	return rsc.enc.Reconstruct(shards)
 }
 
 func (rsc rsCode) Recover(w io.Writer, shards [][]byte, off, n int) error {
 	checkShards(shards, rsc.n)
-	if err := rsc.enc.ReconstructDataMulti(shards, merkle.SegmentSize); err != nil {
+	if err := rsc.enc.ReconstructData(shards); err != nil {
 		return err
 	}
 	return rsc.enc.JoinMulti(w, shards, merkle.SegmentSize, off, n)

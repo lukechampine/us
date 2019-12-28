@@ -550,7 +550,7 @@ func (r *ReedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
 			outputCount++
 		}
 	}
-	r.codeSomeShards(matrixRows, subShards, outputs[:outputCount], outputCount, shardSize)
+	r.codeSomeShardsP(matrixRows, subShards, outputs[:outputCount], outputCount, shardSize)
 
 	if dataOnly {
 		// Exit out early if we are only interested in the data shards
@@ -576,128 +576,7 @@ func (r *ReedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
 			outputCount++
 		}
 	}
-	r.codeSomeShards(matrixRows, shards[:r.DataShards], outputs[:outputCount], outputCount, shardSize)
-	return nil
-}
-
-// ReconstructMulti reconstructs shards in blocks of subsize bytes.
-func (r *ReedSolomon) ReconstructMulti(shards [][]byte, subsize int) error {
-	return r.reconstructMulti(shards, subsize, false)
-}
-
-// ReconstructDataMulti reconstructs data shards in blocks of subsize bytes.
-func (r *ReedSolomon) ReconstructDataMulti(shards [][]byte, subsize int) error {
-	return r.reconstructMulti(shards, subsize, true)
-}
-
-func (r *ReedSolomon) reconstructMulti(shards [][]byte, subsize int, dataOnly bool) error {
-	if len(shards) != r.Shards {
-		return ErrTooFewShards
-	}
-	err := checkShards(shards, true)
-	if err != nil {
-		return err
-	}
-	shardSize := shardSize(shards)
-
-	numberPresent := 0
-	for i := range shards {
-		if len(shards[i]) != 0 {
-			numberPresent++
-		}
-	}
-	if numberPresent < r.DataShards {
-		return ErrTooFewShards
-	} else if numberPresent == r.Shards {
-		return nil // nothing to do
-	}
-
-	// construct decode matrix
-	invalidIndices := make([]int, 0, 256)
-	for i := range shards {
-		if len(shards[i]) == 0 {
-			invalidIndices = append(invalidIndices, i)
-		}
-	}
-	dataDecodeMatrix := r.tree.GetInvertedMatrix(invalidIndices)
-	if dataDecodeMatrix == nil {
-		subMatrix, _ := newMatrix(r.DataShards, r.DataShards)
-		subMatrixRow := 0
-		for validIndex := 0; validIndex < r.Shards && subMatrixRow < r.DataShards; validIndex++ {
-			if len(shards[validIndex]) != 0 {
-				for c := 0; c < r.DataShards; c++ {
-					subMatrix[subMatrixRow][c] = r.m[validIndex][c]
-				}
-				subMatrixRow++
-			}
-		}
-		dataDecodeMatrix, err = subMatrix.Invert()
-		if err != nil {
-			return err
-		}
-		err = r.tree.InsertInvertedMatrix(invalidIndices, dataDecodeMatrix, r.Shards)
-		if err != nil {
-			return err
-		}
-	}
-
-	// initialize input/output buffers
-	subShards := make([][]byte, 256)[:r.DataShards]
-	outputs := make([][]byte, 256)[:r.ParityShards]
-	subShardMapping := make([]int, 0, 256)
-	dataMapping := make([]int, 0, 256)
-	parityMapping := make([]int, 0, 256)
-	for i := range shards {
-		if len(shards[i]) == 0 {
-			if i < r.DataShards {
-				dataMapping = append(dataMapping, i)
-			} else {
-				parityMapping = append(parityMapping, i)
-			}
-		} else if len(subShardMapping) < r.DataShards {
-			subShardMapping = append(subShardMapping, i)
-		}
-	}
-	dataMatrixRows := make([][]byte, 256)[:r.ParityShards]
-	for i, j := range dataMapping {
-		dataMatrixRows[i] = dataDecodeMatrix[j]
-	}
-	parityMatrixRows := make([][]byte, 256)[:r.ParityShards]
-	for i, j := range parityMapping {
-		parityMatrixRows[i] = r.parity[j-r.DataShards]
-	}
-
-	for i := range shards {
-		shards[i] = shards[i][:shardSize]
-	}
-	multishards := make([][]byte, 256)[:r.Shards]
-	for off := 0; off < shardSize; off += subsize {
-		// advance to next block
-		for i := range shards {
-			multishards[i] = shards[i][off:][:subsize]
-		}
-
-		// collect present shards
-		for i, j := range subShardMapping {
-			subShards[i] = multishards[j]
-		}
-
-		// compute missing data shards
-		for i, j := range dataMapping {
-			outputs[i] = multishards[j]
-		}
-		r.codeSomeShards(dataMatrixRows, subShards, outputs[:len(dataMapping)], len(dataMapping), 0)
-
-		if dataOnly {
-			continue
-		}
-
-		// compute missing parity shards
-		for i, j := range parityMapping {
-			outputs[i] = multishards[j]
-		}
-		r.codeSomeShards(parityMatrixRows, multishards[:r.DataShards], outputs[:len(parityMapping)], len(parityMapping), 0)
-	}
+	r.codeSomeShardsP(matrixRows, shards[:r.DataShards], outputs[:outputCount], outputCount, shardSize)
 	return nil
 }
 
