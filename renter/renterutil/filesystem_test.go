@@ -265,6 +265,12 @@ func TestFileSystemBasic(t *testing.T) {
 	} else if n != 500 {
 		t.Fatalf("expected to read 500 bytes, got %v", n)
 	}
+	// ReadAtP should behave the same as ReadAt
+	if n, err := pf.ReadAtP(p, stat.Size()-500); err != io.EOF {
+		t.Fatalf("expected io.EOF, got %v", err)
+	} else if n != 500 {
+		t.Fatalf("expected to read 500 bytes, got %v", n)
+	}
 
 	// remove file
 	if err := pf.Close(); err != nil {
@@ -559,7 +565,7 @@ func BenchmarkFileSystemRead(b *testing.B) {
 
 	// create metafile
 	metaName := b.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
-	pf, err := fs.Create(metaName, 4)
+	pf, err := fs.Create(metaName, 2)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -581,6 +587,37 @@ func BenchmarkFileSystemRead(b *testing.B) {
 			b.Fatal(err)
 		}
 		if _, err := pf.Read(buf); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFileSystemReadAtP(b *testing.B) {
+	fs, cleanup := createTestingFS(b, 4)
+	defer cleanup()
+
+	// create metafile
+	metaName := b.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
+	pf, err := fs.Create(metaName, 2)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer pf.Close()
+	// upload initial data
+	buf := make([]byte, renterhost.SectorSize)
+	if _, err := pf.Write(buf); err != nil {
+		b.Fatal(err)
+	}
+	if err := pf.Sync(); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	b.SetBytes(int64(len(buf)))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err := pf.ReadAtP(buf, 0)
+		if err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -1,6 +1,8 @@
 package renterutil
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -451,6 +453,58 @@ func (pf PseudoFile) ReadAt(p []byte, off int64) (int, error) {
 		return 0, ErrDirectory
 	}
 	return pf.fs.fileReadAt(f, p, off)
+}
+
+// ReadAtP is a helper method that makes multiple concurrent ReadAt calls, with
+// each call filling part of p. This may increase throughput depending on the
+// file's redundancy. For example, if the file is stored at 2x redundancy, then
+// in ideal circumstances, ReadAtP will be 2x faster than the equivalent ReadAt
+// call.
+//
+// ReadAtP returns the first non-nil error returned by a ReadAt call. The
+// contents of p are undefined if an error other than io.EOF is returned.
+func (pf PseudoFile) ReadAtP(p []byte, off int64) (int, error) {
+	if !pf.readable() {
+		return 0, ErrNotReadable
+	}
+	pf.fs.mu.RLock()
+	defer pf.fs.mu.RUnlock()
+	f, d := pf.lookupFD()
+	if f == nil && d == nil {
+		return 0, ErrInvalidFileDescriptor
+	} else if d != nil {
+		return 0, ErrDirectory
+	}
+
+	sets := len(f.m.Hosts) / f.m.MinShards
+	if len(f.m.Hosts)%f.m.MinShards != 0 {
+		sets++
+	}
+	splitSize := len(p) / sets
+
+	type readResult struct {
+		n   int
+		err error
+	}
+	resChan := make(chan readResult)
+	for buf := bytes.NewBuffer(p); buf.Len() > 0; {
+		suboff := off + int64(len(p)-buf.Len())
+		subp := buf.Next(splitSize)
+		go func() {
+			n, err := pf.ReadAt(subp, suboff)
+			resChan <- readResult{n, err}
+		}()
+	}
+	var n int
+	var err error
+	for i := 0; i < sets; i++ {
+		r := <-resChan
+		n += r.n
+		if r.err != nil && (err == nil || err == io.EOF) {
+			err = r.err
+		}
+	}
+	return n, err
 }
 
 // WriteAt implements io.WriterAt.
