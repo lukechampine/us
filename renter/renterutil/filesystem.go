@@ -39,7 +39,7 @@ type PseudoFS struct {
 	hosts          *HostSet
 	sectors        map[hostdb.HostPublicKey]*renter.SectorBuilder
 	lastCommitTime time.Time
-	mu             sync.Mutex
+	mu             sync.RWMutex
 }
 
 func (fs *PseudoFS) path(name string) string {
@@ -280,7 +280,7 @@ func (fs *PseudoFS) Rename(oldname, newname string) error {
 
 // Stat returns the FileInfo structure describing file.
 func (fs *PseudoFS) Stat(name string) (os.FileInfo, error) {
-	fs.mu.Lock()
+	fs.mu.RLock()
 	for _, f := range fs.files {
 		if f.name == name {
 			info := pseudoFileInfo{name: f.name, m: f.m.MetaIndex}
@@ -289,7 +289,7 @@ func (fs *PseudoFS) Stat(name string) (os.FileInfo, error) {
 			return info, nil
 		}
 	}
-	fs.mu.Unlock()
+	fs.mu.RUnlock()
 
 	path := fs.path(name)
 	if isDir(path) {
@@ -409,6 +409,7 @@ func (pf PseudoFile) Read(p []byte) (int, error) {
 	if !pf.readable() {
 		return 0, ErrNotReadable
 	}
+	// we need a write lock here because Read modifies the seek offset
 	pf.fs.mu.Lock()
 	defer pf.fs.mu.Unlock()
 	f, d := pf.lookupFD()
@@ -441,8 +442,8 @@ func (pf PseudoFile) ReadAt(p []byte, off int64) (int, error) {
 	if !pf.readable() {
 		return 0, ErrNotReadable
 	}
-	pf.fs.mu.Lock()
-	defer pf.fs.mu.Unlock()
+	pf.fs.mu.RLock()
+	defer pf.fs.mu.RUnlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
 		return 0, ErrInvalidFileDescriptor
@@ -504,8 +505,8 @@ func (pf PseudoFile) Name() string { return pf.name }
 // before the end of the directory, Readdir returns the FileInfo read until that
 // point and a non-nil error.
 func (pf PseudoFile) Readdir(n int) ([]os.FileInfo, error) {
-	pf.fs.mu.Lock()
-	defer pf.fs.mu.Unlock()
+	pf.fs.mu.RLock()
+	defer pf.fs.mu.RUnlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
 		return nil, ErrInvalidFileDescriptor
@@ -555,8 +556,8 @@ outer:
 // error before the end of the directory, Readdirnames returns the names read
 // until that point and a non-nil error.
 func (pf PseudoFile) Readdirnames(n int) ([]string, error) {
-	pf.fs.mu.Lock()
-	defer pf.fs.mu.Unlock()
+	pf.fs.mu.RLock()
+	defer pf.fs.mu.RUnlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
 		return nil, ErrInvalidFileDescriptor
@@ -578,8 +579,8 @@ func (pf PseudoFile) Readdirnames(n int) ([]string, error) {
 // Stat returns the FileInfo structure describing the file. If the file is a
 // metafile, its renter.MetaIndex will be available via the Sys method.
 func (pf PseudoFile) Stat() (os.FileInfo, error) {
-	pf.fs.mu.Lock()
-	defer pf.fs.mu.Unlock()
+	pf.fs.mu.RLock()
+	defer pf.fs.mu.RUnlock()
 	f, d := pf.lookupFD()
 	if f == nil && d == nil {
 		return nil, ErrInvalidFileDescriptor
