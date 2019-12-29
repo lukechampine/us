@@ -13,6 +13,7 @@ import (
 )
 
 var errNoHost = errors.New("no record of that host")
+var errHostAcquired = errors.New("host is currently acquired")
 
 // A HostError associates an error with a given host.
 type HostError struct {
@@ -39,10 +40,39 @@ func (hes HostErrorSet) Error() string {
 	return "\n" + strings.Join(strs, "\n")
 }
 
+type tryLock struct {
+	c    chan struct{}
+	once sync.Once
+}
+
+func (mu *tryLock) init() {
+	mu.c = make(chan struct{}, 1)
+	mu.c <- struct{}{}
+}
+
+func (mu *tryLock) Lock() {
+	mu.once.Do(mu.init)
+	<-mu.c
+}
+
+func (mu *tryLock) TryLock() bool {
+	mu.once.Do(mu.init)
+	select {
+	case <-mu.c:
+		return true
+	default:
+		return false
+	}
+}
+
+func (mu *tryLock) Unlock() {
+	mu.c <- struct{}{}
+}
+
 type lockedHost struct {
 	reconnect func() error
 	s         *proto.Session
-	mu        sync.Mutex
+	mu        tryLock
 }
 
 // A HostSet is a collection of renter-host protocol sessions.
@@ -77,6 +107,21 @@ func (set *HostSet) acquire(host hostdb.HostPublicKey) (*proto.Session, error) {
 		return nil, errNoHost
 	}
 	ls.mu.Lock()
+	if err := ls.reconnect(); err != nil {
+		ls.mu.Unlock()
+		return nil, err
+	}
+	return ls.s, nil
+}
+
+func (set *HostSet) tryAcquire(host hostdb.HostPublicKey) (*proto.Session, error) {
+	ls, ok := set.sessions[host]
+	if !ok {
+		return nil, errNoHost
+	}
+	if !ls.mu.TryLock() {
+		return nil, errHostAcquired
+	}
 	if err := ls.reconnect(); err != nil {
 		ls.mu.Unlock()
 		return nil, err

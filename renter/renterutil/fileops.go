@@ -405,36 +405,48 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	for i := range shards {
 		shards[i] = make([]byte, 0, length)
 	}
-	reqChan := make(chan int, f.m.MinShards)
+	type req struct {
+		shardIndex int
+		block      bool // wait to acquire
+	}
+	reqChan := make(chan req, f.m.MinShards)
 	respChan := make(chan *HostError, f.m.MinShards)
-	shardOrder := frand.Perm(len(f.m.Hosts))
-	for len(shardOrder) > len(f.m.Hosts)-f.m.MinShards {
+	reqQueue := make([]req, len(f.m.Hosts))
+	// initialize queue in random order
+	for i, shardIndex := range frand.Perm(len(reqQueue)) {
+		reqQueue[i] = req{shardIndex, false}
+	}
+	for len(reqQueue) > len(f.m.Hosts)-f.m.MinShards {
 		go func() {
-			for shardIndex := range reqChan {
-				hostKey := f.m.Hosts[shardIndex]
-				s, err := fs.hosts.acquire(hostKey)
+			for req := range reqChan {
+				hostKey := f.m.Hosts[req.shardIndex]
+				s, err := fs.hosts.tryAcquire(hostKey)
+				if err == errHostAcquired && req.block {
+					s, err = fs.hosts.acquire(hostKey)
+				}
 				if err != nil {
 					respChan <- &HostError{hostKey, err}
 					continue
 				}
-				buf := bytes.NewBuffer(shards[shardIndex])
+				buf := bytes.NewBuffer(shards[req.shardIndex])
 				err = (&renter.ShardDownloader{
 					Downloader: s,
 					Key:        f.m.MasterKey,
-					Slices:     f.m.Shards[shardIndex],
+					Slices:     f.m.Shards[req.shardIndex],
 				}).CopySection(buf, offset, length)
 				fs.hosts.release(hostKey)
 				if err != nil {
 					respChan <- &HostError{hostKey, err}
 					continue
 				}
-				shards[shardIndex] = buf.Bytes()
+				shards[req.shardIndex] = buf.Bytes()
 				respChan <- nil
 			}
 		}()
-		reqChan <- shardOrder[0]
-		shardOrder = shardOrder[1:]
+		reqChan <- reqQueue[0]
+		reqQueue = reqQueue[1:]
 	}
+
 	var goodShards int
 	var errs HostErrorSet
 	for goodShards < f.m.MinShards && goodShards+len(errs) < len(f.m.Hosts) {
@@ -442,10 +454,21 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 		if err == nil {
 			goodShards++
 		} else {
-			errs = append(errs, err)
-			if len(shardOrder) > 0 {
-				reqChan <- shardOrder[0]
-				shardOrder = shardOrder[1:]
+			if err.Err == errHostAcquired {
+				// host could not be acquired without blocking; add it to the back
+				// of the queue, but next time, block
+				reqQueue = append(reqQueue, req{
+					shardIndex: f.m.HostIndex(err.HostKey),
+					block:      true,
+				})
+			} else {
+				// downloading from this host failed; don't try it again
+				errs = append(errs, err)
+			}
+			// try the next host in the queue
+			if len(reqQueue) > 0 {
+				reqChan <- reqQueue[0]
+				reqQueue = reqQueue[1:]
 			}
 		}
 	}
