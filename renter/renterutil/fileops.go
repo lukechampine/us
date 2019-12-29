@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
@@ -391,32 +392,6 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 		}
 	}
 
-	hosts := make([]*renter.ShardDownloader, len(f.m.Hosts))
-	unavailableHosts := make(map[hostdb.HostPublicKey]error)
-	var nHosts int
-	for i, hostKey := range f.m.Hosts {
-		s, err := fs.hosts.acquire(hostKey)
-		if err != nil {
-			unavailableHosts[hostKey] = err
-			continue
-		}
-		defer fs.hosts.release(hostKey)
-		hosts[i] = &renter.ShardDownloader{
-			Downloader: s,
-			Key:        f.m.MasterKey,
-			Slices:     f.m.Shards[i],
-		}
-		nHosts++
-	}
-	if nHosts < f.m.MinShards {
-		errs := make(HostErrorSet, 0, len(unavailableHosts))
-		for hostKey, err := range unavailableHosts {
-			errs = append(errs, &HostError{hostKey, err})
-		}
-		return 0, errors.Wrapf(errs, "insufficient hosts to recover file data (needed %v, got %v)",
-			f.m.MinShards, nHosts)
-	}
-
 	start := (off / f.m.MinChunkSize()) * merkle.SegmentSize
 	end := ((off + int64(len(p))) / f.m.MinChunkSize()) * merkle.SegmentSize
 	if (off+int64(len(p)))%f.m.MinChunkSize() != 0 {
@@ -426,23 +401,29 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 
 	// download shards in parallel, stopping when we have any f.m.MinShards of
 	// them
-	shards := make([][]byte, len(hosts))
+	shards := make([][]byte, len(f.m.Hosts))
 	for i := range shards {
 		shards[i] = make([]byte, 0, length)
 	}
 	reqChan := make(chan int, f.m.MinShards)
 	respChan := make(chan *HostError, f.m.MinShards)
-	var reqIndex int
-	for ; reqIndex < f.m.MinShards; reqIndex++ {
+	shardOrder := frand.Perm(len(f.m.Hosts))
+	for len(shardOrder) > len(f.m.Hosts)-f.m.MinShards {
 		go func() {
 			for shardIndex := range reqChan {
 				hostKey := f.m.Hosts[shardIndex]
-				if err := unavailableHosts[hostKey]; err != nil {
+				s, err := fs.hosts.acquire(hostKey)
+				if err != nil {
 					respChan <- &HostError{hostKey, err}
 					continue
 				}
 				buf := bytes.NewBuffer(shards[shardIndex])
-				err := hosts[shardIndex].CopySection(buf, offset, length)
+				err = (&renter.ShardDownloader{
+					Downloader: s,
+					Key:        f.m.MasterKey,
+					Slices:     f.m.Shards[shardIndex],
+				}).CopySection(buf, offset, length)
+				fs.hosts.release(hostKey)
 				if err != nil {
 					respChan <- &HostError{hostKey, err}
 					continue
@@ -451,25 +432,27 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 				respChan <- nil
 			}
 		}()
-		reqChan <- reqIndex
+		reqChan <- shardOrder[0]
+		shardOrder = shardOrder[1:]
 	}
 	var goodShards int
 	var errs HostErrorSet
-	for goodShards < f.m.MinShards && goodShards+len(errs) < len(hosts) {
+	for goodShards < f.m.MinShards && goodShards+len(errs) < len(f.m.Hosts) {
 		err := <-respChan
 		if err == nil {
 			goodShards++
 		} else {
 			errs = append(errs, err)
-			if reqIndex < len(hosts) {
-				reqChan <- reqIndex
-				reqIndex++
+			if len(shardOrder) > 0 {
+				reqChan <- shardOrder[0]
+				shardOrder = shardOrder[1:]
 			}
 		}
 	}
 	close(reqChan)
 	if goodShards < f.m.MinShards {
-		return 0, errors.Wrap(errs, "too many hosts did not supply their shard")
+		return 0, errors.Wrapf(errs, "too many hosts did not supply their shard (needed %v, got %v)",
+			f.m.MinShards, goodShards)
 	}
 
 	// recover data shards directly into p
