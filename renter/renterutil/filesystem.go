@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 )
@@ -214,12 +215,12 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 	}, nil
 }
 
-// Remove removes the named file or (empty) directory.
+// Remove removes the named file or (empty) directory. It does NOT delete the
+// file data on the host; use (PseudoFS).GC and (PseudoFile).Free for that.
 func (fs *PseudoFS) Remove(name string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
-	// if the file is in fs.files and is closed, delete it
-	// TODO: delete remote sectors?
+	// remove the file from fs.files if it is closed
 	for fd, f := range fs.files {
 		if f.name == name && f.closed {
 			delete(fs.files, fd)
@@ -239,7 +240,6 @@ func (fs *PseudoFS) Remove(name string) error {
 // RemoveAll returns nil (no error).
 func (fs *PseudoFS) RemoveAll(path string) error {
 	// if the remove affects closed files in fs.files, delete them
-	// TODO: delete remote sectors?
 	for fd, f := range fs.files {
 		if strings.HasPrefix(f.name, path) && f.closed {
 			delete(fs.files, fd)
@@ -251,6 +251,111 @@ func (fs *PseudoFS) RemoveAll(path string) error {
 		path += metafileExt
 	}
 	return os.RemoveAll(path)
+}
+
+// GC deletes unused data from the filesystem's host set. Any data not
+// referenced by the files within the filesystem will be deleted. This has
+// important implications for shared files: if you share a metafile and do not
+// retain a local copy of it, then running GC will cause that file's data to be
+// deleted, making it inaccessible.
+//
+// GC complements the (PseudoFile).Free method. Free cannot safely delete
+// non-full sectors, because those sectors may be referenced by other files,
+// e.g. when multiple files are packed into a single sector. GC is guaranteed to
+// delete all unreferenced sectors, but is much slower than Free because it must
+// examine the full filesystem. Free should be called frequently as a "first
+// line of defense," while GC should be called infrequently to remove any
+// sectors missed by Free.
+func (fs *PseudoFS) GC() error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	// Strategy: build a set of all sector roots stored on hosts. Iterate
+	// through all files in the fs, deleting their sector roots from the set.
+	// Any roots that remain in the set are unreferenced and may be deleted.
+
+	// gather the sector roots from each host
+	hostRoots := make(map[hostdb.HostPublicKey]map[crypto.Hash]struct{})
+	for hostKey := range fs.hosts.sessions {
+		err := func() error {
+			h, err := fs.hosts.acquire(hostKey)
+			if err != nil {
+				return err
+			}
+			defer fs.hosts.release(hostKey)
+
+			roots, err := h.SectorRoots(0, h.Revision().NumSectors())
+			if err != nil {
+				return err
+			}
+			rootMap := make(map[crypto.Hash]struct{}, len(roots))
+			for _, r := range roots {
+				rootMap[r] = struct{}{}
+			}
+			hostRoots[hostKey] = rootMap
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
+	}
+
+	// iterate through all files, deleting their sector roots from the set
+	//
+	// NOTE: we only iterate over the metafiles on disk, not the files
+	// in-memory. We don't need to worry about the latter, because their sectors
+	// have not been flushed to hosts yet.
+	err := filepath.Walk(fs.root, func(path string, info os.FileInfo, _ error) error {
+		if info.IsDir() || !strings.HasSuffix(path, ".usa") {
+			return nil
+		}
+		m, err := renter.ReadMetaFile(path)
+		if err != nil {
+			// don't continue if a file couldn't be read; the user needs to be
+			// confident that all files were checked
+			return err
+		}
+		for i, hostKey := range m.Hosts {
+			if roots, ok := hostRoots[hostKey]; ok {
+				for _, ss := range m.Shards[i] {
+					delete(roots, ss.MerkleRoot)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// if there are no unreferenced sectors, we are done
+	done := true
+	for _, roots := range hostRoots {
+		done = done && len(roots) == 0
+	}
+	if done {
+		return nil
+	}
+
+	// delete the remaining sectors
+	for hostKey, rootsMap := range hostRoots {
+		err := func() error {
+			h, err := fs.hosts.acquire(hostKey)
+			if err != nil {
+				return err
+			}
+			defer fs.hosts.release(hostKey)
+			roots := make([]crypto.Hash, 0, len(rootsMap))
+			for root := range rootsMap {
+				roots = append(roots, root)
+			}
+			return h.DeleteSectors(roots)
+		}()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Rename renames (moves) oldpath to newpath. If newpath already exists and is
@@ -679,4 +784,28 @@ func (pf PseudoFile) Truncate(size int64) error {
 		return ErrDirectory
 	}
 	return pf.fs.fileTruncate(f, size)
+}
+
+// Free truncates the file to 0 bytes and deletes file data from the
+// filesystem's host set. Free only deletes sectors that it can prove are
+// exclusively storing the file's data. If multiple files were packed into the
+// same sector, Free will not delete that sector. Similarly, Free cannot safely
+// delete "trailing" sectors at the end of a file. Use (PseudoFS).GC to delete
+// such sectors after calling Remove on all the relevant files.
+//
+// Note that Free also discards any uncommitted Writes, so it may be necessary
+// to call Sync prior to Free.
+func (pf PseudoFile) Free() error {
+	if !pf.writeable() {
+		return ErrNotWriteable
+	}
+	pf.fs.mu.Lock()
+	defer pf.fs.mu.Unlock()
+	f, d := pf.lookupFD()
+	if f == nil && d == nil {
+		return ErrInvalidFileDescriptor
+	} else if d != nil {
+		return ErrDirectory
+	}
+	return pf.fs.fileFree(f)
 }

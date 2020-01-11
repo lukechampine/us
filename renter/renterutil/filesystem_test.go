@@ -530,6 +530,145 @@ func TestFileSystemRandomAccess(t *testing.T) {
 	}
 }
 
+func TestFileSystemDelete(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	fs, cleanup := createTestingFS(t, 2)
+	defer cleanup()
+
+	expectStoredSectors := func(n int) {
+		t.Helper()
+		for hostKey := range fs.hosts.sessions {
+			h, err := fs.hosts.acquire(hostKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer fs.hosts.release(hostKey)
+			if h.Revision().NumSectors() != n {
+				t.Fatalf("expected %v stored sectors, got %v", n, h.Revision().NumSectors())
+			}
+			return
+		}
+		t.Fatal("couldn't connect to any hosts")
+	}
+
+	// create metafile
+	metaName := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
+	pf, err := fs.Create(metaName, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pf.Close()
+
+	// write one full sector and one partial sector
+	if _, err := pf.Write(make([]byte, renterhost.SectorSize+1024)); err != nil {
+		t.Fatal(err)
+	}
+	expectStoredSectors(1)
+
+	// Free the file; the full sector should be deleted, and the uncommitted
+	// partial sector should be discarded
+	if err := pf.Free(); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := pf.Stat(); info.Size() != 0 {
+		t.Fatal("filesize should be 0 after Free")
+	}
+	if n, err := pf.Read(make([]byte, 1)); n != 0 || err != io.EOF {
+		t.Fatal("expected (0, EOF) when Reading after Free")
+	}
+	expectStoredSectors(0)
+
+	// write another full sector and partial sector, but this time, flush the
+	// partial sector
+	if _, err := pf.Write(make([]byte, renterhost.SectorSize+1024)); err != nil {
+		t.Fatal(err)
+	} else if err := pf.Sync(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Free the file; the full sector should be deleted, but not the partial sector.
+	if err := pf.Free(); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := pf.Stat(); info.Size() != 0 {
+		t.Fatal("filesize should be 0 after Free")
+	}
+	if n, err := pf.Read(make([]byte, 1)); n != 0 || err != io.EOF {
+		t.Fatal("expected (0, EOF) when Reading after Free")
+	}
+	expectStoredSectors(1)
+
+	// Close the file and Remove it, then run a GC; the partial sector should be
+	// deleted.
+	if err := pf.Close(); err != nil {
+		t.Fatal(err)
+	} else if err := fs.Remove(pf.Name()); err != nil {
+		t.Fatal(err)
+	} else if err := fs.GC(); err != nil {
+		t.Fatal(err)
+	}
+	expectStoredSectors(0)
+
+	// Upload two small files that share a sector.
+	small1Name := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
+	small1, err := fs.Create(small1Name, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer small1.Close()
+	if _, err := small1.Write([]byte("foo bar baz")); err != nil {
+		t.Fatal(err)
+	}
+	small2Name := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
+	small2, err := fs.Create(small2Name, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer small2.Close()
+	if _, err := small2.Write([]byte("foo bar baz")); err != nil {
+		t.Fatal(err)
+	}
+	if err := small1.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if err := small2.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	expectStoredSectors(1)
+	// calling Free on either file should no-op
+	if err := small1.Free(); err != nil {
+		t.Fatal(err)
+	}
+	if err := small2.Free(); err != nil {
+		t.Fatal(err)
+	}
+	// Remove one of the files and GC; should no-op
+	if err := small1.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.Remove(small1Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.GC(); err != nil {
+		t.Fatal(err)
+	}
+	expectStoredSectors(1)
+	// Remove the other file and GC; should delete the sector
+	if err := small2.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.Remove(small2Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.GC(); err != nil {
+		t.Fatal(err)
+	}
+	expectStoredSectors(0)
+}
+
 func BenchmarkFileSystemWrite(b *testing.B) {
 	const numHosts = 4
 	const minShards = 4

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"gitlab.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
@@ -150,6 +151,9 @@ func (f *openMetaFile) commitPendingSlices(sectors map[hostdb.HostPublicKey]*ren
 				}
 			}
 			offset += numSegments
+
+		default:
+			panic("developer error: cannot make progress")
 		}
 	}
 
@@ -576,6 +580,46 @@ func (fs *PseudoFS) fileTruncate(f *openMetaFile, size int64) error {
 
 	f.m.ModTime = time.Now()
 	return fs.flushSectors() // TODO: avoid this
+}
+
+func (fs *PseudoFS) fileFree(f *openMetaFile) error {
+	// discard pending writes
+	f.pendingWrites = f.pendingWrites[:0]
+	f.pendingChunks = f.pendingChunks[:0]
+
+	// delete from each host
+	//
+	// TODO: parallelize
+	for shardIndex, hostKey := range f.m.Hosts {
+		shard := f.m.Shards[shardIndex]
+		err := func() error {
+			h, err := fs.hosts.acquire(hostKey)
+			if err != nil {
+				return err
+			}
+			defer fs.hosts.release(hostKey)
+			var roots []crypto.Hash
+			for _, ss := range shard {
+				if ss.NumSegments == merkle.SegmentsPerSector {
+					roots = append(roots, ss.MerkleRoot)
+				}
+			}
+			if err := h.DeleteSectors(roots); err != nil {
+				return err
+			}
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
+		// delete the shard
+		f.m.Shards[shardIndex] = nil
+	}
+
+	f.m.Filesize = 0
+	f.offset = 0
+	f.m.ModTime = time.Now()
+	return nil
 }
 
 func (fs *PseudoFS) fileSync(f *openMetaFile) error {
