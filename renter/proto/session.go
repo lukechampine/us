@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/bits"
 	"net"
+	"sort"
 	"time"
 
 	"github.com/pkg/errors"
@@ -420,6 +421,63 @@ func (s *Session) Append(sector *[renterhost.SectorSize]byte) (crypto.Hash, erro
 		return crypto.Hash{}, err
 	}
 	return s.appendRoots[0], nil
+}
+
+// DeleteSectors calls the Write RPC with a set of Swap and Trim actions that
+// delete the specified sectors.
+func (s *Session) DeleteSectors(roots []crypto.Hash) error {
+	// download the full set of SectorRoots
+	allRoots, err := s.SectorRoots(0, s.Revision().NumSectors())
+	if err != nil {
+		return err
+	}
+	rootIndices := make(map[crypto.Hash]int, len(allRoots))
+	for i := range allRoots {
+		rootIndices[allRoots[i]] = i
+	}
+
+	// look up the index of each sector
+	badIndices := make([]int, 0, len(roots))
+	for _, r := range roots {
+		// if a root isn't present, skip it; the caller probably deleted it
+		// previously
+		if index, ok := rootIndices[r]; ok {
+			badIndices = append(badIndices, index)
+			// deleting here ensures that we only add each root index once, i.e.
+			// it guards against duplicates in roots
+			delete(rootIndices, r)
+		}
+	}
+	// sort in descending order so that we can use 'range'
+	sort.Sort(sort.Reverse(sort.IntSlice(badIndices)))
+
+	// iterate backwards from the end of the contract, swapping each "good"
+	// sector with one of the "bad" sectors.
+	var actions []renterhost.RPCWriteAction
+	cIndex := s.Revision().NumSectors() - 1
+	for _, rIndex := range badIndices {
+		if cIndex != rIndex {
+			// swap a "good" sector for a "bad" sector
+			actions = append(actions, renterhost.RPCWriteAction{
+				Type: renterhost.RPCWriteActionSwap,
+				A:    uint64(cIndex),
+				B:    uint64(rIndex),
+			})
+		}
+		cIndex--
+	}
+	// trim all "bad" sectors
+	actions = append(actions, renterhost.RPCWriteAction{
+		Type: renterhost.RPCWriteActionTrim,
+		A:    uint64(len(badIndices)),
+	})
+
+	// request the swap+delete operation
+	//
+	// NOTE: siad hosts will accept up to 20 MiB of data in the request,
+	// which should be sufficient to delete up to 2.5 TiB of sector data
+	// at a time.
+	return s.Write(actions)
 }
 
 // Close gracefully terminates the session and closes the underlying connection.
