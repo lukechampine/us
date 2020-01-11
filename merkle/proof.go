@@ -164,7 +164,9 @@ func VerifyProof(proof []crypto.Hash, segments []byte, start, end int, root cryp
 
 // BuildSectorRangeProof constructs a proof for the sector range [start, end).
 func BuildSectorRangeProof(sectorRoots []crypto.Hash, start, end int) []crypto.Hash {
-	if start < 0 || end > len(sectorRoots) || start > end || start == end {
+	if len(sectorRoots) == 0 {
+		return nil
+	} else if start < 0 || end > len(sectorRoots) || start > end || start == end {
 		panic("BuildSectorRangeProof: illegal proof range")
 	}
 
@@ -183,7 +185,9 @@ func BuildSectorRangeProof(sectorRoots []crypto.Hash, start, end int) []crypto.H
 
 // VerifySectorRangeProof verifies a proof produced by BuildSectorRangeProof.
 func VerifySectorRangeProof(proof []crypto.Hash, rangeRoots []crypto.Hash, start, end, numRoots int, root crypto.Hash) bool {
-	if len(rangeRoots) != end-start {
+	if numRoots == 0 {
+		return len(proof) == 0
+	} else if len(rangeRoots) != end-start {
 		panic("VerifySectorRangeProof: number of sector roots does not match range")
 	} else if start < 0 || end > numRoots || start > end || start == end {
 		panic("VerifySectorRangeProof: illegal proof range")
