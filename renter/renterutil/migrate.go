@@ -1,7 +1,10 @@
 package renterutil
 
 import (
+	"errors"
 	"io"
+	"io/ioutil"
+	"sync"
 	"time"
 
 	"lukechampine.com/us/hostdb"
@@ -78,16 +81,18 @@ func (m *Migrator) AddFile(f *renter.MetaFile, source io.Reader, onFinish func(*
 	for i := range shards {
 		shards[i] = make([]byte, 0, renterhost.SectorSize)
 	}
-
+	remaining := f.Filesize
 	for _, ss := range f.Shards[0] {
 		// read next chunk
-		chunkSize := int(ss.NumSegments*merkle.SegmentSize) * f.MinShards
-		n, err := io.ReadFull(source, chunk[:chunkSize])
-		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-			return err
-		} else if n == 0 {
-			break // done
+		chunkSize := int64(ss.NumSegments*merkle.SegmentSize) * int64(f.MinShards)
+		if chunkSize > remaining {
+			chunkSize = remaining
 		}
+		n, err := io.ReadFull(source, chunk[:chunkSize])
+		if err != nil {
+			return err
+		}
+		remaining -= int64(n)
 		// erasure-encode
 		f.ErasureCode().Encode(chunk[:n], shards)
 		// make room if necessary
@@ -109,21 +114,30 @@ func (m *Migrator) AddFile(f *renter.MetaFile, source io.Reader, onFinish func(*
 		// append to newShards when this sector is flushed (which should be on
 		// the next iteration, unless we've reached the end of the file)
 		m.onFlush = append(m.onFlush, func() error {
-			for i := range newShards {
-				if newHosts[i] != f.Hosts[i] {
-					s := m.shards[newHosts[i]]
-					sliceIndex := sliceIndices[i]
-					newShards[i] = append(newShards[i], s.Slices()[sliceIndex])
+			for i, hostKey := range newHosts {
+				if hostKey == f.Hosts[i] {
+					continue // no migration necessary
 				}
+				s := m.shards[hostKey]
+				sliceIndex := sliceIndices[i]
+				newShards[i] = append(newShards[i], s.Slices()[sliceIndex])
 			}
 			return nil
 		})
 	}
+	// source should be fully consumed at this point; if not, the files were
+	// different (or the stream was a concatenation of multiple files for some
+	// reason, likely developer error)
+	if n, _ := io.CopyN(ioutil.Discard, source, 1); n != 0 {
+		return errors.New("source stream is larger than file being migrated")
+	}
+
 	m.onFlush = append(m.onFlush, func() error {
-		for i := range f.Shards {
-			if newHosts[i] != f.Hosts[i] {
-				f.Shards[i] = newShards[i]
+		for i, hostKey := range newHosts {
+			if hostKey == f.Hosts[i] {
+				continue // no migration necessary
 			}
+			f.Shards[i] = newShards[i]
 		}
 		f.Hosts = newHosts
 		f.ModTime = time.Now()
@@ -135,23 +149,38 @@ func (m *Migrator) AddFile(f *renter.MetaFile, source io.Reader, onFinish func(*
 // Flush flushes any un-uploaded migration data to the new hosts. Flush must be
 // called to guarantee that migration is complete.
 func (m *Migrator) Flush() error {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var errs HostErrorSet
 	for hostKey, s := range m.shards {
 		if s.Len() == 0 {
 			continue
 		}
-		h, err := m.hosts.acquire(hostKey)
-		if err != nil {
-			return err
-		}
-		sector := s.Finish()
-		err = h.Write([]renterhost.RPCWriteAction{{
-			Type: renterhost.RPCWriteActionAppend,
-			Data: sector[:],
-		}})
-		m.hosts.release(hostKey)
-		if err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func(hostKey hostdb.HostPublicKey, s *renter.SectorBuilder) {
+			defer wg.Done()
+			h, err := m.hosts.acquire(hostKey)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, &HostError{hostKey, err})
+				mu.Unlock()
+				return
+			}
+			sector := s.Finish()
+			root, err := h.Append(sector)
+			m.hosts.release(hostKey)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, &HostError{hostKey, err})
+				mu.Unlock()
+				return
+			}
+			s.SetMerkleRoot(root)
+		}(hostKey, s)
+	}
+	wg.Wait()
+	if len(errs) > 0 {
+		return errs
 	}
 
 	for _, fn := range m.onFlush {
