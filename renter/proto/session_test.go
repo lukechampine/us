@@ -9,10 +9,8 @@ import (
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/frand"
 	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/internal/ghost"
-	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
 )
 
@@ -73,14 +71,8 @@ func TestSession(t *testing.T) {
 	defer renter.Close()
 	defer host.Close()
 
-	var sector [renterhost.SectorSize]byte
-	frand.Read(sector[:])
-	sectorRoot := merkle.SectorRoot(&sector)
-
-	err := renter.Write([]renterhost.RPCWriteAction{{
-		Type: renterhost.RPCWriteActionAppend,
-		Data: sector[:],
-	}})
+	sector := [renterhost.SectorSize]byte{0: 1}
+	sectorRoot, err := renter.Append(&sector)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +85,6 @@ func TestSession(t *testing.T) {
 	}
 
 	var sectorBuf bytes.Buffer
-	sectorBuf.Grow(renterhost.SectorSize)
 	err = renter.Read(&sectorBuf, []renterhost.RPCReadRequestSection{{
 		MerkleRoot: sectorRoot,
 		Offset:     0,
@@ -117,17 +108,14 @@ func BenchmarkWrite(b *testing.B) {
 	defer renter.Close()
 	defer host.Close()
 
-	sector := frand.Bytes(renterhost.SectorSize)
+	sector := [renterhost.SectorSize]byte{0: 1}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	b.SetBytes(renterhost.SectorSize)
 
 	for i := 0; i < b.N; i++ {
-		err := renter.Write([]renterhost.RPCWriteAction{{
-			Type: renterhost.RPCWriteActionAppend,
-			Data: sector,
-		}})
+		_, err := renter.Append(&sector)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -139,13 +127,8 @@ func BenchmarkRead(b *testing.B) {
 	defer renter.Close()
 	defer host.Close()
 
-	var sector [renterhost.SectorSize]byte
-	frand.Read(sector[:])
-	sectorRoot := merkle.SectorRoot(&sector)
-	err := renter.Write([]renterhost.RPCWriteAction{{
-		Type: renterhost.RPCWriteActionAppend,
-		Data: sector[:],
-	}})
+	sector := [renterhost.SectorSize]byte{0: 1}
+	sectorRoot, err := renter.Append(&sector)
 	if err != nil {
 		b.Fatal(err)
 	}
