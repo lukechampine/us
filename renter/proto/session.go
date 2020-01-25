@@ -142,6 +142,8 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 	defer wrapErr(&err, "SectorRoots")
 	if offset < 0 || n < 0 || offset+n > s.rev.NumSectors() {
 		return nil, errors.New("requested range is out-of-bounds")
+	} else if n == 0 {
+		return nil, nil
 	}
 
 	// calculate price
@@ -188,6 +190,9 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 // Merkle proofs are always requested.
 func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection) (err error) {
 	defer wrapErr(&err, "Read")
+	if len(sections) == 0 {
+		return nil
+	}
 
 	// calculate price
 	sectorAccesses := make(map[crypto.Hash]struct{})
@@ -286,6 +291,9 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 // always requested.
 func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	defer wrapErr(&err, "Write")
+	if len(actions) == 0 {
+		return nil
+	}
 	rev := s.rev.Revision
 
 	// calculate the new Merkle root set and sectors uploaded/stored
@@ -426,6 +434,9 @@ func (s *Session) Append(sector *[renterhost.SectorSize]byte) (crypto.Hash, erro
 // DeleteSectors calls the Write RPC with a set of Swap and Trim actions that
 // delete the specified sectors.
 func (s *Session) DeleteSectors(roots []crypto.Hash) error {
+	if len(roots) == 0 {
+		return nil
+	}
 	// download the full set of SectorRoots
 	allRoots, err := s.SectorRoots(0, s.Revision().NumSectors())
 	if err != nil {
