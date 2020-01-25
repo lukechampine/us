@@ -190,6 +190,11 @@ func NewMetaFile(mode os.FileMode, size int64, hosts []hostdb.HostPublicKey, min
 // WriteMetaFile creates a gzipped tar archive containing m's index and shards,
 // and writes it to filename. The write is atomic.
 func WriteMetaFile(filename string, m *MetaFile) error {
+	// validate before writing
+	if err := validateShards(m.Shards); err != nil {
+		return errors.Wrap(err, "invalid shards")
+	}
+
 	f, err := os.Create(filename + "_tmp")
 	if err != nil {
 		return errors.Wrap(err, "could not create archive")
@@ -316,6 +321,11 @@ func ReadMetaFile(filename string) (*MetaFile, error) {
 		}
 		m.Shards[i] = shard
 	}
+
+	if err := validateShards(m.Shards); err != nil {
+		return nil, errors.Wrap(err, "invalid shards")
+	}
+
 	return m, nil
 }
 
@@ -435,4 +445,21 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 		}
 	}
 	return index, fullShards, nil
+}
+
+// validateShards checks that a set of shards does not contain any inconsistent
+// chunks.
+func validateShards(shards [][]SectorSlice) error {
+	if len(shards) < 2 {
+		return nil
+	}
+	for chunkIndex, s := range shards[0] {
+		for j := 1; j < len(shards); j++ {
+			s2 := shards[j][chunkIndex]
+			if s.NumSegments != s2.NumSegments {
+				return errors.Errorf("shards %v and %v differ at chunk %v", 0, j, chunkIndex)
+			}
+		}
+	}
+	return nil
 }
