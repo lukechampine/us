@@ -41,6 +41,8 @@ type cryptWriter struct {
 func calcSections(slices []SectorSlice, offset, length int64) ([]renterhost.RPCReadRequestSection, error) {
 	if offset < 0 || length < 0 {
 		return nil, errors.New("offset and length must be positive")
+	} else if len(slices) == 0 || length == 0 {
+		return nil, nil
 	}
 	// seek to offset
 	var n int64
