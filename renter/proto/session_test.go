@@ -55,7 +55,7 @@ func createTestingPair(tb testing.TB) (*Session, *ghost.Host) {
 	}
 
 	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
-	rev, err := s.FormContract(stubWallet{}, stubTpool{}, key, types.ZeroCurrency, 0, 0)
+	rev, _, err := s.FormContract(stubWallet{}, stubTpool{}, key, types.ZeroCurrency, 0, 0)
 	if err != nil {
 		tb.Fatal(err)
 	}

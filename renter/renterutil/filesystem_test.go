@@ -52,7 +52,7 @@ func createHostWithContract(tb testing.TB) (*ghost.Host, renter.Contract) {
 	}
 
 	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
-	rev, err := proto.FormContract(stubWallet{}, stubTpool{}, key, sh, types.ZeroCurrency, 0, 0)
+	rev, _, err := proto.FormContract(stubWallet{}, stubTpool{}, key, sh, types.ZeroCurrency, 0, 0)
 	if err != nil {
 		tb.Fatal(err)
 	}

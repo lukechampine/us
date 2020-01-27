@@ -22,10 +22,10 @@ const (
 
 // FormContract forms a contract with a host. The resulting contract will have
 // renterPayout coins in the renter output.
-func FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
+func FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, []types.Transaction, error) {
 	s, err := NewUnlockedSession(host.NetAddress, host.PublicKey, 0)
 	if err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 	s.host = host
 	defer s.Close()
@@ -34,20 +34,20 @@ func FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, host 
 
 // FormContract forms a contract with a host. The resulting contract will have
 // renterPayout coins in the renter output.
-func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (_ ContractRevision, err error) {
+func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (_ ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "FormContract")
 	if endHeight < startHeight {
-		return ContractRevision{}, errors.New("end height must be greater than start height")
+		return ContractRevision{}, nil, errors.New("end height must be greater than start height")
 	}
 	// get two renter addresses: one for the renter refund output, one for the
 	// change output
 	refundAddr, err := w.NewWalletAddress()
 	if err != nil {
-		return ContractRevision{}, errors.Wrap(err, "could not get an address to use")
+		return ContractRevision{}, nil, errors.Wrap(err, "could not get an address to use")
 	}
 	changeAddr, err := w.NewWalletAddress()
 	if err != nil {
-		return ContractRevision{}, errors.Wrap(err, "could not get an address to use")
+		return ContractRevision{}, nil, errors.Wrap(err, "could not get an address to use")
 	}
 
 	// create unlock conditions
@@ -113,7 +113,7 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	// tax, and a transaction fee.
 	_, maxFee, err := tpool.FeeEstimate()
 	if err != nil {
-		return ContractRevision{}, errors.Wrap(err, "could not estimate transaction fee")
+		return ContractRevision{}, nil, errors.Wrap(err, "could not estimate transaction fee")
 	}
 	fee := maxFee.Mul64(estTxnSize)
 	totalCost := renterPayout.Add(s.host.ContractPrice).Add(types.Tax(startHeight, fc.Payout)).Add(fee)
@@ -125,13 +125,13 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	}
 	toSign, err := fundSiacoins(&txn, totalCost, changeAddr, w)
 	if err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	// include any unconfirmed parent transactions
 	parents, err := w.UnconfirmedParents(txn)
 	if err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	// send request
@@ -141,12 +141,12 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 		RenterKey:    uc.PublicKeys[0],
 	}
 	if err := s.sess.WriteRequest(renterhost.RPCFormContractID, req); err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	var resp renterhost.RPCFormContractAdditions
 	if err := s.sess.ReadResponse(&resp, 65536); err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	// merge host additions with txn
@@ -168,7 +168,7 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
 		s.sess.WriteResponse(nil, errors.New("internal error")) // don't want to reveal too much
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	// calculate signatures added
@@ -209,27 +209,21 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 		RevisionSignature:  renterRevisionSig,
 	}
 	if err := s.sess.WriteResponse(renterSigs, nil); err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	// Read the host signatures.
 	var hostSigs renterhost.RPCFormContractSignatures
 	if err := s.sess.ReadResponse(&hostSigs, 4096); err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 	txn.TransactionSignatures = append(txn.TransactionSignatures, hostSigs.ContractSignatures...)
-
-	// submit contract txn to tpool
 	signedTxnSet := append(resp.Parents, append(parents, txn)...)
-	err = tpool.AcceptTransactionSet(signedTxnSet)
-	if err != nil && err != modules.ErrDuplicateTransactionSet {
-		return ContractRevision{}, errors.Wrap(err, "contract transaction was not accepted")
-	}
 
 	return ContractRevision{
 		Revision:   initRevision,
 		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostSigs.RevisionSignature},
-	}, nil
+	}, signedTxnSet, nil
 }
 
 func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr types.UnlockHash, w Wallet) ([]crypto.Hash, error) {

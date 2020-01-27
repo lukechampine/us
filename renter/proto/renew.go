@@ -5,7 +5,6 @@ import (
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 
 	"lukechampine.com/us/ed25519"
@@ -15,35 +14,35 @@ import (
 
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host.
-func RenewContract(w Wallet, tpool TransactionPool, id types.FileContractID, key ed25519.PrivateKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, error) {
+func RenewContract(w Wallet, tpool TransactionPool, id types.FileContractID, key ed25519.PrivateKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, []types.Transaction, error) {
 	s, err := NewUnlockedSession(host.NetAddress, host.PublicKey, 0)
 	if err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 	s.host = host
 	defer s.Close()
 	if err := s.Lock(id, key); err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 	return s.RenewContract(w, tpool, renterPayout, startHeight, endHeight)
 }
 
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host.
-func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (_ ContractRevision, err error) {
+func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (_ ContractRevision, _ []types.Transaction, err error) {
 	defer wrapErr(&err, "RenewContract")
 	if endHeight < startHeight {
-		return ContractRevision{}, errors.New("end height must be greater than start height")
+		return ContractRevision{}, nil, errors.New("end height must be greater than start height")
 	}
 	// get two renter addresses: one for the renter refund output, one for the
 	// change output
 	refundAddr, err := w.NewWalletAddress()
 	if err != nil {
-		return ContractRevision{}, errors.Wrap(err, "could not get an address to use")
+		return ContractRevision{}, nil, errors.Wrap(err, "could not get an address to use")
 	}
 	changeAddr, err := w.NewWalletAddress()
 	if err != nil {
-		return ContractRevision{}, errors.Wrap(err, "could not get an address to use")
+		return ContractRevision{}, nil, errors.Wrap(err, "could not get an address to use")
 	}
 
 	// estimate collateral
@@ -105,7 +104,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	// tax, and a transaction fee.
 	_, maxFee, err := tpool.FeeEstimate()
 	if err != nil {
-		return ContractRevision{}, errors.Wrap(err, "could not estimate transaction fee")
+		return ContractRevision{}, nil, errors.Wrap(err, "could not estimate transaction fee")
 	}
 	fee := maxFee.Mul64(estTxnSize)
 	totalCost := renterPayout.Add(s.host.ContractPrice).Add(types.Tax(startHeight, fc.Payout)).Add(fee)
@@ -117,13 +116,13 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	}
 	toSign, err := fundSiacoins(&txn, totalCost, changeAddr, w)
 	if err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	// include any unconfirmed parent transactions
 	parents, err := w.UnconfirmedParents(txn)
 	if err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	s.extendDeadline(120 * time.Second)
@@ -132,12 +131,12 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		RenterKey:    s.rev.Revision.UnlockConditions.PublicKeys[0],
 	}
 	if err := s.sess.WriteRequest(renterhost.RPCRenewContractID, req); err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	var resp renterhost.RPCFormContractAdditions
 	if err := s.sess.ReadResponse(&resp, 65536); err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	// merge host additions with txn
@@ -156,7 +155,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
 		s.sess.WriteResponse(nil, err)
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	// calculate signatures added
@@ -197,25 +196,19 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		RevisionSignature:  renterRevisionSig,
 	}
 	if err := s.sess.WriteResponse(renterSigs, nil); err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 
 	// Read the host signatures.
 	var hostSigs renterhost.RPCFormContractSignatures
 	if err := s.sess.ReadResponse(&hostSigs, 4096); err != nil {
-		return ContractRevision{}, err
+		return ContractRevision{}, nil, err
 	}
 	txn.TransactionSignatures = append(txn.TransactionSignatures, hostSigs.ContractSignatures...)
-
-	// submit contract txn to tpool
 	signedTxnSet := append(resp.Parents, append(parents, txn)...)
-	err = tpool.AcceptTransactionSet(signedTxnSet)
-	if err != nil && err != modules.ErrDuplicateTransactionSet {
-		return ContractRevision{}, errors.Wrap(err, "contract transaction was not accepted")
-	}
 
 	return ContractRevision{
 		Revision:   initRevision,
 		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostSigs.RevisionSignature},
-	}, nil
+	}, signedTxnSet, nil
 }
