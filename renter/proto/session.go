@@ -19,9 +19,16 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
-// ErrInvalidMerkleProof is returned by various RPCs when the host supplies an
-// invalid Merkle proof.
-var ErrInvalidMerkleProof = errors.New("host supplied invalid Merkle proof")
+var (
+	// ErrInvalidMerkleProof is returned by various RPCs when the host supplies
+	// an invalid Merkle proof.
+	ErrInvalidMerkleProof = errors.New("host supplied invalid Merkle proof")
+
+	// ErrContractLocked is returned by the Lock RPC when the contract in
+	// question is already locked by another party. This is a transient error;
+	// the caller should retry later.
+	ErrContractLocked = errors.New("contract is locked by another party")
+)
 
 // wrapResponseErr formats RPC response errors nicely, wrapping them in either
 // readCtx or rejectCtx depending on whether we encountered an I/O error or the
@@ -94,7 +101,7 @@ func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey) (err err
 		return errors.New("host's signature on claimed revision is invalid")
 	}
 	if !resp.Acquired {
-		return errors.New("contract is locked by another party")
+		return ErrContractLocked
 	}
 	s.rev = ContractRevision{
 		Revision:   resp.Revision,
