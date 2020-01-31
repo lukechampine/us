@@ -84,26 +84,26 @@ func HostKeyFromSiaPublicKey(spk types.SiaPublicKey) HostPublicKey {
 
 // HostSettings are the settings reported by a host.
 type HostSettings struct {
-	AcceptingContracts     bool
-	MaxDownloadBatchSize   uint64
-	MaxDuration            types.BlockHeight
-	MaxReviseBatchSize     uint64
-	NetAddress             modules.NetAddress
-	RemainingStorage       uint64
-	SectorSize             uint64
-	TotalStorage           uint64
-	UnlockHash             types.UnlockHash
-	WindowSize             types.BlockHeight
-	Collateral             types.Currency
-	MaxCollateral          types.Currency
-	BaseRPCPrice           types.Currency
-	ContractPrice          types.Currency
-	DownloadBandwidthPrice types.Currency
-	SectorAccessPrice      types.Currency
-	StoragePrice           types.Currency
-	UploadBandwidthPrice   types.Currency
-	RevisionNumber         uint64
-	Version                string
+	AcceptingContracts     bool               `json:"acceptingContracts"`
+	MaxDownloadBatchSize   uint64             `json:"maxDownloadBatchSize"`
+	MaxDuration            types.BlockHeight  `json:"maxDuration"`
+	MaxReviseBatchSize     uint64             `json:"maxReviseBatchSize"`
+	NetAddress             modules.NetAddress `json:"netAddress"`
+	RemainingStorage       uint64             `json:"remainingStorage"`
+	SectorSize             uint64             `json:"sectorSize"`
+	TotalStorage           uint64             `json:"totalStorage"`
+	UnlockHash             types.UnlockHash   `json:"unlockHash"`
+	WindowSize             types.BlockHeight  `json:"windowSize"`
+	Collateral             types.Currency     `json:"collateral"`
+	MaxCollateral          types.Currency     `json:"maxCollateral"`
+	BaseRPCPrice           types.Currency     `json:"baseRPCPrice"`
+	ContractPrice          types.Currency     `json:"contractPrice"`
+	DownloadBandwidthPrice types.Currency     `json:"downloadBandwidthPrice"`
+	SectorAccessPrice      types.Currency     `json:"sectorAccessPrice"`
+	StoragePrice           types.Currency     `json:"storagePrice"`
+	UploadBandwidthPrice   types.Currency     `json:"uploadBandwidthPrice"`
+	RevisionNumber         uint64             `json:"revisionNumber"`
+	Version                string             `json:"version"`
 }
 
 // ScannedHost groups a host's settings with its public key and other scan-
