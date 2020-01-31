@@ -241,7 +241,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 		Signature:            renterSig,
 	}
 	if err := s.sess.WriteRequest(renterhost.RPCReadID, req); err != nil {
-		return errors.Wrap(err, "couldn't write RPC ID")
+		return err
 	}
 
 	// host will now stream back responses; ensure we send RPCLoopReadStop
@@ -381,7 +381,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 		NewMissedProofValues: newMissed,
 	}
 	if err := s.sess.WriteRequest(renterhost.RPCWriteID, req); err != nil {
-		return errors.Wrap(err, "couldn't write RPC ID")
+		return err
 	}
 
 	// read and verify Merkle proof
