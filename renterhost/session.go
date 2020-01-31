@@ -148,10 +148,9 @@ func (s *Session) readMessage(obj ProtocolObject, maxLen uint64) error {
 // WriteRequest sends an encrypted RPC request, comprising an RPC ID and a
 // request object.
 func (s *Session) WriteRequest(rpcID Specifier, req ProtocolObject) (err error) {
-	defer wrapErr(&err, "WriteRequest")
-	err = s.writeMessage(&rpcID)
+	err = errors.Wrap(s.writeMessage(&rpcID), "WriteRequestID")
 	if err == nil && req != nil {
-		err = s.writeMessage(req)
+		err = errors.Wrap(s.writeMessage(req), "WriteRequest")
 	}
 	return
 }
@@ -273,11 +272,11 @@ func NewRenterSession(conn io.ReadWriteCloser, hv HashVerifier) (_ *Session, err
 		Ciphers:   []Specifier{cipherChaCha20Poly1305},
 	}
 	if err := req.writeTo(conn); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "couldn't write handshake")
 	}
 	var resp loopKeyExchangeResponse
 	if err := resp.readFrom(conn); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "couldn't read host's handshake")
 	}
 	// validate the signature before doing anything else
 	if !hv.VerifyHash(hashKeys(req.PublicKey, resp.PublicKey), resp.Signature) {
