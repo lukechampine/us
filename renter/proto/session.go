@@ -48,6 +48,9 @@ type Session struct {
 	readBuf     [renterhost.SectorSize]byte
 	appendRoots []crypto.Hash
 
+	readDeadline  time.Duration
+	writeDeadline time.Duration
+
 	host   hostdb.ScannedHost
 	height types.BlockHeight
 	rev    ContractRevision
@@ -59,6 +62,16 @@ func (s *Session) HostKey() hostdb.HostPublicKey { return s.host.PublicKey }
 
 // Revision returns the most recent revision of the locked contract.
 func (s *Session) Revision() ContractRevision { return s.rev }
+
+// SetReadDeadline sets the per-byte deadline for the Read SectorRoots RPCs. For
+// example, to time out after 1 minute when downloading a sector, set the
+// per-byte deadline to time.Minute / renterhost.SectorSize.
+func (s *Session) SetReadDeadline(d time.Duration) { s.readDeadline = d }
+
+// SetWriteDeadline sets the per-byte deadline for the Write RPC. For example,
+// to time out after 1 minute when uploading a sector, set the per-byte deadline
+// to time.Minute / renterhost.SectorSize.
+func (s *Session) SetWriteDeadline(d time.Duration) { s.writeDeadline = d }
 
 func (s *Session) extendDeadline(d time.Duration) {
 	_ = s.conn.SetDeadline(time.Now().Add(d))
@@ -84,7 +97,7 @@ func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey) (err err
 		Signature:  s.sess.SignChallenge(key),
 		Timeout:    10e3, // 10 seconds
 	}
-	s.extendDeadline(15 * time.Second)
+	s.extendDeadline(time.Duration(req.Timeout+5e3) * time.Millisecond)
 	var resp renterhost.RPCLockResponse
 	if err := s.call(renterhost.RPCLockID, req, &resp); err != nil {
 		return err
@@ -170,7 +183,7 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 	rev.NewRevisionNumber++
 	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
 
-	s.extendDeadline(60*time.Second + time.Duration(bandwidth)/time.Microsecond)
+	s.extendDeadline(s.readDeadline * time.Duration(bandwidth))
 	req := &renterhost.RPCSectorRootsRequest{
 		RootOffset: uint64(offset),
 		NumRoots:   uint64(n),
@@ -230,7 +243,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	renterSig := s.key.SignHash(renterhost.HashRevision(rev))
 
 	// send request
-	s.extendDeadline(60*time.Second + time.Duration(bandwidth)/time.Microsecond)
+	s.extendDeadline(s.readDeadline * time.Duration(bandwidth))
 	req := &renterhost.RPCReadRequest{
 		Sections:    sections,
 		MerkleProof: true,
@@ -371,7 +384,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	defer func() { <-precompChan }()
 
 	// send request
-	s.extendDeadline(60*time.Second + time.Duration(uploadBandwidth)/time.Microsecond)
+	s.extendDeadline(s.writeDeadline * time.Duration(uploadBandwidth))
 	req := &renterhost.RPCWriteRequest{
 		Actions:     actions,
 		MerkleProof: true,
@@ -550,6 +563,8 @@ func newUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey,
 		host: hostdb.ScannedHost{
 			PublicKey: hostKey,
 		},
+		readDeadline:  20 * time.Microsecond, // 0.40 Mbps
+		writeDeadline: 50 * time.Microsecond, // 0.16 Mbps
 	}, nil
 }
 
