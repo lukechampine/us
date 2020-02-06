@@ -392,7 +392,7 @@ func (fs *PseudoFS) Stat(name string) (os.FileInfo, error) {
 		if f.name == name {
 			info := pseudoFileInfo{name: f.name, m: f.m.MetaIndex}
 			info.m.Filesize = f.filesize()
-			fs.mu.Unlock()
+			fs.mu.RUnlock()
 			return info, nil
 		}
 	}
