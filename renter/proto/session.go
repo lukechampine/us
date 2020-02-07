@@ -183,7 +183,8 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 	rev.NewRevisionNumber++
 	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
 
-	s.extendDeadline(s.readDeadline * time.Duration(bandwidth))
+	uploadBandwidth := 4096 // estimate
+	s.extendDeadline(time.Second + s.writeDeadline*time.Duration(uploadBandwidth) + s.readDeadline*time.Duration(bandwidth))
 	req := &renterhost.RPCSectorRootsRequest{
 		RootOffset: uint64(offset),
 		NumRoots:   uint64(n),
@@ -243,7 +244,9 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	renterSig := s.key.SignHash(renterhost.HashRevision(rev))
 
 	// send request
-	s.extendDeadline(s.readDeadline * time.Duration(bandwidth))
+	uploadBandwidth := 4096 + 4096*uint64(len(sections))
+	downloadBandwidth := bandwidth + 4096*uint64(len(sections))
+	s.extendDeadline(time.Second + s.writeDeadline*time.Duration(uploadBandwidth) + s.readDeadline*time.Duration(downloadBandwidth))
 	req := &renterhost.RPCReadRequest{
 		Sections:    sections,
 		MerkleProof: true,
@@ -384,7 +387,8 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	defer func() { <-precompChan }()
 
 	// send request
-	s.extendDeadline(s.writeDeadline * time.Duration(uploadBandwidth))
+	uploadBandwidth += 4096 * uint64(len(actions))
+	s.extendDeadline(time.Second + s.writeDeadline*time.Duration(uploadBandwidth) + s.readDeadline*time.Duration(downloadBandwidth))
 	req := &renterhost.RPCWriteRequest{
 		Actions:     actions,
 		MerkleProof: true,
