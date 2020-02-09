@@ -1,6 +1,8 @@
 package proto
 
 import (
+	"bufio"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,7 +47,6 @@ func wrapResponseErr(err error, readCtx, rejectCtx string) error {
 type Session struct {
 	sess        *renterhost.Session
 	conn        net.Conn
-	readBuf     [renterhost.SectorSize]byte
 	appendRoots []crypto.Hash
 
 	readDeadline  time.Duration
@@ -207,8 +208,35 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 	return resp.SectorRoots, nil
 }
 
+// helper type for ensuring that we always write in multiples of SegmentSize,
+// which is required by e.g. (renter.KeySeed).XORKeyStream
+type segWriter struct {
+	w   io.Writer
+	buf [merkle.SegmentSize * 64]byte
+	len int
+}
+
+func (sw *segWriter) Write(p []byte) (int, error) {
+	lenp := len(p)
+	for len(p) > 0 {
+		n := copy(sw.buf[sw.len:], p)
+		sw.len += n
+		p = p[n:]
+		segs := sw.buf[:sw.len-(sw.len%merkle.SegmentSize)]
+		if _, err := sw.w.Write(segs); err != nil {
+			return 0, err
+		}
+		sw.len = copy(sw.buf[:], sw.buf[len(segs):sw.len])
+	}
+	return lenp, nil
+}
+
 // Read calls the Read RPC, writing the requested sections of sector data to w.
 // Merkle proofs are always requested.
+//
+// Note that sector data is streamed to w before it has been validated. Callers
+// MUST check the returned error, and discard any data written to w if the error
+// is non-nil. Failure to do so may allow an attacker to inject malicious data.
 func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection) (err error) {
 	defer wrapErr(&err, "Read")
 	if len(sections) == 0 {
@@ -263,33 +291,67 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	// host will now stream back responses; ensure we send RPCLoopReadStop
 	// before returning
 	defer s.sess.WriteResponse(&renterhost.RPCReadStop, nil)
-	resp := renterhost.RPCReadResponse{
-		Data: s.readBuf[:0], // avoid reallocating
-	}
 	var hostSig []byte
 	for _, sec := range sections {
-		if err := s.sess.ReadResponse(&resp, 4096+uint64(sec.Length)); err != nil {
+		// NOTE: normally, we would call ReadResponse here to read an AEAD RPC
+		// message, verify the tag and decrypt, and then pass the data to
+		// merkle.VerifyProof. As an optimization, we instead stream the message
+		// through a Merkle proof verifier before verifying the AEAD tag.
+		// Security therefore depends on the caller of Read discarding any data
+		// written to w in the event that verification fails.
+		msgReader, err := s.sess.RawResponse(4096 + uint64(sec.Length))
+		if err != nil {
 			return wrapResponseErr(err, "couldn't read sector data", "host rejected Read request")
 		}
-		// The host may have sent data, a signature, or both. If they sent data,
-		// validate it.
-		if len(resp.Data) > 0 {
-			if len(resp.Data) != int(sec.Length) {
-				return errors.New("host did not send enough sector data")
-			}
-			proofStart := int(sec.Offset) / merkle.SegmentSize
-			proofEnd := int(sec.Offset+sec.Length) / merkle.SegmentSize
-			if !merkle.VerifyProof(resp.MerkleProof, resp.Data, proofStart, proofEnd, sec.MerkleRoot) {
-				return ErrInvalidMerkleProof
-			}
-			if _, err := w.Write(resp.Data); err != nil {
-				return errors.Wrap(err, "couldn't write sector data")
+		// Read the signature, which may or may not be present.
+		lenbuf := make([]byte, 8)
+		if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
+			return errors.Wrap(err, "couldn't read signature len")
+		}
+		if n := binary.LittleEndian.Uint64(lenbuf); n > 0 {
+			hostSig = make([]byte, n)
+			if _, err := io.ReadFull(msgReader, hostSig); err != nil {
+				return errors.Wrap(err, "couldn't read signature")
 			}
 		}
-		// If the host sent a signature, exit the loop; they won't be sending
+		// stream the sector data into w and the proof verifier
+		if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
+			return errors.Wrap(err, "couldn't read data len")
+		} else if binary.LittleEndian.Uint64(lenbuf) != uint64(sec.Length) {
+			return errors.New("host sent wrong amount of sector data")
+		}
+		proofStart := int(sec.Offset) / merkle.SegmentSize
+		proofEnd := int(sec.Offset+sec.Length) / merkle.SegmentSize
+		rpv := merkle.NewRangeProofVerifier(proofStart, proofEnd)
+		tee := io.TeeReader(io.LimitReader(msgReader, int64(sec.Length)), &segWriter{w: w})
+		// the proof verifier Reads one segment at a time, so bufio is crucial
+		// for performance here
+		if _, err := rpv.ReadFrom(bufio.NewReaderSize(tee, 1<<16)); err != nil {
+			return errors.Wrap(err, "couldn't stream sector data")
+		}
+		// read the Merkle proof
+		if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
+			return errors.Wrap(err, "couldn't read proof len")
+		}
+		if binary.LittleEndian.Uint64(lenbuf) != uint64(merkle.ProofSize(merkle.SegmentsPerSector, proofStart, proofEnd)) {
+			return errors.New("invalid proof size")
+		}
+		proof := make([]crypto.Hash, binary.LittleEndian.Uint64(lenbuf))
+		for i := range proof {
+			if _, err := io.ReadFull(msgReader, proof[i][:]); err != nil {
+				return errors.Wrap(err, "couldn't read Merkle proof")
+			}
+		}
+		// verify the message tag and the Merkle proof
+		if err := msgReader.VerifyTag(); err != nil {
+			return err
+		}
+		if !rpv.Verify(proof, sec.MerkleRoot) {
+			return ErrInvalidMerkleProof
+		}
+		// if the host sent a signature, exit the loop; they won't be sending
 		// any more data
-		if len(resp.Signature) > 0 {
-			hostSig = resp.Signature
+		if len(hostSig) > 0 {
 			break
 		}
 	}
@@ -297,6 +359,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 		// the host is required to send a signature; if they haven't sent one
 		// yet, they should send an empty ReadResponse containing just the
 		// signature.
+		var resp renterhost.RPCReadResponse
 		if err := s.sess.ReadResponse(&resp, 4096); err != nil {
 			return wrapResponseErr(err, "couldn't read signature", "host rejected Read request")
 		}
