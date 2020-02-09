@@ -1,8 +1,12 @@
 package merkle
 
 import (
+	"bytes"
+	"io"
+	"math/bits"
 	"reflect"
 	"testing"
+	"testing/iotest"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"golang.org/x/crypto/blake2b"
@@ -786,5 +790,148 @@ func BenchmarkVerifyPrecomputedDiffProof(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		VerifyDiffProof(actions, numSectors, treeHashes, leafHashes, oldRoot, newRoot, appendRoots)
+	}
+}
+
+func TestReaderRoot(t *testing.T) {
+	var sector [renterhost.SectorSize]byte
+	frand.Read(sector[:])
+	leafHashes := make([]crypto.Hash, SegmentsPerSector)
+	for i := range leafHashes {
+		leafHashes[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
+	}
+
+	root, err := ReaderRoot(bytes.NewReader(sector[:]))
+	if err != nil {
+		t.Fatal(err)
+	} else if root != SectorRoot(&sector) {
+		t.Fatal("root mismatch")
+	}
+
+	// test some random tree sizes against MetaRoot
+	for i := 0; i < 10; i++ {
+		numSegs := 1 << frand.Intn(bits.TrailingZeros(SegmentsPerSector))
+		root, err := ReaderRoot(bytes.NewReader(sector[:numSegs*SegmentSize]))
+		if err != nil {
+			t.Fatal(err)
+		} else if root != MetaRoot(leafHashes[:numSegs]) {
+			t.Fatal("root mismatch")
+		}
+	}
+
+	// test bad reader
+	_, err = ReaderRoot(iotest.OneByteReader(bytes.NewReader(sector[:])))
+	if err == io.ErrUnexpectedEOF {
+		t.Fatal("expected io.ErrUnexpectedEOF, got", err)
+	}
+}
+
+func BenchmarkReaderRoot(b *testing.B) {
+	var sector [renterhost.SectorSize]byte
+	r := bytes.NewReader(sector[:])
+	b.SetBytes(renterhost.SectorSize)
+	for i := 0; i < b.N; i++ {
+		ReaderRoot(r)
+		r.Seek(0, io.SeekStart)
+	}
+}
+
+func TestRangeProofVerifier(t *testing.T) {
+	// same as TestBuildVerifyProof, but using RangeProofVerifier
+
+	var sector [renterhost.SectorSize]byte
+	frand.Read(sector[:])
+	sectorRoot := SectorRoot(&sector)
+	segmentRoots := make([]crypto.Hash, SegmentsPerSector)
+	for i := range segmentRoots {
+		segmentRoots[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
+	}
+
+	verifyProof := func(proof []crypto.Hash, data []byte, start, end int, root crypto.Hash) bool {
+		rpv := NewRangeProofVerifier(start, end)
+		rpv.ReadFrom(bytes.NewReader(data))
+		return rpv.Verify(proof, root)
+	}
+
+	proof := BuildProof(&sector, 0, 1, nil)
+	hash := leafHash(sector[:64])
+	for i := range proof {
+		hash = nodeHash(hash, proof[i])
+	}
+	if !verifyProof(proof, sector[:64], 0, 1, hash) {
+		t.Error("RangeProofVerifier failed to verify a known correct proof")
+	}
+
+	proof = BuildProof(&sector, SegmentsPerSector-1, SegmentsPerSector, nil)
+	hash = leafHash(sector[len(sector)-64:])
+	for i := range proof {
+		hash = nodeHash(proof[len(proof)-i-1], hash)
+	}
+	if !verifyProof(proof, sector[len(sector)-64:], SegmentsPerSector-1, SegmentsPerSector, hash) {
+		t.Error("RangeProofVerifier failed to verify a known correct proof")
+	}
+
+	proof = BuildProof(&sector, 10, 11, nil)
+	hash = leafHash(sector[10*64:][:64])
+	hash = nodeHash(hash, proof[2])
+	hash = nodeHash(proof[1], hash)
+	hash = nodeHash(hash, proof[3])
+	hash = nodeHash(proof[0], hash)
+	for i := 4; i < len(proof); i++ {
+		hash = nodeHash(hash, proof[i])
+	}
+	if !verifyProof(proof, sector[10*64:11*64], 10, 11, hash) {
+		t.Error("RangeProofVerifier failed to verify a known correct proof")
+	}
+
+	// this is the largest possible proof
+	midl, midr := SegmentsPerSector/2-1, SegmentsPerSector/2+1
+	proof = BuildProof(&sector, midl, midr, nil)
+	left := leafHash(sector[midl*64:][:64])
+	for i := 0; i < len(proof)/2; i++ {
+		left = nodeHash(proof[len(proof)/2-i-1], left)
+	}
+	right := leafHash(sector[(midr-1)*64:][:64])
+	for i := len(proof) / 2; i < len(proof); i++ {
+		right = nodeHash(right, proof[i])
+	}
+	if !verifyProof(proof, sector[midl*64:midr*64], midl, midr, hash) {
+		t.Error("RangeProofVerifier failed to verify a known correct proof")
+	}
+
+	// test some random proofs against VerifyProof
+	for i := 0; i < 5; i++ {
+		start := frand.Intn(SegmentsPerSector - 1)
+		end := start + frand.Intn(SegmentsPerSector-start) + 1
+		proof := BuildProof(&sector, start, end, nil)
+		if !verifyProof(proof, sector[start*SegmentSize:end*SegmentSize], start, end, sectorRoot) {
+			t.Errorf("BuildProof constructed an incorrect proof for range %v-%v", start, end)
+		}
+	}
+
+	// test a proof with precomputed inputs
+	leftRoots := make([]crypto.Hash, SegmentsPerSector/2)
+	for i := range leftRoots {
+		leftRoots[i] = leafHash(sector[i*SegmentSize:][:SegmentSize])
+	}
+	left = MetaRoot(leftRoots)
+	precalc := func(i, j int) (h crypto.Hash) {
+		if i == 0 && j == SegmentsPerSector/2 {
+			h = left
+		}
+		return
+	}
+	proof = BuildProof(&sector, SegmentsPerSector-1, SegmentsPerSector, precalc)
+	recalcProof := BuildProof(&sector, SegmentsPerSector-1, SegmentsPerSector, nil)
+	if !reflect.DeepEqual(proof, recalcProof) {
+		t.Fatal("precalc failed")
+	}
+
+	// test malformed inputs
+	if verifyProof(nil, make([]byte, SegmentSize), 0, 1, crypto.Hash{}) {
+		t.Error("RangeProofVerifier verified an incorrect proof")
+	}
+	if verifyProof([]crypto.Hash{{}}, sector[:], 0, SegmentsPerSector, crypto.Hash{}) {
+		t.Error("RangeProofVerifier verified an incorrect proof")
 	}
 }

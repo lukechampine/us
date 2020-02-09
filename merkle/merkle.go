@@ -2,6 +2,8 @@
 package merkle // import "lukechampine.com/us/merkle"
 
 import (
+	"io"
+
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/us/renterhost"
 )
@@ -41,4 +43,20 @@ func MetaRoot(roots []crypto.Hash) crypto.Hash {
 		s.insertNodeHash(r, 0)
 	}
 	return s.root()
+}
+
+// ReaderRoot returns the Merkle root of the supplied stream, which must contain
+// an integer multiple of segments.
+func ReaderRoot(r io.Reader) (crypto.Hash, error) {
+	var s stack
+	leaf := make([]byte, SegmentSize)
+	for {
+		if _, err := io.ReadFull(r, leaf); err == io.EOF {
+			break
+		} else if err != nil {
+			return crypto.Hash{}, err
+		}
+		s.appendLeaf(leaf)
+	}
+	return s.root(), nil
 }
