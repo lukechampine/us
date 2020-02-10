@@ -133,10 +133,21 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 	path += metafileExt
 
 	// first check open files
-	//
-	// TODO: handle more flag combos here
 	for fd, of := range fs.files {
 		if of.name == name {
+			// if reopening a file with write permissions, check that we have all hosts
+			if flag&rwmask == os.O_WRONLY || flag&rwmask == os.O_RDWR {
+				var missing []string
+				for _, hostKey := range of.m.Hosts {
+					if _, ok := fs.hosts.sessions[hostKey]; !ok {
+						missing = append(missing, hostKey.ShortKey())
+					}
+				}
+				if len(missing) > 0 {
+					return nil, errors.Errorf("insufficient contracts: need a contract from each of these hosts: %v",
+						strings.Join(missing, " "))
+				}
+			}
 			of.closed = false
 			of.offset = 0
 			if flag&os.O_APPEND == os.O_APPEND {

@@ -196,6 +196,19 @@ func (fs *PseudoFS) fillSectors(f *openMetaFile) error {
 	if len(f.pendingWrites) == 0 {
 		return nil
 	}
+	// sanity check: we should have all of the file's hosts
+	var missingHostErrs HostErrorSet
+	for _, hostKey := range f.m.Hosts {
+		if _, ok := fs.sectors[hostKey]; !ok {
+			missingHostErrs = append(missingHostErrs, &HostError{
+				HostKey: hostKey,
+				Err:     errors.New("not in filesystem's host set"),
+			})
+		}
+	}
+	if missingHostErrs != nil {
+		return missingHostErrs
+	}
 
 	// prepare shards
 	shards := make([][]byte, len(f.m.Hosts))
@@ -237,6 +250,7 @@ func (fs *PseudoFS) fillSectors(f *openMetaFile) error {
 		}
 		// encode the chunk
 		for i, hostKey := range f.m.Hosts {
+			// map lookup guaranteed to succeed by earlier check
 			shards[i] = fs.sectors[hostKey].SliceForAppend()
 		}
 		f.m.ErasureCode().Encode(pw.data, shards)
