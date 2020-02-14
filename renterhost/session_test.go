@@ -294,6 +294,74 @@ func TestFormContract(t *testing.T) {
 	}
 }
 
+func TestRawMessage(t *testing.T) {
+	renter, host := newFakeConns()
+	hostErr := make(chan error, 1)
+	go func() {
+		hostErr <- func() error {
+			hs, err := NewHostSession(host, dummyKey{})
+			if err != nil {
+				return err
+			}
+			defer hs.Close()
+			for {
+				id, err := hs.ReadID()
+				if errors.Cause(err) == ErrRenterClosed {
+					return nil
+				} else if err != nil {
+					return err
+				}
+				switch id {
+				case newSpecifier("Foo"):
+					s := newSpecifier("Bar")
+					if err := hs.WriteResponse(&s, nil); err != nil {
+						return err
+					}
+				default:
+					if err := hs.WriteResponse(nil, errors.New("invalid name")); err != nil {
+						return err
+					}
+				}
+			}
+		}()
+	}()
+
+	rs, err := NewRenterSession(renter, dummyKey{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rs.WriteRequest(newSpecifier("Quux"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rs.RawResponse(0); err == nil {
+		t.Fatal("expected RPCError, got nil")
+	}
+
+	if err := rs.WriteRequest(newSpecifier("Foo"), nil); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := rs.RawResponse(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp Specifier
+	if _, err := io.ReadFull(msg, resp[:]); err != nil {
+		t.Fatal(err)
+	} else if resp != newSpecifier("Bar") {
+		t.Fatal("unexpected response:", resp)
+	} else if err := msg.VerifyTag(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rs.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-hostErr; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestChallenge(t *testing.T) {
 	var s Session
 	frand.Read(s.challenge[:])

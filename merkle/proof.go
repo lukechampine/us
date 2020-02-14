@@ -1,6 +1,7 @@
 package merkle
 
 import (
+	"io"
 	"math/bits"
 	"sort"
 	"unsafe"
@@ -422,4 +423,58 @@ func modifyLeaves(leafHashes []crypto.Hash, actions []renterhost.RPCWriteAction,
 		}
 	}
 	return leafHashes
+}
+
+// A RangeProofVerifier allows for proofs to be verified in streaming fashion.
+type RangeProofVerifier struct {
+	start, end int
+	roots      []crypto.Hash
+}
+
+// ReadFrom implements io.ReaderFrom.
+func (rpv *RangeProofVerifier) ReadFrom(r io.Reader) (int64, error) {
+	var total int64
+	i, j := rpv.start, rpv.end
+	for i < j {
+		subtreeSize := nextSubtreeSize(i, j)
+		n := int64(subtreeSize * SegmentSize)
+		root, err := ReaderRoot(io.LimitReader(r, n))
+		if err != nil {
+			return total, err
+		}
+		total += n
+		rpv.roots = append(rpv.roots, root)
+		i += subtreeSize
+	}
+	return total, nil
+}
+
+// Verify verifies the supplied proof, using the data ingested from ReadFrom.
+func (rpv *RangeProofVerifier) Verify(proof []crypto.Hash, root crypto.Hash) bool {
+	if len(proof) != ProofSize(SegmentsPerSector, rpv.start, rpv.end) {
+		return false
+	}
+	var s stack
+	consume := func(roots *[]crypto.Hash, i, j int) {
+		for i < j && len(*roots) > 0 {
+			subtreeSize := nextSubtreeSize(i, j)
+			height := bits.TrailingZeros(uint(subtreeSize)) // log2
+			s.insertNodeHash((*roots)[0], height)
+			*roots = (*roots)[1:]
+			i += subtreeSize
+		}
+	}
+	consume(&proof, 0, rpv.start)
+	consume(&rpv.roots, rpv.start, rpv.end)
+	consume(&proof, rpv.end, SegmentsPerSector)
+	return s.root() == root
+}
+
+// NewRangeProofVerifier returns a RangeProofVerifier for the sector range
+// [start, end).
+func NewRangeProofVerifier(start, end int) *RangeProofVerifier {
+	return &RangeProofVerifier{
+		start: start,
+		end:   end,
+	}
 }

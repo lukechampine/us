@@ -5,13 +5,18 @@ package renterhost // import "lukechampine.com/us/renterhost"
 import (
 	"bytes"
 	"crypto/cipher"
+	"crypto/subtle"
+	"encoding/binary"
 	"io"
+	"io/ioutil"
 
+	"github.com/aead/chacha20/chacha"
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/chacha20poly1305"
+	"golang.org/x/crypto/poly1305"
 	"lukechampine.com/frand"
 )
 
@@ -57,6 +62,7 @@ type rpcResponse struct {
 type Session struct {
 	conn      io.ReadWriteCloser
 	aead      cipher.AEAD
+	key       []byte // for RawResponse
 	inbuf     objBuffer
 	outbuf    objBuffer
 	challenge [16]byte
@@ -197,6 +203,110 @@ func (s *Session) ReadResponse(resp ProtocolObject, maxLen uint64) (err error) {
 	return nil
 }
 
+// A ResponseReader contains an unencrypted, unauthenticated RPC response
+// message.
+type ResponseReader struct {
+	msgR io.Reader
+	tagR io.Reader
+	mac  *poly1305.MAC
+	clen uint64
+}
+
+// Read implements io.Reader.
+func (rr *ResponseReader) Read(p []byte) (int, error) {
+	return rr.msgR.Read(p)
+}
+
+// VerifyTag verifies the authentication tag appended to the message. VerifyTag
+// must be called after Read returns io.EOF, and the message must be discarded
+// if VerifyTag returns a non-nil error.
+func (rr *ResponseReader) VerifyTag() error {
+	// the caller may not have consumed the full message (e.g. if it was padded
+	// to MinMessageSize), so make sure the whole thing is written to the MAC
+	if _, err := io.Copy(ioutil.Discard, rr); err != nil {
+		return err
+	}
+
+	var tag [poly1305.TagSize]byte
+	if _, err := io.ReadFull(rr.tagR, tag[:]); err != nil {
+		return err
+	}
+	// MAC is padded to 16 bytes, and covers the length of AD (0 in this case)
+	// and ciphertext
+	tail := make([]byte, 0, 32)[:32-(rr.clen%16)]
+	binary.LittleEndian.PutUint64(tail[len(tail)-8:], rr.clen)
+	rr.mac.Write(tail)
+	var ourTag [poly1305.TagSize]byte
+	rr.mac.Sum(ourTag[:0])
+	if subtle.ConstantTimeCompare(tag[:], ourTag[:]) != 1 {
+		return errors.New("chacha20poly1305: message authentication failed")
+	}
+	return nil
+}
+
+// RawResponse returns a stream containing the (unencrypted, unauthenticated)
+// content of the next message. The Reader must be fully consumed by the caller,
+// after which the caller should call VerifyTag to authenticate the message. If
+// the response was an RPCError, it is authenticated and returned immediately.
+func (s *Session) RawResponse(maxLen uint64) (*ResponseReader, error) {
+	if maxLen < MinMessageSize {
+		maxLen = MinMessageSize
+	}
+	s.inbuf.reset()
+	s.inbuf.copyN(s.conn, 8)
+	if s.inbuf.Err() != nil {
+		return nil, s.inbuf.Err()
+	}
+	msgSize := s.inbuf.readUint64()
+	if msgSize > maxLen {
+		return nil, errors.Errorf("message size (%v bytes) exceeds maxLen of %v bytes", msgSize, maxLen)
+	} else if msgSize < uint64(s.aead.NonceSize()+s.aead.Overhead()) {
+		return nil, errors.Errorf("message size (%v bytes) is too small (nonce + MAC is %v bytes)", msgSize, s.aead.NonceSize()+s.aead.Overhead())
+	}
+	msgSize -= uint64(s.aead.NonceSize() + s.aead.Overhead())
+
+	s.inbuf.reset()
+	s.inbuf.grow(s.aead.NonceSize())
+	if err := s.inbuf.copyN(s.conn, uint64(s.aead.NonceSize())); err != nil {
+		return nil, err
+	}
+	nonce := s.inbuf.next(s.aead.NonceSize())
+
+	// construct reader
+	c, _ := chacha.NewCipher(nonce, s.key, 20)
+	var polyKey [32]byte
+	c.XORKeyStream(polyKey[:], polyKey[:])
+	mac := poly1305.New(&polyKey)
+	c.SetCounter(1)
+	rr := &ResponseReader{
+		msgR: cipher.StreamReader{
+			R: io.TeeReader(io.LimitReader(s.conn, int64(msgSize)), mac),
+			S: c,
+		},
+		tagR: io.LimitReader(s.conn, poly1305.TagSize),
+		mac:  mac,
+		clen: msgSize,
+	}
+
+	// check if response is an RPCError
+	if err := s.inbuf.copyN(rr, 1); err != nil {
+		return nil, err
+	}
+	if isErr := s.inbuf.readBool(); isErr {
+		if err := s.inbuf.copyN(rr, msgSize-1); err != nil {
+			return nil, err
+		}
+		err := new(RPCError)
+		err.unmarshalBuffer(&s.inbuf)
+		if err := rr.VerifyTag(); err != nil {
+			return nil, err
+		}
+		return nil, err
+	}
+	// not an error; pass rest of stream to caller
+	return rr, nil
+}
+
 // Close gracefully terminates the RPC loop and closes the connection.
 func (s *Session) Close() (err error) {
 	defer wrapErr(&err, "Close")
@@ -249,6 +359,7 @@ func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (_ *Session, err err
 	s := &Session{
 		conn:     conn,
 		aead:     aead,
+		key:      cipherKey[:],
 		isRenter: false,
 	}
 	frand.Read(s.challenge[:])
@@ -293,6 +404,7 @@ func NewRenterSession(conn io.ReadWriteCloser, hv HashVerifier) (_ *Session, err
 	s := &Session{
 		conn:     conn,
 		aead:     aead,
+		key:      cipherKey[:],
 		isRenter: true,
 	}
 	// hack: cast challenge to Specifier to make it a ProtocolObject
