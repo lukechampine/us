@@ -630,7 +630,7 @@ func NewUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey,
 // same as above, but without error wrapping, since we call it from NewSession too.
 func newUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (_ *Session, err error) {
 	start := time.Now()
-	conn, err := net.Dial("tcp", string(hostIP))
+	conn, err := net.DialTimeout("tcp", string(hostIP), 60*time.Second)
 	if err != nil {
 		return nil, err
 	}
