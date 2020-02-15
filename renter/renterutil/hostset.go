@@ -130,7 +130,11 @@ func (set *HostSet) tryAcquire(host hostdb.HostPublicKey) (*proto.Session, error
 }
 
 func (set *HostSet) release(host hostdb.HostPublicKey) {
-	set.sessions[host].mu.Unlock()
+	lh := set.sessions[host]
+	if lh.s.IsClosed() {
+		lh.s = nil // force a reconnect
+	}
+	lh.mu.Unlock()
 }
 
 // AddHost adds a host to the set for later use.

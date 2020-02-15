@@ -65,6 +65,9 @@ func (s *Session) HostKey() hostdb.HostPublicKey { return s.host.PublicKey }
 // Revision returns the most recent revision of the locked contract.
 func (s *Session) Revision() ContractRevision { return s.rev }
 
+// IsClosed returns whether the Session is closed.
+func (s *Session) IsClosed() bool { return s.sess.IsClosed() }
+
 // SetLatency sets the latency deadline for RPCs.
 func (s *Session) SetLatency(d time.Duration) { s.latency = d }
 
@@ -627,7 +630,7 @@ func NewUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey,
 // same as above, but without error wrapping, since we call it from NewSession too.
 func newUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (_ *Session, err error) {
 	start := time.Now()
-	conn, err := net.Dial("tcp", string(hostIP))
+	conn, err := net.DialTimeout("tcp", string(hostIP), 60*time.Second)
 	if err != nil {
 		return nil, err
 	}

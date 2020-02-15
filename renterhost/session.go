@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"io"
 	"io/ioutil"
+	"net"
 
 	"github.com/aead/chacha20/chacha"
 	"github.com/pkg/errors"
@@ -66,9 +67,27 @@ type Session struct {
 	inbuf     objBuffer
 	outbuf    objBuffer
 	challenge [16]byte
+	err       error // set when Session is prematurely closed
 	closed    bool
 	isRenter  bool
 }
+
+func (s *Session) setErr(err error) {
+	if err != nil && s.err == nil {
+		if ne, ok := err.(net.Error); !ok || !ne.Temporary() {
+			s.conn.Close()
+			s.err = err
+		}
+	}
+}
+
+// PrematureCloseErr returns the error that resulted in the Session being closed
+// prematurely.
+func (s *Session) PrematureCloseErr() error { return s.err }
+
+// IsClosed returns whether the Session is closed. Check PrematureCloseErr to
+// determine whether the Session was closed gracefully.
+func (s *Session) IsClosed() bool { return s.closed || s.err != nil }
 
 // SetChallenge sets the current session challenge.
 func (s *Session) SetChallenge(challenge [16]byte) {
@@ -93,6 +112,9 @@ func (s *Session) VerifyChallenge(sig []byte, hv HashVerifier) bool {
 }
 
 func (s *Session) writeMessage(obj ProtocolObject) error {
+	if s.err != nil {
+		return s.err
+	}
 	// generate random nonce
 	nonce := make([]byte, 256)[:s.aead.NonceSize()] // avoid heap alloc
 	frand.Read(nonce)
@@ -117,17 +139,21 @@ func (s *Session) writeMessage(obj ProtocolObject) error {
 	s.aead.Seal(payload[:0], msgNonce, payload, nil)
 
 	_, err := s.conn.Write(msg)
+	s.setErr(err)
 	return err
 }
 
 func (s *Session) readMessage(obj ProtocolObject, maxLen uint64) error {
+	if s.err != nil {
+		return s.err
+	}
 	if maxLen < MinMessageSize {
 		maxLen = MinMessageSize
 	}
 	s.inbuf.reset()
-	s.inbuf.copyN(s.conn, 8)
-	if s.inbuf.Err() != nil {
-		return s.inbuf.Err()
+	if err := s.inbuf.copyN(s.conn, 8); err != nil {
+		s.setErr(err)
+		return err
 	}
 	msgSize := s.inbuf.readUint64()
 	if msgSize > maxLen {
@@ -139,6 +165,7 @@ func (s *Session) readMessage(obj ProtocolObject, maxLen uint64) error {
 	s.inbuf.reset()
 	s.inbuf.grow(int(msgSize))
 	if err := s.inbuf.copyN(s.conn, msgSize); err != nil {
+		s.setErr(err)
 		return err
 	}
 
@@ -146,6 +173,7 @@ func (s *Session) readMessage(obj ProtocolObject, maxLen uint64) error {
 	paddedPayload := s.inbuf.bytes()
 	_, err := s.aead.Open(paddedPayload[:0], nonce, paddedPayload, nil)
 	if err != nil {
+		s.setErr(err) // not an I/O error, but still fatal
 		return err
 	}
 	return obj.unmarshalBuffer(&s.inbuf)
@@ -206,15 +234,21 @@ func (s *Session) ReadResponse(resp ProtocolObject, maxLen uint64) (err error) {
 // A ResponseReader contains an unencrypted, unauthenticated RPC response
 // message.
 type ResponseReader struct {
-	msgR io.Reader
-	tagR io.Reader
-	mac  *poly1305.MAC
-	clen uint64
+	msgR   io.Reader
+	tagR   io.Reader
+	mac    *poly1305.MAC
+	clen   uint64
+	setErr func(error)
 }
 
 // Read implements io.Reader.
 func (rr *ResponseReader) Read(p []byte) (int, error) {
-	return rr.msgR.Read(p)
+	n, err := rr.msgR.Read(p)
+	if err != io.EOF {
+		// EOF is expected, since this is a limited reader
+		rr.setErr(err)
+	}
+	return n, err
 }
 
 // VerifyTag verifies the authentication tag appended to the message. VerifyTag
@@ -229,6 +263,7 @@ func (rr *ResponseReader) VerifyTag() error {
 
 	var tag [poly1305.TagSize]byte
 	if _, err := io.ReadFull(rr.tagR, tag[:]); err != nil {
+		rr.setErr(err)
 		return err
 	}
 	// MAC is padded to 16 bytes, and covers the length of AD (0 in this case)
@@ -239,7 +274,9 @@ func (rr *ResponseReader) VerifyTag() error {
 	var ourTag [poly1305.TagSize]byte
 	rr.mac.Sum(ourTag[:0])
 	if subtle.ConstantTimeCompare(tag[:], ourTag[:]) != 1 {
-		return errors.New("chacha20poly1305: message authentication failed")
+		err := errors.New("chacha20poly1305: message authentication failed")
+		rr.setErr(err) // not an I/O error, but still fatal
+		return err
 	}
 	return nil
 }
@@ -253,9 +290,9 @@ func (s *Session) RawResponse(maxLen uint64) (*ResponseReader, error) {
 		maxLen = MinMessageSize
 	}
 	s.inbuf.reset()
-	s.inbuf.copyN(s.conn, 8)
-	if s.inbuf.Err() != nil {
-		return nil, s.inbuf.Err()
+	if err := s.inbuf.copyN(s.conn, 8); err != nil {
+		s.setErr(err)
+		return nil, err
 	}
 	msgSize := s.inbuf.readUint64()
 	if msgSize > maxLen {
@@ -268,6 +305,7 @@ func (s *Session) RawResponse(maxLen uint64) (*ResponseReader, error) {
 	s.inbuf.reset()
 	s.inbuf.grow(s.aead.NonceSize())
 	if err := s.inbuf.copyN(s.conn, uint64(s.aead.NonceSize())); err != nil {
+		s.setErr(err)
 		return nil, err
 	}
 	nonce := s.inbuf.next(s.aead.NonceSize())
@@ -283,9 +321,10 @@ func (s *Session) RawResponse(maxLen uint64) (*ResponseReader, error) {
 			R: io.TeeReader(io.LimitReader(s.conn, int64(msgSize)), mac),
 			S: c,
 		},
-		tagR: io.LimitReader(s.conn, poly1305.TagSize),
-		mac:  mac,
-		clen: msgSize,
+		tagR:   io.LimitReader(s.conn, poly1305.TagSize),
+		mac:    mac,
+		clen:   msgSize,
+		setErr: s.setErr,
 	}
 
 	// check if response is an RPCError
@@ -310,7 +349,7 @@ func (s *Session) RawResponse(maxLen uint64) (*ResponseReader, error) {
 // Close gracefully terminates the RPC loop and closes the connection.
 func (s *Session) Close() (err error) {
 	defer wrapErr(&err, "Close")
-	if s.closed {
+	if s.closed || s.err != nil {
 		return nil
 	}
 	s.closed = true
