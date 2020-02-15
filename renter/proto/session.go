@@ -65,6 +65,9 @@ func (s *Session) HostKey() hostdb.HostPublicKey { return s.host.PublicKey }
 // Revision returns the most recent revision of the locked contract.
 func (s *Session) Revision() ContractRevision { return s.rev }
 
+// IsClosed returns whether the Session is closed.
+func (s *Session) IsClosed() bool { return s.sess.IsClosed() }
+
 // SetLatency sets the latency deadline for RPCs.
 func (s *Session) SetLatency(d time.Duration) { s.latency = d }
 
