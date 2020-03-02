@@ -2,37 +2,28 @@ package merkle
 
 import (
 	"math/bits"
+	"unsafe"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"golang.org/x/crypto/blake2b"
+	"lukechampine.com/us/merkle/blake2b"
 )
 
-// A Stack is a Merkle tree that stores only one (or zero) nodes per
-// level. If a node is inserted at a level already containing a node, the
-// nodes are merged into the next level. This process repeats until it reaches
-// an open level.
+// A stack is a Merkle tree that stores only one (or zero) nodes per level. If a
+// node is inserted at a level already containing a node, the nodes are merged
+// into the next level. This process repeats until it reaches an open level.
 //
-// Stacks are an alternative to storing the full Merkle tree; they
-// compress the tree to O(log2(n)) space at the cost of reduced functionality
-// (nodes can only be appended to the "end" of the stack; arbitrary insertion
-// is not possible).
+// Stacks are an alternative to storing the full Merkle tree; they compress the
+// tree to O(log2(n)) space at the cost of reduced functionality (nodes can only
+// be appended to the "end" of the stack; arbitrary insertion is not possible).
+//
+// This implementation only supports trees with up to SegmentsPerSector leaves.
 type stack struct {
-	// NOTE: 64 hashes is enough to cover 2^64 * SegmentSize bytes (1 ZiB), so
-	// we don't need to worry about running out.
-	stack [64]crypto.Hash
-	used  uint64 // one bit per stack elem; also number of nodes
-	buf   [1 + SegmentSize]byte
+	stack [17]crypto.Hash
+	used  uint32 // one bit per stack elem; also number of nodes
 }
 
-// (*stack).nodeHash assumes that SegmentSize = crypto.HashSize * 2; verify this
-// assumption at compile time
-var _ [SegmentSize]struct{} = [crypto.HashSize * 2]struct{}{}
-
 func (s *stack) nodeHash(left, right crypto.Hash) crypto.Hash {
-	s.buf[0] = nodeHashPrefix
-	copy(s.buf[1:], left[:])
-	copy(s.buf[1+len(left):], right[:])
-	return crypto.Hash(blake2b.Sum256(s.buf[:]))
+	return blake2b.SumPair(left, right)
 }
 
 // insertNodeHash inserts a node hash into the stack at the specified height. If
@@ -53,10 +44,7 @@ func (s *stack) appendLeaf(leaf []byte) {
 	if len(leaf) != SegmentSize {
 		panic("leafHash: illegal input size")
 	}
-	s.buf[0] = leafHashPrefix
-	copy(s.buf[1:], leaf)
-	h := crypto.Hash(blake2b.Sum256(s.buf[:]))
-	s.insertNodeHash(h, 0)
+	s.insertNodeHash(blake2b.SumLeaf((*[64]byte)(unsafe.Pointer(&leaf[0]))), 0)
 }
 
 // reset clears the stack.
@@ -67,12 +55,12 @@ func (s *stack) reset() {
 // root returns the root of the Merkle tree. It does not modify the stack. If
 // the stack is empty, root returns a zero-valued hash.
 func (s *stack) root() crypto.Hash {
-	i := uint64(bits.TrailingZeros64(s.used))
-	if i == 64 {
+	i := bits.TrailingZeros32(s.used)
+	if i == 32 {
 		return crypto.Hash{}
 	}
 	root := s.stack[i]
-	for i++; i < 64; i++ {
+	for i++; i < 32; i++ {
 		if s.used&(1<<i) != 0 {
 			root = s.nodeHash(s.stack[i], root)
 		}
