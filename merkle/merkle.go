@@ -3,8 +3,10 @@ package merkle // import "lukechampine.com/us/merkle"
 
 import (
 	"io"
+	"math/bits"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
+	"lukechampine.com/us/merkle/blake2b"
 	"lukechampine.com/us/renterhost"
 )
 
@@ -16,10 +18,6 @@ const (
 
 	// SegmentsPerSector is a convenience value.
 	SegmentsPerSector = renterhost.SectorSize / SegmentSize
-
-	// prefixes used during hashing, as specified by RFC 6962
-	leafHashPrefix = 0
-	nodeHashPrefix = 1
 )
 
 // Much of this code assumes that renterhost.SectorSize is a power of 2; verify
@@ -29,34 +27,43 @@ var _ [0]struct{} = [renterhost.SectorSize & (renterhost.SectorSize - 1)]struct{
 // SectorRoot computes the Merkle root of a sector using SegmentSize bytes per
 // leaf.
 func SectorRoot(sector *[renterhost.SectorSize]byte) crypto.Hash {
-	var s stack
-	for i := 0; i < len(sector); i += SegmentSize {
-		s.appendLeaf(sector[i:][:SegmentSize])
-	}
+	var s appendStack
+	s.appendLeaves(sector[:])
 	return s.root()
 }
 
 // MetaRoot calculates the root of a set of existing Merkle roots.
 func MetaRoot(roots []crypto.Hash) crypto.Hash {
-	var s stack
-	for _, r := range roots {
-		s.insertNodeHash(r, 0)
+	// Stacks are only designed to store one sector's worth of leaves, so we'll
+	// panic if we insert more than SegmentsPerSector nodes. To compensate, call
+	// MetaRoot recursively.
+	if len(roots) <= SegmentsPerSector {
+		var s appendStack
+		for _, r := range roots {
+			s.appendNode(r)
+		}
+		return s.root()
 	}
-	return s.root()
+	// split at largest power of two
+	split := 1 << (bits.Len(uint(len(roots)-1)) - 1)
+	return blake2b.SumPair(MetaRoot(roots[:split]), MetaRoot(roots[split:]))
 }
 
 // ReaderRoot returns the Merkle root of the supplied stream, which must contain
 // an integer multiple of segments.
 func ReaderRoot(r io.Reader) (crypto.Hash, error) {
-	var s stack
-	leaf := make([]byte, SegmentSize)
+	var s appendStack
+	leaves := make([]byte, SegmentSize*4)
 	for {
-		if _, err := io.ReadFull(r, leaf); err == io.EOF {
+		n, err := io.ReadFull(r, leaves)
+		if err == io.EOF {
 			break
+		} else if err == io.ErrUnexpectedEOF && n%SegmentSize == 0 {
+			// this is fine
 		} else if err != nil {
 			return crypto.Hash{}, err
 		}
-		s.appendLeaf(leaf)
+		s.appendLeaves(leaves[:n])
 	}
 	return s.root(), nil
 }

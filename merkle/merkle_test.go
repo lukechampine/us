@@ -49,11 +49,11 @@ func TestProofSize(t *testing.T) {
 }
 
 func leafHash(seg []byte) crypto.Hash {
-	return blake2b.Sum256(append([]byte{leafHashPrefix}, seg...))
+	return blake2b.Sum256(append([]byte{0}, seg...))
 }
 
 func nodeHash(left, right crypto.Hash) crypto.Hash {
-	return blake2b.Sum256(append([]byte{nodeHashPrefix}, append(left[:], right[:]...)...))
+	return blake2b.Sum256(append([]byte{1}, append(left[:], right[:]...)...))
 }
 
 func refSectorRoot(sector *[renterhost.SectorSize]byte) crypto.Hash {
@@ -68,9 +68,11 @@ func recNodeRoot(roots []crypto.Hash) crypto.Hash {
 	if len(roots) == 1 {
 		return roots[0]
 	}
+	// split at largest power of two
+	split := 1 << (bits.Len(uint(len(roots)-1)) - 1)
 	return nodeHash(
-		recNodeRoot(roots[:len(roots)/2]),
-		recNodeRoot(roots[len(roots)/2:]),
+		recNodeRoot(roots[:split]),
+		recNodeRoot(roots[split:]),
 	)
 }
 
@@ -110,6 +112,7 @@ func TestSectorRoot(t *testing.T) {
 func BenchmarkSectorRoot(b *testing.B) {
 	b.ReportAllocs()
 	var sector [renterhost.SectorSize]byte
+	b.SetBytes(renterhost.SectorSize)
 	for i := 0; i < b.N; i++ {
 		_ = SectorRoot(&sector)
 	}
@@ -143,11 +146,16 @@ func TestMetaRoot(t *testing.T) {
 			t.Error("MetaRoot does not match reference implementation")
 		}
 	}
+	// test some random tree sizes
+	for i := 0; i < 10; i++ {
+		roots := make([]crypto.Hash, frand.Intn(SegmentsPerSector))
+		if MetaRoot(roots) != recNodeRoot(roots) {
+			t.Error("MetaRoot does not match reference implementation")
+		}
+	}
 
-	// test an odd number of roots
 	roots = roots[:5]
-	refRoot := recNodeRoot([]crypto.Hash{recNodeRoot(roots[:4]), roots[4]})
-	if MetaRoot(roots) != refRoot {
+	if MetaRoot(roots) != recNodeRoot(roots) {
 		t.Error("MetaRoot does not match reference implementation")
 	}
 
@@ -157,75 +165,70 @@ func TestMetaRoot(t *testing.T) {
 	if allocs > 0 {
 		t.Error("expected MetaRoot to allocate 0 times, got", allocs)
 	}
+
+	// test a massive number of roots, larger than a single stack can store
+	const sectorsPerTerabyte = 262145
+	roots = make([]crypto.Hash, sectorsPerTerabyte)
+	if MetaRoot(roots) != recNodeRoot(roots) {
+		t.Error("MetaRoot does not match reference implementation")
+	}
 }
 
 func BenchmarkMetaRoot1TB(b *testing.B) {
 	const sectorsPerTerabyte = 262144
-	b.ReportAllocs()
 	roots := make([]crypto.Hash, sectorsPerTerabyte)
+	b.SetBytes(sectorsPerTerabyte * 32)
 	for i := 0; i < b.N; i++ {
 		_ = MetaRoot(roots)
 	}
 }
 
-func TestStack(t *testing.T) {
-	var s stack
+func TestProofStack(t *testing.T) {
+	var s proofStack
 
 	// test some known roots
 	if s.root() != (crypto.Hash{}) {
-		t.Error("wrong Stack root for empty stack")
+		t.Error("wrong root for empty stack")
 	}
 
 	roots := make([]crypto.Hash, 32)
 	for _, root := range roots {
-		s.insertNodeHash(root, 0)
+		s.insertNode(root, 0)
 	}
 	if s.root().String() != "1c23727030051d1bba1c887273addac2054afbd6926daddef6740f4f8bf1fb7f" {
-		t.Error("wrong Stack root for 32 empty roots")
+		t.Error("wrong root for 32 empty roots")
 	}
 
-	s.reset()
+	s = proofStack{}
 	roots[0][0] = 1
 	for _, root := range roots {
-		s.insertNodeHash(root, 0)
+		s.insertNode(root, 0)
 	}
 	if s.root().String() != "c5da05749139505704ea18a5d92d46427f652ac79c5f5712e4aefb68e20dffb8" {
-		t.Error("wrong Stack root for roots[0][0] = 1")
+		t.Error("wrong root for roots[0][0] = 1")
 	}
 
 	// test some random roots against a reference implementation
 	for i := 0; i < 5; i++ {
-		s.reset()
+		var s proofStack
 		for j := range roots {
 			frand.Read(roots[j][:])
-			s.insertNodeHash(roots[j], 0)
+			s.insertNode(roots[j], 0)
 		}
 		if s.root() != recNodeRoot(roots) {
-			t.Error("Stack root does not match reference implementation")
+			t.Error("root does not match reference implementation")
 		}
 	}
 
 	// test an odd number of roots
-	s.reset()
+	s = proofStack{}
 	roots = roots[:5]
 	for _, root := range roots {
-		s.insertNodeHash(root, 0)
+		s.insertNode(root, 0)
 	}
 	refRoot := recNodeRoot([]crypto.Hash{recNodeRoot(roots[:4]), roots[4]})
 	if s.root() != refRoot {
-		t.Error("Stack root does not match reference implementation")
-	}
-}
-
-func BenchmarkStack1TB(b *testing.B) {
-	const sectorsPerTerabyte = 262144
-	b.ReportAllocs()
-	var s stack
-	for i := 0; i < b.N; i++ {
-		s.reset()
-		for j := 0; j < sectorsPerTerabyte; j++ {
-			s.insertNodeHash(crypto.Hash{}, 0)
-		}
+		t.Error("root does not match reference implementation")
 	}
 }
 
@@ -810,12 +813,12 @@ func TestReaderRoot(t *testing.T) {
 
 	// test some random tree sizes against MetaRoot
 	for i := 0; i < 10; i++ {
-		numSegs := 1 << frand.Intn(bits.TrailingZeros(SegmentsPerSector))
+		numSegs := frand.Intn(SegmentsPerSector)
 		root, err := ReaderRoot(bytes.NewReader(sector[:numSegs*SegmentSize]))
 		if err != nil {
 			t.Fatal(err)
 		} else if root != MetaRoot(leafHashes[:numSegs]) {
-			t.Fatal("root mismatch")
+			t.Fatal("root mismatch", numSegs)
 		}
 	}
 
@@ -830,6 +833,7 @@ func BenchmarkReaderRoot(b *testing.B) {
 	var sector [renterhost.SectorSize]byte
 	r := bytes.NewReader(sector[:])
 	b.SetBytes(renterhost.SectorSize)
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		ReaderRoot(r)
 		r.Seek(0, io.SeekStart)
