@@ -8,70 +8,65 @@ import (
 	"lukechampine.com/us/merkle/blake2b"
 )
 
-// A stack is a Merkle tree that stores only one (or zero) nodes per level. If a
-// node is inserted at a level already containing a node, the nodes are merged
-// into the next level. This process repeats until it reaches an open level.
+// "Stacks" are compressed Merkle trees; each element of the stack stores the
+// root of a perfect subtree, and the index of the element indicates the size of
+// the subtree. This makes it possible to perform various Merkle tree operations
+// in log(n) space.
 //
-// Stacks are an alternative to storing the full Merkle tree; they compress the
-// tree to O(log2(n)) space at the cost of reduced functionality (nodes can only
-// be appended to the "end" of the stack; arbitrary insertion is not possible).
-//
-// This implementation only supports trees with up to SegmentsPerSector leaves.
-type stack struct {
-	stack [17]crypto.Hash
-	used  uint32 // one bit per stack elem; also number of nodes
+// Originally, there was just one stack type, which was used for both verifying
+// proofs and computing roots. Later, I wrote optimized Merkle tree code that
+// could hash multiple inputs simultaneously. While this greatly improved
+// performance, it could not easily be integrated with the verification code,
+// which generally deals with just one input at a time. So I split the
+// implementation into two stacks: one for verifying proofs (proofStack) and one
+// for computing roots as fast as possible (appendStack).
+
+type proofStack struct {
+	stack [17]crypto.Hash // ordered smallest-to-largest
+	used  uint32          // one bit per stack elem
 }
 
-func (s *stack) nodeHash(left, right crypto.Hash) crypto.Hash {
-	return blake2b.SumPair(left, right)
+func (s *proofStack) hasNodeAtHeight(height int) bool {
+	return s.used&(1<<height) != 0
 }
 
-// insertNodeHash inserts a node hash into the stack at the specified height. If
-// a hash is already present at that height, the hashes are merged up the tree
-// until an empty slot is reached.
-func (s *stack) insertNodeHash(h crypto.Hash, height int) {
-	// seek to first open slot, merging nodes as we go
-	i := uint64(height)
-	for ; s.used&(1<<i) != 0; i++ {
-		h = s.nodeHash(s.stack[i], h)
+func (s *proofStack) insertNode(h crypto.Hash, height int) {
+	i := height
+	for ; s.hasNodeAtHeight(i); i++ {
+		h = blake2b.SumPair(s.stack[i], h)
 	}
 	s.stack[i] = h
-	s.used += 1 << uint(height) // nice
+	s.used += 1 << height
 }
 
-// appendLeaf inserts the hash of leaf at height 0.
-func (s *stack) appendLeaf(leaf []byte) {
-	if len(leaf) != SegmentSize {
-		panic("leafHash: illegal input size")
-	}
-	s.insertNodeHash(blake2b.SumLeaf((*[64]byte)(unsafe.Pointer(&leaf[0]))), 0)
-}
-
-// reset clears the stack.
-func (s *stack) reset() {
-	s.used = 0 // nice
-}
-
-// root returns the root of the Merkle tree. It does not modify the stack. If
-// the stack is empty, root returns a zero-valued hash.
-func (s *stack) root() crypto.Hash {
+func (s *proofStack) root() crypto.Hash {
 	i := bits.TrailingZeros32(s.used)
 	if i == 32 {
 		return crypto.Hash{}
 	}
 	root := s.stack[i]
 	for i++; i < 32; i++ {
-		if s.used&(1<<i) != 0 {
-			root = s.nodeHash(s.stack[i], root)
+		if s.hasNodeAtHeight(i) {
+			root = blake2b.SumPair(s.stack[i], root)
 		}
 	}
 	return root
 }
 
 type appendStack struct {
-	stack   [15][4][32]byte
+	// Unlike proofStack, this stack is ordered largest-to-smallest, and stores
+	// four subtree roots per height. This ordering allows us to cast two
+	// adjacent stack elements into a single [8][32]byte, which reduces copying
+	// when hashing.
+	stack [15][4][32]byte
+	// Since we operate on 8 nodes at a time, we need a buffer to hold nodes
+	// until we have enough. And since the buffer is adjacent to the stack in
+	// memory, we can again avoid some copying.
 	nodeBuf [4][32]byte
-	used    uint32
+	// Like proofStack, 'used' is both the number of leaves appended and a bit vector
+	// that indicates which elements of the stack are active. We also use it to
+	// determine how many nodes are the buffer.
+	used uint32
 }
 
 // We rely on the nodeBuf field immediately following the last element of the
@@ -80,6 +75,8 @@ type appendStack struct {
 var _ [unsafe.Offsetof(appendStack{}.nodeBuf)]struct{} = [unsafe.Sizeof(appendStack{}.stack)]struct{}{}
 
 func (s *appendStack) hasNodeAtHeight(i int) bool {
+	// not as simple as in proofStack; order is reversed, and s.used is "off" by
+	// a factor of 4
 	return (s.used>>2)&(1<<(len(s.stack)-i-1)) != 0
 }
 
@@ -111,6 +108,8 @@ func (s *appendStack) appendLeaves(leaves []byte) {
 }
 
 func (s *appendStack) mergeNodeBuf() {
+	// same as in proofStack, except that we operate on 8 nodes at a time,
+	// exploiting the fact that the two groups of 4 are contiguous in memory
 	nodes := &s.nodeBuf
 	i := len(s.stack) - 1
 	for ; s.hasNodeAtHeight(i); i-- {

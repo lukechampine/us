@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
+	"lukechampine.com/us/merkle/blake2b"
 	"lukechampine.com/us/renterhost"
 )
 
@@ -56,12 +57,10 @@ func BuildProof(sector *[renterhost.SectorSize]byte, start, end int, precalc fun
 	}
 
 	// define a helper function for later
-	var s stack
+	var s appendStack
 	subtreeRoot := func(i, j int) crypto.Hash {
 		s.reset()
-		for ; i < j; i++ {
-			s.appendLeaf(sector[i*SegmentSize:][:SegmentSize])
-		}
+		s.appendLeaves(sector[i*SegmentSize : j*SegmentSize])
 		return s.root()
 	}
 
@@ -117,7 +116,6 @@ func verifyProof(proof []crypto.Hash, subtreeRoot func(i, j int) crypto.Hash, st
 	// proof set), but this is the simplest way I was able to implement it.
 	// Namely, it has the important advantage of being symmetrical to the
 	// Build operation.
-	var s stack
 	var rec func(int, int) crypto.Hash
 	rec = func(i, j int) crypto.Hash {
 		if i >= start && j <= end {
@@ -135,7 +133,7 @@ func verifyProof(proof []crypto.Hash, subtreeRoot func(i, j int) crypto.Hash, st
 			mid := (i + j) / 2
 			left := rec(i, mid)
 			right := rec(mid, j)
-			return s.nodeHash(left, right)
+			return blake2b.SumPair(left, right)
 		}
 	}
 	return rec(0, SegmentsPerSector) == root
@@ -152,12 +150,10 @@ func VerifyProof(proof []crypto.Hash, segments []byte, start, end int, root cryp
 		panic("VerifyProof: illegal proof range")
 	}
 
-	var s stack
+	var s appendStack
 	subtreeRoot := func(i, j int) crypto.Hash {
 		s.reset()
-		for ; i < j; i++ {
-			s.appendLeaf(segments[(i-start)*SegmentSize:][:SegmentSize])
-		}
+		s.appendLeaves(segments[(i-start)*SegmentSize : (j-start)*SegmentSize])
 		return s.root()
 	}
 	return verifyProof(proof, subtreeRoot, start, end, root)
@@ -197,12 +193,12 @@ func VerifySectorRangeProof(proof []crypto.Hash, rangeRoots []crypto.Hash, start
 		return false
 	}
 
-	var s stack
+	var s proofStack
 	insertRange := func(i, j int) {
 		for i < j {
 			subtreeSize := nextSubtreeSize(i, j)
 			height := bits.TrailingZeros(uint(subtreeSize)) // log2
-			s.insertNodeHash(proof[0], height)
+			s.insertNode(proof[0], height)
 			proof = proof[1:]
 			i += subtreeSize
 		}
@@ -210,7 +206,7 @@ func VerifySectorRangeProof(proof []crypto.Hash, rangeRoots []crypto.Hash, start
 
 	insertRange(0, start)
 	for _, h := range rangeRoots {
-		s.insertNodeHash(h, 0)
+		s.insertNode(h, 0)
 	}
 	insertRange(end, numRoots)
 	return s.root() == root
@@ -307,12 +303,12 @@ func PrecomputeAppendRoots(actions []renterhost.RPCWriteAction) []crypto.Hash {
 // precomputed SectorRoots of all Append actions.
 func VerifyDiffProof(actions []renterhost.RPCWriteAction, numLeaves int, treeHashes, leafHashes []crypto.Hash, oldRoot, newRoot crypto.Hash, appendRoots []crypto.Hash) bool {
 	verifyMulti := func(proofIndices []int, treeHashes, leafHashes []crypto.Hash, numLeaves int, root crypto.Hash) bool {
-		var s stack
+		var s proofStack
 		insertRange := func(i, j int) {
 			for i < j {
 				subtreeSize := nextSubtreeSize(i, j)
 				height := bits.TrailingZeros(uint(subtreeSize)) // log2
-				s.insertNodeHash(treeHashes[0], height)
+				s.insertNode(treeHashes[0], height)
 				treeHashes = treeHashes[1:]
 				i += subtreeSize
 			}
@@ -322,7 +318,7 @@ func VerifyDiffProof(actions []renterhost.RPCWriteAction, numLeaves int, treeHas
 		for i, end := range proofIndices {
 			insertRange(start, end)
 			start = end + 1
-			s.insertNodeHash(leafHashes[i], 0)
+			s.insertNode(leafHashes[i], 0)
 		}
 		insertRange(start, numLeaves)
 
@@ -454,12 +450,12 @@ func (rpv *RangeProofVerifier) Verify(proof []crypto.Hash, root crypto.Hash) boo
 	if len(proof) != ProofSize(SegmentsPerSector, rpv.start, rpv.end) {
 		return false
 	}
-	var s stack
+	var s proofStack
 	consume := func(roots *[]crypto.Hash, i, j int) {
 		for i < j && len(*roots) > 0 {
 			subtreeSize := nextSubtreeSize(i, j)
 			height := bits.TrailingZeros(uint(subtreeSize)) // log2
-			s.insertNodeHash((*roots)[0], height)
+			s.insertNode((*roots)[0], height)
 			*roots = (*roots)[1:]
 			i += subtreeSize
 		}
