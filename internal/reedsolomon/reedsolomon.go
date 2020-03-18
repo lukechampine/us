@@ -16,6 +16,13 @@ import (
 	"errors"
 	"io"
 	"sync"
+
+	"golang.org/x/sys/cpu"
+)
+
+var (
+	useSSSE3 = cpu.X86.HasSSSE3
+	useAVX2  = cpu.X86.HasAVX2
 )
 
 // ReedSolomon contains a matrix for a specific
@@ -28,7 +35,6 @@ type ReedSolomon struct {
 	m            matrix
 	tree         inversionTree
 	parity       [][]byte
-	o            options
 }
 
 // ErrInvShardNum will be returned by New, if you attempt to create
@@ -72,71 +78,16 @@ func buildMatrix(dataShards, totalShards int) (matrix, error) {
 	return vm.Multiply(topInv)
 }
 
-// buildMatrixPAR1 creates the matrix to use for encoding according to
-// the PARv1 spec, given the number of data shards and the number of
-// total shards. Note that the method they use is buggy, and may lead
-// to cases where recovery is impossible, even if there are enough
-// parity shards.
-//
-// The top square of the matrix is guaranteed to be an identity
-// matrix, which means that the data shards are unchanged after
-// encoding.
-func buildMatrixPAR1(dataShards, totalShards int) (matrix, error) {
-	result, err := newMatrix(totalShards, dataShards)
-	if err != nil {
-		return nil, err
-	}
-
-	for r, row := range result {
-		// The top portion of the matrix is the identity
-		// matrix, and the bottom is a transposed Vandermonde
-		// matrix starting at 1 instead of 0.
-		if r < dataShards {
-			result[r][r] = 1
-		} else {
-			for c := range row {
-				result[r][c] = galExp(byte(c+1), r-dataShards)
-			}
-		}
-	}
-	return result, nil
-}
-
-func buildMatrixCauchy(dataShards, totalShards int) (matrix, error) {
-	result, err := newMatrix(totalShards, dataShards)
-	if err != nil {
-		return nil, err
-	}
-
-	for r, row := range result {
-		// The top portion of the matrix is the identity
-		// matrix, and the bottom is a transposed Cauchy matrix.
-		if r < dataShards {
-			result[r][r] = 1
-		} else {
-			for c := range row {
-				result[r][c] = invTable[(byte(r ^ c))]
-			}
-		}
-	}
-	return result, nil
-}
-
 // New creates a new encoder and initializes it to
 // the number of data shards and parity shards that
 // you want to use. You can reuse this encoder.
 // Note that the maximum number of total shards is 256.
 // If no options are supplied, default options are used.
-func New(dataShards, parityShards int, opts ...Option) (*ReedSolomon, error) {
+func New(dataShards, parityShards int) (*ReedSolomon, error) {
 	r := &ReedSolomon{
 		DataShards:   dataShards,
 		ParityShards: parityShards,
 		Shards:       dataShards + parityShards,
-		o:            defaultOptions,
-	}
-
-	for _, opt := range opts {
-		opt(&r.o)
 	}
 	if dataShards <= 0 || parityShards <= 0 {
 		return nil, ErrInvShardNum
@@ -147,14 +98,7 @@ func New(dataShards, parityShards int, opts ...Option) (*ReedSolomon, error) {
 	}
 
 	var err error
-	switch {
-	case r.o.useCauchy:
-		r.m, err = buildMatrixCauchy(dataShards, r.Shards)
-	case r.o.usePAR1Matrix:
-		r.m, err = buildMatrixPAR1(dataShards, r.Shards)
-	default:
-		r.m, err = buildMatrix(dataShards, r.Shards)
-	}
+	r.m, err = buildMatrix(dataShards, r.Shards)
 	if err != nil {
 		return nil, err
 	}
@@ -189,39 +133,12 @@ func (r *ReedSolomon) Encode(shards [][]byte) error {
 	if len(shards) != r.Shards {
 		return ErrTooFewShards
 	}
-
 	err := checkShards(shards, false)
 	if err != nil {
 		return err
 	}
-
-	// Get the slice of output buffers.
-	output := shards[r.DataShards:]
-
-	// Do the coding.
-	r.codeSomeShardsP(r.parity, shards[0:r.DataShards], output, r.ParityShards, len(shards[0]))
+	r.codeSomeShardsP(r.parity, shards[:r.DataShards], shards[r.DataShards:], r.ParityShards, len(shards[0]))
 	return nil
-}
-
-// ErrInvalidInput is returned if invalid input parameter of Update.
-var ErrInvalidInput = errors.New("invalid input")
-
-// Verify returns true if the parity shards contain the right data.
-// The data is the same format as Encode. No data is modified.
-func (r *ReedSolomon) Verify(shards [][]byte) (bool, error) {
-	if len(shards) != r.Shards {
-		return false, ErrTooFewShards
-	}
-	err := checkShards(shards, false)
-	if err != nil {
-		return false, err
-	}
-
-	// Slice of buffers being checked.
-	toCheck := shards[r.DataShards:]
-
-	// Do the checking.
-	return r.checkSomeShards(r.parity, shards[0:r.DataShards], toCheck, r.ParityShards, len(shards[0])), nil
 }
 
 // Multiplies a subset of rows from a coding matrix by a full set of
@@ -233,26 +150,13 @@ func (r *ReedSolomon) Verify(shards [][]byte) (bool, error) {
 // The number of outputs computed, and the
 // number of matrix rows used, is determined by
 // outputCount, which is the number of outputs to compute.
-func (r *ReedSolomon) codeSomeShards(matrixRows, inputs, outputs [][]byte, outputCount, byteCount int) {
-	for c := 0; c < r.DataShards; c++ {
-		in := inputs[c]
-		for iRow := 0; iRow < outputCount; iRow++ {
-			if c == 0 {
-				galMulSlice(matrixRows[iRow][c], in, outputs[iRow], r.o.useSSSE3, r.o.useAVX2)
-			} else {
-				galMulSliceXor(matrixRows[iRow][c], in, outputs[iRow], r.o.useSSSE3, r.o.useAVX2)
-			}
-		}
-	}
-}
-
-// Perform the same as codeSomeShards, but split the workload into
-// several goroutines.
 func (r *ReedSolomon) codeSomeShardsP(matrixRows, inputs, outputs [][]byte, outputCount, byteCount int) {
+	const maxGoroutines = 384
+	const minSplitSize = 1024
 	var wg sync.WaitGroup
-	do := byteCount / r.o.maxGoroutines
-	if do < r.o.minSplitSize {
-		do = r.o.minSplitSize
+	do := byteCount / maxGoroutines
+	if do < minSplitSize {
+		do = minSplitSize
 	}
 	// Make sizes divisible by 32
 	do = (do + 31) & (^31)
@@ -267,9 +171,9 @@ func (r *ReedSolomon) codeSomeShardsP(matrixRows, inputs, outputs [][]byte, outp
 				in := inputs[c][start:stop]
 				for iRow := 0; iRow < outputCount; iRow++ {
 					if c == 0 {
-						galMulSlice(matrixRows[iRow][c], in, outputs[iRow][start:stop], r.o.useSSSE3, r.o.useAVX2)
+						galMulSlice(matrixRows[iRow][c], in, outputs[iRow][start:stop], useSSSE3, useAVX2)
 					} else {
-						galMulSliceXor(matrixRows[iRow][c], in, outputs[iRow][start:stop], r.o.useSSSE3, r.o.useAVX2)
+						galMulSliceXor(matrixRows[iRow][c], in, outputs[iRow][start:stop], useSSSE3, useAVX2)
 					}
 				}
 			}
@@ -278,83 +182,6 @@ func (r *ReedSolomon) codeSomeShardsP(matrixRows, inputs, outputs [][]byte, outp
 		start += do
 	}
 	wg.Wait()
-}
-
-// checkSomeShards is mostly the same as codeSomeShards,
-// except this will check values and return
-// as soon as a difference is found.
-func (r *ReedSolomon) checkSomeShards(matrixRows, inputs, toCheck [][]byte, outputCount, byteCount int) bool {
-	if r.o.maxGoroutines > 1 && byteCount > r.o.minSplitSize {
-		return r.checkSomeShardsP(matrixRows, inputs, toCheck, outputCount, byteCount)
-	}
-	outputs := make([][]byte, len(toCheck))
-	for i := range outputs {
-		outputs[i] = make([]byte, byteCount)
-	}
-	for c := 0; c < r.DataShards; c++ {
-		in := inputs[c]
-		for iRow := 0; iRow < outputCount; iRow++ {
-			galMulSliceXor(matrixRows[iRow][c], in, outputs[iRow], r.o.useSSSE3, r.o.useAVX2)
-		}
-	}
-
-	for i, calc := range outputs {
-		if !bytes.Equal(calc, toCheck[i]) {
-			return false
-		}
-	}
-	return true
-}
-
-func (r *ReedSolomon) checkSomeShardsP(matrixRows, inputs, toCheck [][]byte, outputCount, byteCount int) bool {
-	same := true
-	var mu sync.RWMutex // For above
-
-	var wg sync.WaitGroup
-	do := byteCount / r.o.maxGoroutines
-	if do < r.o.minSplitSize {
-		do = r.o.minSplitSize
-	}
-	// Make sizes divisible by 16
-	do = (do + 15) & (^15)
-	start := 0
-	for start < byteCount {
-		if start+do > byteCount {
-			do = byteCount - start
-		}
-		wg.Add(1)
-		go func(start, do int) {
-			defer wg.Done()
-			outputs := make([][]byte, len(toCheck))
-			for i := range outputs {
-				outputs[i] = make([]byte, do)
-			}
-			for c := 0; c < r.DataShards; c++ {
-				mu.RLock()
-				if !same {
-					mu.RUnlock()
-					return
-				}
-				mu.RUnlock()
-				in := inputs[c][start : start+do]
-				for iRow := 0; iRow < outputCount; iRow++ {
-					galMulSliceXor(matrixRows[iRow][c], in, outputs[iRow], r.o.useSSSE3, r.o.useAVX2)
-				}
-			}
-
-			for i, calc := range outputs {
-				if !bytes.Equal(calc, toCheck[i][start:start+do]) {
-					mu.Lock()
-					same = false
-					mu.Unlock()
-					return
-				}
-			}
-		}(start, do)
-		start += do
-	}
-	wg.Wait()
-	return same
 }
 
 // ErrShardNoData will be returned if there are no shards,
@@ -543,7 +370,7 @@ func (r *ReedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
 	for iShard := 0; iShard < r.DataShards; iShard++ {
 		if len(shards[iShard]) == 0 {
 			if cap(shards[iShard]) >= shardSize {
-				shards[iShard] = shards[iShard][0:shardSize]
+				shards[iShard] = shards[iShard][:shardSize]
 			} else {
 				shards[iShard] = make([]byte, shardSize)
 			}
@@ -569,7 +396,7 @@ func (r *ReedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
 	for iShard := r.DataShards; iShard < r.Shards; iShard++ {
 		if len(shards[iShard]) == 0 {
 			if cap(shards[iShard]) >= shardSize {
-				shards[iShard] = shards[iShard][0:shardSize]
+				shards[iShard] = shards[iShard][:shardSize]
 			} else {
 				shards[iShard] = make([]byte, shardSize)
 			}
@@ -586,48 +413,9 @@ func (r *ReedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
 // to fill the number of shards.
 var ErrShortData = errors.New("not enough data to fill the number of requested shards")
 
-// Split a data slice into the number of shards given to the encoder,
-// and create empty parity shards if necessary.
-//
-// The data will be split into equally sized shards.
-// If the data size isn't divisible by the number of shards,
-// the last shard will contain extra zeros.
-//
-// There must be at least 1 byte otherwise ErrShortData will be
-// returned.
-//
-// The data will not be copied, except for the last shard, so you
-// should not modify the data of the input slice afterwards.
-func (r *ReedSolomon) Split(data []byte) ([][]byte, error) {
-	if len(data) == 0 {
-		return nil, ErrShortData
-	}
-	// Calculate number of bytes per data shard.
-	perShard := (len(data) + r.DataShards - 1) / r.DataShards
-
-	if cap(data) > len(data) {
-		data = data[:cap(data)]
-	}
-
-	// Only allocate memory if necessary
-	if len(data) < (r.Shards * perShard) {
-		// Pad data to r.Shards*perShard.
-		padding := make([]byte, (r.Shards*perShard)-len(data))
-		data = append(data, padding...)
-	}
-
-	// Split into equal-length shards.
-	dst := make([][]byte, r.Shards)
-	for i := range dst {
-		dst[i] = data[:perShard]
-		data = data[perShard:]
-	}
-
-	return dst, nil
-}
-
 // SplitMulti splits data into blocks of shards, where each block has subsize
-// bytes. The shards must have sufficient capacity to hold the sharded data.
+// bytes. The shards must have sufficient capacity to hold the sharded data. The
+// length of the shards will be modified to fit their new contents.
 func (r *ReedSolomon) SplitMulti(data []byte, shards [][]byte, subsize int) error {
 	chunkSize := r.DataShards * subsize
 	numChunks := len(data) / chunkSize
@@ -658,54 +446,6 @@ func (r *ReedSolomon) SplitMulti(data []byte, shards [][]byte, subsize int) erro
 // ErrReconstructRequired is returned if too few data shards are intact and a
 // reconstruction is required before you can successfully join the shards.
 var ErrReconstructRequired = errors.New("reconstruction required as one or more required data shards are nil")
-
-// Join the shards and write the data segment to dst.
-//
-// Only the data shards are considered.
-// You must supply the exact output size you want.
-//
-// If there are to few shards given, ErrTooFewShards will be returned.
-// If the total data size is less than outSize, ErrShortData will be returned.
-// If one or more required data shards are nil, ErrReconstructRequired will be returned.
-func (r *ReedSolomon) Join(dst io.Writer, shards [][]byte, outSize int) error {
-	// Do we have enough shards?
-	if len(shards) < r.DataShards {
-		return ErrTooFewShards
-	}
-	shards = shards[:r.DataShards]
-
-	// Do we have enough data?
-	size := 0
-	for _, shard := range shards {
-		if shard == nil {
-			return ErrReconstructRequired
-		}
-		size += len(shard)
-
-		// Do we have enough data already?
-		if size >= outSize {
-			break
-		}
-	}
-	if size < outSize {
-		return ErrShortData
-	}
-
-	// Copy data to dst
-	write := outSize
-	for _, shard := range shards {
-		if write < len(shard) {
-			_, err := dst.Write(shard[:write])
-			return err
-		}
-		n, err := dst.Write(shard)
-		if err != nil {
-			return err
-		}
-		write -= n
-	}
-	return nil
-}
 
 // JoinMulti joins the supplied multi-block shards, writing them to dst. The
 // first 'skip' bytes of the recovered data are skipped, and 'writeLen' bytes
