@@ -313,6 +313,83 @@ func (r *RPCFormContractSignatures) unmarshalBuffer(b *objBuffer) error {
 	return b.Err()
 }
 
+// RPCRenewAndClear
+
+func (r *RPCRenewAndClearContractRequest) marshalledSize() int {
+	txnsSize := 24
+	for i := range r.Transactions {
+		txnsSize += (*objTransaction)(&r.Transactions[i]).marshalledSize()
+	}
+	txnsSize += (*objSiaPublicKey)(&r.RenterKey).marshalledSize()
+	for i := range r.FinalValidProofValues {
+		txnsSize += (*objCurrency)(&r.FinalValidProofValues[i]).marshalledSize()
+	}
+	for i := range r.FinalMissedProofValues {
+		txnsSize += (*objCurrency)(&r.FinalMissedProofValues[i]).marshalledSize()
+	}
+	return txnsSize
+}
+
+func (r *RPCRenewAndClearContractRequest) marshalBuffer(b *objBuffer) {
+	b.writePrefix(len(r.Transactions))
+	for i := range r.Transactions {
+		(*objTransaction)(&r.Transactions[i]).marshalBuffer(b)
+	}
+	(*objSiaPublicKey)(&r.RenterKey).marshalBuffer(b)
+	b.writePrefix(len(r.FinalValidProofValues))
+	for i := range r.FinalValidProofValues {
+		(*objCurrency)(&r.FinalValidProofValues[i]).marshalBuffer(b)
+	}
+	b.writePrefix(len(r.FinalMissedProofValues))
+	for i := range r.FinalMissedProofValues {
+		(*objCurrency)(&r.FinalMissedProofValues[i]).marshalBuffer(b)
+	}
+}
+
+func (r *RPCRenewAndClearContractRequest) unmarshalBuffer(b *objBuffer) error {
+	r.Transactions = make([]types.Transaction, b.readPrefix(sizeofTransaction))
+	for i := range r.Transactions {
+		(*objTransaction)(&r.Transactions[i]).unmarshalBuffer(b)
+	}
+	(*objSiaPublicKey)(&r.RenterKey).unmarshalBuffer(b)
+	r.FinalValidProofValues = make([]types.Currency, b.readPrefix(sizeofCurrency))
+	for i := range r.FinalValidProofValues {
+		(*objCurrency)(&r.FinalValidProofValues[i]).unmarshalBuffer(b)
+	}
+	r.FinalMissedProofValues = make([]types.Currency, b.readPrefix(sizeofCurrency))
+	for i := range r.FinalMissedProofValues {
+		(*objCurrency)(&r.FinalMissedProofValues[i]).unmarshalBuffer(b)
+	}
+	return b.Err()
+}
+
+func (r *RPCRenewAndClearContractSignatures) marshalledSize() int {
+	sigsSize := 16
+	for i := range r.ContractSignatures {
+		sigsSize += (*objTransactionSignature)(&r.ContractSignatures[i]).marshalledSize()
+	}
+	return sigsSize + (*objTransactionSignature)(&r.RevisionSignature).marshalledSize() + len(r.FinalRevisionSignature)
+}
+
+func (r *RPCRenewAndClearContractSignatures) marshalBuffer(b *objBuffer) {
+	b.writePrefix(len(r.ContractSignatures))
+	for i := range r.ContractSignatures {
+		(*objTransactionSignature)(&r.ContractSignatures[i]).marshalBuffer(b)
+	}
+	(*objTransactionSignature)(&r.RevisionSignature).marshalBuffer(b)
+	b.writePrefixedBytes(r.FinalRevisionSignature)
+}
+
+func (r *RPCRenewAndClearContractSignatures) unmarshalBuffer(b *objBuffer) error {
+	r.ContractSignatures = make([]types.TransactionSignature, b.readPrefix(sizeofTransactionSignature))
+	for i := range r.ContractSignatures {
+		(*objTransactionSignature)(&r.ContractSignatures[i]).unmarshalBuffer(b)
+	}
+	(*objTransactionSignature)(&r.RevisionSignature).unmarshalBuffer(b)
+	r.FinalRevisionSignature = b.readPrefixedBytes()
+	return b.Err()
+}
+
 // RPCLock
 
 func (r *RPCLockRequest) marshalledSize() int {

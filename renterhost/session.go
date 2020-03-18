@@ -501,14 +501,15 @@ var (
 
 // RPC IDs
 var (
-	RPCFormContractID  = newSpecifier("LoopFormContract")
-	RPCLockID          = newSpecifier("LoopLock")
-	RPCReadID          = newSpecifier("LoopRead")
-	RPCRenewContractID = newSpecifier("LoopRenew")
-	RPCSectorRootsID   = newSpecifier("LoopSectorRoots")
-	RPCSettingsID      = newSpecifier("LoopSettings")
-	RPCUnlockID        = newSpecifier("LoopUnlock")
-	RPCWriteID         = newSpecifier("LoopWrite")
+	RPCFormContractID       = newSpecifier("LoopFormContract")
+	RPCLockID               = newSpecifier("LoopLock")
+	RPCReadID               = newSpecifier("LoopRead")
+	RPCRenewContractID      = newSpecifier("LoopRenew")
+	RPCRenewClearContractID = newSpecifier("LoopRenewClear")
+	RPCSectorRootsID        = newSpecifier("LoopSectorRoots")
+	RPCSettingsID           = newSpecifier("LoopSettings")
+	RPCUnlockID             = newSpecifier("LoopUnlock")
+	RPCWriteID              = newSpecifier("LoopWrite")
 )
 
 // Read/Write actions
@@ -524,10 +525,19 @@ var (
 // RPC request/response objects
 type (
 	// RPCFormContractRequest contains the request parameters for the
-	// FormContract RPC.
+	// FormContract and RenewContract RPCs.
 	RPCFormContractRequest struct {
 		Transactions []types.Transaction
 		RenterKey    types.SiaPublicKey
+	}
+
+	// RPCRenewAndClearContractRequest contains the request parameters for the
+	// RenewAndClearContract RPC.
+	RPCRenewAndClearContractRequest struct {
+		Transactions           []types.Transaction
+		RenterKey              types.SiaPublicKey
+		FinalValidProofValues  []types.Currency
+		FinalMissedProofValues []types.Currency
 	}
 
 	// RPCFormContractAdditions contains the parent transaction, inputs, and
@@ -544,6 +554,16 @@ type (
 	RPCFormContractSignatures struct {
 		ContractSignatures []types.TransactionSignature
 		RevisionSignature  types.TransactionSignature
+	}
+
+	// RPCRenewAndClearContractSignatures contains the signatures for a contract
+	// transaction, initial revision, and final revision of the contract being
+	// renewed. These signatures are sent by both the renter and host during the
+	// RenewAndClear RPC.
+	RPCRenewAndClearContractSignatures struct {
+		ContractSignatures     []types.TransactionSignature
+		RevisionSignature      types.TransactionSignature
+		FinalRevisionSignature []byte
 	}
 
 	// RPCLockRequest contains the request parameters for the Lock RPC.
