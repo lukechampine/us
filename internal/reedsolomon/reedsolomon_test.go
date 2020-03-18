@@ -9,12 +9,36 @@ package reedsolomon
 
 import (
 	"bytes"
-	"fmt"
 	"math/rand"
-	"runtime"
-	"sync"
 	"testing"
 )
+
+func verify(r *ReedSolomon, shards [][]byte) (bool, error) {
+	if len(shards) != r.Shards {
+		return false, ErrTooFewShards
+	}
+	err := checkShards(shards, false)
+	if err != nil {
+		return false, err
+	}
+	toCheck := shards[r.DataShards:]
+	outputs := make([][]byte, len(toCheck))
+	for i := range outputs {
+		outputs[i] = make([]byte, len(shards[0]))
+	}
+	for c := 0; c < r.DataShards; c++ {
+		in := shards[c]
+		for iRow := 0; iRow < r.ParityShards; iRow++ {
+			galMulSliceXor(r.parity[iRow][c], in, outputs[iRow], useSSSE3, useAVX2)
+		}
+	}
+	for i, calc := range outputs {
+		if !bytes.Equal(calc, toCheck[i]) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
 
 func isIncreasingAndContainsDataRow(indices []int) bool {
 	cols := len(indices)
@@ -81,69 +105,9 @@ func findSingularSubMatrix(m matrix) (matrix, error) {
 	return nil, nil
 }
 
-func TestBuildMatrixPAR1Singular(t *testing.T) {
-	totalShards := 8
-	dataShards := 4
-	m, err := buildMatrixPAR1(dataShards, totalShards)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	singularSubMatrix, err := findSingularSubMatrix(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if singularSubMatrix == nil {
-		t.Fatal("No singular sub-matrix found")
-	}
-
-	t.Logf("matrix %s has singular sub-matrix %s", m, singularSubMatrix)
-}
-
-func testOpts() [][]Option {
-	if testing.Short() {
-		return [][]Option{
-			{WithPAR1Matrix()}, {WithCauchyMatrix()},
-		}
-	}
-	opts := [][]Option{
-		{WithPAR1Matrix()}, {WithCauchyMatrix()},
-		{WithMaxGoroutines(1), WithMinSplitSize(500), withSSE3(false), withAVX2(false)},
-		{WithMaxGoroutines(5000), WithMinSplitSize(50), withSSE3(false), withAVX2(false)},
-		{WithMaxGoroutines(5000), WithMinSplitSize(500000), withSSE3(false), withAVX2(false)},
-		{WithMaxGoroutines(1), WithMinSplitSize(500000), withSSE3(false), withAVX2(false)},
-		{WithAutoGoroutines(50000), WithMinSplitSize(500)},
-	}
-	for _, o := range opts[:] {
-		if defaultOptions.useSSSE3 {
-			n := make([]Option, len(o), len(o)+1)
-			copy(n, o)
-			n = append(n, withSSE3(true))
-			opts = append(opts, n)
-		}
-		if defaultOptions.useAVX2 {
-			n := make([]Option, len(o), len(o)+1)
-			copy(n, o)
-			n = append(n, withAVX2(true))
-			opts = append(opts, n)
-		}
-	}
-	return opts
-}
-
 func TestEncoding(t *testing.T) {
-	testEncoding(t)
-	for i, o := range testOpts() {
-		t.Run(fmt.Sprintf("options %d", i), func(t *testing.T) {
-			testEncoding(t, o...)
-		})
-	}
-}
-
-func testEncoding(t *testing.T, o ...Option) {
 	perShard := 50000
-	r, err := New(10, 3, o...)
+	r, err := New(10, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +125,7 @@ func testEncoding(t *testing.T, o ...Option) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err := r.Verify(shards)
+	ok, err := verify(r, shards)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,17 +147,8 @@ func testEncoding(t *testing.T, o ...Option) {
 }
 
 func TestReconstruct(t *testing.T) {
-	testReconstruct(t)
-	for i, o := range testOpts() {
-		t.Run(fmt.Sprintf("options %d", i), func(t *testing.T) {
-			testReconstruct(t, o...)
-		})
-	}
-}
-
-func testReconstruct(t *testing.T, o ...Option) {
 	perShard := 50000
-	r, err := New(10, 3, o...)
+	r, err := New(10, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +185,7 @@ func testReconstruct(t *testing.T, o ...Option) {
 		t.Fatal(err)
 	}
 
-	ok, err := r.Verify(shards)
+	ok, err := verify(r, shards)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,17 +219,8 @@ func testReconstruct(t *testing.T, o ...Option) {
 }
 
 func TestReconstructData(t *testing.T) {
-	testReconstructData(t)
-	for i, o := range testOpts() {
-		t.Run(fmt.Sprintf("options %d", i), func(t *testing.T) {
-			testReconstruct(t, o...)
-		})
-	}
-}
-
-func testReconstructData(t *testing.T, o ...Option) {
 	perShard := 100000
-	r, err := New(8, 5, o...)
+	r, err := New(8, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +258,7 @@ func testReconstructData(t *testing.T, o ...Option) {
 	}
 
 	// Since all parity shards are available, verification will succeed
-	ok, err := r.Verify(shards)
+	ok, err := verify(r, shards)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +281,7 @@ func testReconstructData(t *testing.T, o ...Option) {
 	}
 
 	// Verification will fail now due to absence of a parity block
-	_, err = r.Verify(shards)
+	_, err = verify(r, shards)
 	if err != ErrShardSize {
 		t.Errorf("expected %v, got %v", ErrTooFewShards, err)
 	}
@@ -352,7 +298,7 @@ func testReconstructData(t *testing.T, o ...Option) {
 		t.Fatal(err)
 	}
 
-	_, err = r.Verify(shards)
+	_, err = verify(r, shards)
 	if err != ErrShardSize {
 		t.Errorf("expected %v, got %v", ErrTooFewShards, err)
 	}
@@ -380,55 +326,9 @@ func testReconstructData(t *testing.T, o ...Option) {
 	}
 }
 
-func TestReconstructPAR1Singular(t *testing.T) {
-	perShard := 50
-	r, err := New(4, 4, WithPAR1Matrix())
-	if err != nil {
-		t.Fatal(err)
-	}
-	shards := make([][]byte, 8)
-	for s := range shards {
-		shards[s] = make([]byte, perShard)
-	}
-
-	rand.Seed(0)
-	for s := 0; s < 8; s++ {
-		fillRandom(shards[s])
-	}
-
-	err = r.Encode(shards)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Reconstruct with only the last data shard present, and the
-	// first, second, and fourth parity shard present (based on
-	// the result of TestBuildMatrixPAR1Singular). This should
-	// fail.
-	shards[0] = nil
-	shards[1] = nil
-	shards[2] = nil
-	shards[6] = nil
-
-	err = r.Reconstruct(shards)
-	if err != errSingular {
-		t.Fatal(err)
-		t.Errorf("expected %v, got %v", errSingular, err)
-	}
-}
-
 func TestVerify(t *testing.T) {
-	testVerify(t)
-	for i, o := range testOpts() {
-		t.Run(fmt.Sprintf("options %d", i), func(t *testing.T) {
-			testVerify(t, o...)
-		})
-	}
-}
-
-func testVerify(t *testing.T, o ...Option) {
 	perShard := 33333
-	r, err := New(10, 4, o...)
+	r, err := New(10, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +346,7 @@ func testVerify(t *testing.T, o ...Option) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err := r.Verify(shards)
+	ok, err := verify(r, shards)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +356,7 @@ func testVerify(t *testing.T, o ...Option) {
 
 	// Put in random data. Verification should fail
 	fillRandom(shards[10])
-	ok, err = r.Verify(shards)
+	ok, err = verify(r, shards)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +370,7 @@ func testVerify(t *testing.T, o ...Option) {
 	}
 	// Fill a data segment with random data
 	fillRandom(shards[0])
-	ok, err = r.Verify(shards)
+	ok, err = verify(r, shards)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,12 +378,12 @@ func testVerify(t *testing.T, o ...Option) {
 		t.Fatal("Verification did not fail")
 	}
 
-	_, err = r.Verify(make([][]byte, 1))
+	_, err = verify(r, make([][]byte, 1))
 	if err != ErrTooFewShards {
 		t.Errorf("expected %v, got %v", ErrTooFewShards, err)
 	}
 
-	_, err = r.Verify(make([][]byte, 14))
+	_, err = verify(r, make([][]byte, 14))
 	if err != ErrShardNoData {
 		t.Errorf("expected %v, got %v", ErrShardNoData, err)
 	}
@@ -523,7 +423,7 @@ func TestOneEncode(t *testing.T) {
 		t.Fatal("shard 9 mismatch")
 	}
 
-	ok, err := codec.Verify(shards)
+	ok, err := verify(codec, shards)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,7 +431,7 @@ func TestOneEncode(t *testing.T) {
 		t.Fatal("did not verify")
 	}
 	shards[8][0]++
-	ok, err = codec.Verify(shards)
+	ok, err = verify(codec, shards)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,7 +453,7 @@ func fillRandom(p []byte) {
 
 func benchmarkEncode(b *testing.B, dataShards, parityShards, shardSize int) {
 	b.SkipNow()
-	r, err := New(dataShards, parityShards, WithAutoGoroutines(shardSize))
+	r, err := New(dataShards, parityShards)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -622,7 +522,7 @@ func BenchmarkEncode17x3x16M(b *testing.B) {
 
 func benchmarkVerify(b *testing.B, dataShards, parityShards, shardSize int) {
 	b.SkipNow()
-	r, err := New(dataShards, parityShards, WithAutoGoroutines(shardSize))
+	r, err := New(dataShards, parityShards)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -644,7 +544,7 @@ func benchmarkVerify(b *testing.B, dataShards, parityShards, shardSize int) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err = r.Verify(shards)
+		_, err = verify(r, shards)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -695,7 +595,7 @@ func corruptRandom(shards [][]byte, dataShards, parityShards int) {
 
 func benchmarkReconstruct(b *testing.B, dataShards, parityShards, shardSize int) {
 	b.SkipNow()
-	r, err := New(dataShards, parityShards, WithAutoGoroutines(shardSize))
+	r, err := New(dataShards, parityShards)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -723,7 +623,7 @@ func benchmarkReconstruct(b *testing.B, dataShards, parityShards, shardSize int)
 		if err != nil {
 			b.Fatal(err)
 		}
-		ok, err := r.Verify(shards)
+		ok, err := verify(r, shards)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -777,7 +677,7 @@ func corruptRandomData(shards [][]byte, dataShards, parityShards int) {
 
 func benchmarkReconstructData(b *testing.B, dataShards, parityShards, shardSize int) {
 	b.SkipNow()
-	r, err := New(dataShards, parityShards, WithAutoGoroutines(shardSize))
+	r, err := New(dataShards, parityShards)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -843,79 +743,21 @@ func BenchmarkReconstructData10x4x16M(b *testing.B) {
 	benchmarkReconstructData(b, 10, 4, 16*1024*1024)
 }
 
-func benchmarkReconstructP(b *testing.B, dataShards, parityShards, shardSize int) {
-	b.SkipNow()
-	r, err := New(dataShards, parityShards, WithAutoGoroutines(shardSize))
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	b.SetBytes(int64(shardSize * dataShards))
-	b.ReportAllocs()
-	runtime.GOMAXPROCS(runtime.NumCPU())
-	b.ResetTimer()
-
-	b.RunParallel(func(pb *testing.PB) {
-		shards := make([][]byte, parityShards+dataShards)
-		for s := range shards {
-			shards[s] = make([]byte, shardSize)
-		}
-
-		rand.Seed(0)
-		for s := 0; s < dataShards; s++ {
-			fillRandom(shards[s])
-		}
-		err = r.Encode(shards)
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		for pb.Next() {
-			corruptRandom(shards, dataShards, parityShards)
-
-			err = r.Reconstruct(shards)
-			if err != nil {
-				b.Fatal(err)
-			}
-			ok, err := r.Verify(shards)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if !ok {
-				b.Fatal("Verification failed")
-			}
-		}
-	})
-}
-
-// Benchmark 10 data slices with 2 parity slices holding 10000 bytes each
-func BenchmarkReconstructP10x2x10000(b *testing.B) {
-	benchmarkReconstructP(b, 10, 2, 10000)
-}
-
-// Benchmark 10 data slices with 5 parity slices holding 20000 bytes each
-func BenchmarkReconstructP10x5x20000(b *testing.B) {
-	benchmarkReconstructP(b, 10, 5, 20000)
-}
-
 func TestEncoderReconstruct(t *testing.T) {
-	testEncoderReconstruct(t)
-	for _, o := range testOpts() {
-		testEncoderReconstruct(t, o...)
-	}
-}
-
-func testEncoderReconstruct(t *testing.T, o ...Option) {
 	// Create some sample data
 	var data = make([]byte, 250000)
 	fillRandom(data)
 
 	// Create 5 data slices of 50000 elements each
-	enc, err := New(5, 3, o...)
+	enc, err := New(5, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	shards, err := enc.Split(data)
+	shards := make([][]byte, enc.DataShards+enc.ParityShards)
+	for i := range shards {
+		shards[i] = make([]byte, len(data))
+	}
+	err = enc.SplitMulti(data, shards, 64)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -925,7 +767,7 @@ func testEncoderReconstruct(t *testing.T, o ...Option) {
 	}
 
 	// Check that it verifies
-	ok, err := enc.Verify(shards)
+	ok, err := verify(enc, shards)
 	if !ok || err != nil {
 		t.Fatal("not ok:", ok, "err:", err)
 	}
@@ -940,14 +782,14 @@ func testEncoderReconstruct(t *testing.T, o ...Option) {
 	}
 
 	// Check that it verifies
-	ok, err = enc.Verify(shards)
+	ok, err = verify(enc, shards)
 	if !ok || err != nil {
 		t.Fatal("not ok:", ok, "err:", err)
 	}
 
 	// Recover original bytes
 	buf := new(bytes.Buffer)
-	err = enc.Join(buf, shards, len(data))
+	err = enc.JoinMulti(buf, shards, 64, 0, len(data))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -966,14 +808,14 @@ func testEncoderReconstruct(t *testing.T, o ...Option) {
 	}
 
 	// Check that it verifies
-	ok, err = enc.Verify(shards)
+	ok, err = verify(enc, shards)
 	if ok || err != nil {
 		t.Fatal("error or ok:", ok, "err:", err)
 	}
 
 	// Recovered data should not match original
 	buf.Reset()
-	err = enc.Join(buf, shards, len(data))
+	err = enc.JoinMulti(buf, shards, 64, 0, len(data))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -983,23 +825,23 @@ func testEncoderReconstruct(t *testing.T, o ...Option) {
 }
 
 func TestSplitJoin(t *testing.T) {
-	var data = make([]byte, 250000)
+	const subsize = 64
+	var data = make([]byte, subsize*5000)
 	rand.Seed(0)
 	fillRandom(data)
 
 	enc, _ := New(5, 3)
-	shards, err := enc.Split(data)
+	shards := make([][]byte, enc.DataShards+enc.ParityShards)
+	for i := range shards {
+		shards[i] = make([]byte, len(data)/enc.DataShards)
+	}
+	err := enc.SplitMulti(data, shards, subsize)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = enc.Split([]byte{})
-	if err != ErrShortData {
-		t.Errorf("expected %v, got %v", ErrShortData, err)
-	}
-
 	buf := new(bytes.Buffer)
-	err = enc.Join(buf, shards, 50)
+	err = enc.JoinMulti(buf, shards, subsize, 0, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1007,230 +849,21 @@ func TestSplitJoin(t *testing.T) {
 		t.Fatal("recovered data does match original")
 	}
 
-	err = enc.Join(buf, [][]byte{}, 0)
+	err = enc.JoinMulti(buf, [][]byte{}, subsize, 0, 0)
 	if err != ErrTooFewShards {
 		t.Errorf("expected %v, got %v", ErrTooFewShards, err)
 	}
 
-	err = enc.Join(buf, shards, len(data)+1)
+	err = enc.JoinMulti(buf, shards, subsize, 0, len(data)+1)
 	if err != ErrShortData {
 		t.Errorf("expected %v, got %v", ErrShortData, err)
 	}
 
 	shards[0] = nil
-	err = enc.Join(buf, shards, len(data))
+	err = enc.JoinMulti(buf, shards, subsize, 0, len(data))
 	if err != ErrReconstructRequired {
 		t.Errorf("expected %v, got %v", ErrReconstructRequired, err)
 	}
-}
-
-func TestCodeSomeShards(t *testing.T) {
-	var data = make([]byte, 250000)
-	fillRandom(data)
-	r, _ := New(5, 3)
-	shards, _ := r.Split(data)
-
-	old := runtime.GOMAXPROCS(1)
-	r.codeSomeShards(r.parity, shards[:r.DataShards], shards[r.DataShards:], r.ParityShards, len(shards[0]))
-
-	// hopefully more than 1 CPU
-	runtime.GOMAXPROCS(runtime.NumCPU())
-	r.codeSomeShards(r.parity, shards[:r.DataShards], shards[r.DataShards:], r.ParityShards, len(shards[0]))
-
-	// reset MAXPROCS, otherwise testing complains
-	runtime.GOMAXPROCS(old)
-}
-
-func TestStandardMatrices(t *testing.T) {
-	t.Skip("Skipping slow matrix check (~2 min)")
-	var wg sync.WaitGroup
-	wg.Add(256 - 1)
-	for i := 1; i < 256; i++ {
-		go func(i int) {
-			// i == n.o. datashards
-			defer wg.Done()
-			var shards = make([][]byte, 255)
-			for p := range shards {
-				v := byte(i)
-				shards[p] = []byte{v}
-			}
-			rng := rand.New(rand.NewSource(0))
-			for j := 1; j < 256; j++ {
-				// j == n.o. parity shards
-				if i+j > 255 {
-					continue
-				}
-				sh := shards[:i+j]
-				r, err := New(i, j, WithCauchyMatrix())
-				if err != nil {
-					// We are not supposed to write to t from goroutines.
-					t.Error("creating matrix size", i, j, ":", err)
-				}
-				err = r.Encode(sh)
-				if err != nil {
-					t.Error("encoding", i, j, ":", err)
-				}
-				for k := 0; k < j; k++ {
-					// Remove random shard.
-					r := int(rng.Int63n(int64(i + j)))
-					sh[r] = sh[r][:0]
-				}
-				err = r.Reconstruct(sh)
-				if err != nil {
-					t.Error("reconstructing", i, j, ":", err)
-				}
-				ok, err := r.Verify(sh)
-				if err != nil {
-					t.Error("verifying", i, j, ":", err)
-				}
-				if !ok {
-					t.Error(i, j, ok)
-				}
-				for k := range sh {
-					if k == i {
-						// Only check data shards
-						break
-					}
-					if sh[k][0] != byte(i) {
-						t.Error("does not match", i, j, k, sh[0], sh[k])
-					}
-				}
-			}
-		}(i)
-	}
-	wg.Wait()
-}
-
-func TestCauchyMatrices(t *testing.T) {
-	// Runtime ~15s.
-	t.Skip("Skipping slow matrix check")
-
-	var wg sync.WaitGroup
-	wg.Add(256 - 1)
-	for i := 1; i < 256; i++ {
-		go func(i int) {
-			// i == n.o. datashards
-			defer wg.Done()
-			var shards = make([][]byte, 255)
-			for p := range shards {
-				v := byte(i)
-				shards[p] = []byte{v}
-			}
-			rng := rand.New(rand.NewSource(0))
-			for j := 1; j < 256; j++ {
-				// j == n.o. parity shards
-				if i+j > 255 {
-					continue
-				}
-				sh := shards[:i+j]
-				r, err := New(i, j, WithCauchyMatrix())
-				if err != nil {
-					// We are not supposed to write to t from goroutines.
-					t.Error("creating matrix size", i, j, ":", err)
-				}
-				err = r.Encode(sh)
-				if err != nil {
-					t.Error("encoding", i, j, ":", err)
-				}
-				for k := 0; k < j; k++ {
-					// Remove random shard.
-					r := int(rng.Int63n(int64(i + j)))
-					sh[r] = sh[r][:0]
-				}
-				err = r.Reconstruct(sh)
-				if err != nil {
-					t.Error("reconstructing", i, j, ":", err)
-				}
-				ok, err := r.Verify(sh)
-				if err != nil {
-					t.Error("verifying", i, j, ":", err)
-				}
-				if !ok {
-					t.Error(i, j, ok)
-				}
-				for k := range sh {
-					if k == i {
-						// Only check data shards
-						break
-					}
-					if sh[k][0] != byte(i) {
-						t.Error("does not match", i, j, k, sh[0], sh[k])
-					}
-				}
-			}
-		}(i)
-	}
-	wg.Wait()
-}
-
-func TestPar1Matrices(t *testing.T) {
-	// Runtime ~15s.
-	t.Skip("Skipping slow matrix check")
-	var wg sync.WaitGroup
-	wg.Add(256 - 1)
-	for i := 1; i < 256; i++ {
-		go func(i int) {
-			// i == n.o. datashards
-			defer wg.Done()
-			var shards = make([][]byte, 255)
-			for p := range shards {
-				v := byte(i)
-				shards[p] = []byte{v}
-			}
-			rng := rand.New(rand.NewSource(0))
-			for j := 1; j < 256; j++ {
-				// j == n.o. parity shards
-				if i+j > 255 {
-					continue
-				}
-				sh := shards[:i+j]
-				r, err := New(i, j, WithPAR1Matrix())
-				if err != nil {
-					// We are not supposed to write to t from goroutines.
-					t.Error("creating matrix size", i, j, ":", err)
-				}
-				err = r.Encode(sh)
-				if err != nil {
-					t.Error("encoding", i, j, ":", err)
-				}
-				for k := 0; k < j; k++ {
-					// Remove random shard.
-					r := int(rng.Int63n(int64(i + j)))
-					sh[r] = sh[r][:0]
-				}
-				err = r.Reconstruct(sh)
-				if err != nil {
-					if err == errSingular {
-						t.Logf("Singular: %d (data), %d (parity)", i, j)
-						for p := range sh {
-							if len(sh[p]) == 0 {
-								shards[p] = []byte{byte(i)}
-							}
-						}
-						continue
-					}
-					t.Error("reconstructing", i, j, ":", err)
-				}
-				ok, err := r.Verify(sh)
-				if err != nil {
-					t.Error("verifying", i, j, ":", err)
-				}
-				if !ok {
-					t.Error(i, j, ok)
-				}
-				for k := range sh {
-					if k == i {
-						// Only check data shards
-						break
-					}
-					if sh[k][0] != byte(i) {
-						t.Error("does not match", i, j, k, sh[0], sh[k])
-					}
-				}
-			}
-		}(i)
-	}
-	wg.Wait()
 }
 
 func TestNew(t *testing.T) {
