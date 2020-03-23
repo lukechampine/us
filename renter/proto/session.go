@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/bits"
 	"net"
 	"sort"
@@ -30,6 +31,11 @@ var (
 	// question is already locked by another party. This is a transient error;
 	// the caller should retry later.
 	ErrContractLocked = errors.New("contract is locked by another party")
+
+	// ErrContractFinalized is returned by the Lock RPC when the contract in
+	// question has reached its maximum revision number, meaning the contract
+	// can no longer be revised.
+	ErrContractFinalized = errors.New("contract cannot be revised further")
 )
 
 // wrapResponseErr formats RPC response errors nicely, wrapping them in either
@@ -108,6 +114,10 @@ func (s *Session) call(rpcID renterhost.Specifier, req, resp renterhost.Protocol
 
 // Lock calls the Lock RPC, locking the supplied contract and synchronizing its
 // state with the host's most recent revision.
+//
+// Lock returns ErrContractFinalized if the contract can no longer be revised.
+// The contract will still be available via the Revision method, but invoking
+// other RPCs may result in errors or panics.
 func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey) (err error) {
 	defer wrapErr(&err, "Lock")
 	req := &renterhost.RPCLockRequest{
@@ -140,6 +150,9 @@ func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey) (err err
 	}
 	s.key = key
 
+	if s.rev.Revision.NewRevisionNumber == math.MaxUint64 {
+		return ErrContractFinalized
+	}
 	return nil
 }
 
