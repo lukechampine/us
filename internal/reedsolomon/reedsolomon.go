@@ -33,7 +33,6 @@ type ReedSolomon struct {
 	ParityShards int // Number of parity shards, should not be modified.
 	Shards       int // Total number of shards. Calculated, and should not be modified.
 	m            matrix
-	tree         inversionTree
 	parity       [][]byte
 }
 
@@ -102,13 +101,6 @@ func New(dataShards, parityShards int) (*ReedSolomon, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// Inverted matrices are cached in a tree keyed by the indices
-	// of the invalid rows of the data to reconstruct.
-	// The inversion root node will have the identity matrix as
-	// its inversion matrix because it implies there are no errors
-	// with the original data.
-	r.tree = newInversionTree(dataShards, parityShards)
 
 	r.parity = make([][]byte, parityShards)
 	for i := range r.parity {
@@ -322,40 +314,24 @@ func (r *ReedSolomon) reconstruct(shards [][]byte, dataOnly bool) error {
 		}
 	}
 
-	// Attempt to get the cached inverted matrix out of the tree
-	// based on the indices of the invalid rows.
-	dataDecodeMatrix := r.tree.GetInvertedMatrix(invalidIndices)
-
-	// If the inverted matrix isn't cached in the tree yet we must
-	// construct it ourselves and insert it into the tree for the
-	// future.  In this way the inversion tree is lazily loaded.
-	if dataDecodeMatrix == nil {
-		// Pull out the rows of the matrix that correspond to the
-		// shards that we have and build a square matrix.  This
-		// matrix could be used to generate the shards that we have
-		// from the original data.
-		subMatrix, _ := newMatrix(r.DataShards, r.DataShards)
-		for subMatrixRow, validIndex := range validIndices {
-			for c := 0; c < r.DataShards; c++ {
-				subMatrix[subMatrixRow][c] = r.m[validIndex][c]
-			}
+	// Pull out the rows of the matrix that correspond to the
+	// shards that we have and build a square matrix.  This
+	// matrix could be used to generate the shards that we have
+	// from the original data.
+	subMatrix, _ := newMatrix(r.DataShards, r.DataShards)
+	for subMatrixRow, validIndex := range validIndices {
+		for c := 0; c < r.DataShards; c++ {
+			subMatrix[subMatrixRow][c] = r.m[validIndex][c]
 		}
-		// Invert the matrix, so we can go from the encoded shards
-		// back to the original data.  Then pull out the row that
-		// generates the shard that we want to decode.  Note that
-		// since this matrix maps back to the original data, it can
-		// be used to create a data shard, but not a parity shard.
-		dataDecodeMatrix, err = subMatrix.Invert()
-		if err != nil {
-			return err
-		}
-
-		// Cache the inverted matrix in the tree for future use keyed on the
-		// indices of the invalid rows.
-		err = r.tree.InsertInvertedMatrix(invalidIndices, dataDecodeMatrix, r.Shards)
-		if err != nil {
-			return err
-		}
+	}
+	// Invert the matrix, so we can go from the encoded shards
+	// back to the original data.  Then pull out the row that
+	// generates the shard that we want to decode.  Note that
+	// since this matrix maps back to the original data, it can
+	// be used to create a data shard, but not a parity shard.
+	dataDecodeMatrix, err := subMatrix.Invert()
+	if err != nil {
+		return err
 	}
 
 	// Re-create any data shards that were missing.
