@@ -2,6 +2,7 @@ package ghost
 
 import (
 	"encoding/json"
+	"math"
 	"math/bits"
 	"net"
 	"time"
@@ -40,14 +41,14 @@ func (h *Host) handleConn(conn net.Conn) error {
 	}
 
 	rpcs := map[renterhost.Specifier]func(*session) error{
-		renterhost.RPCSettingsID:     h.rpcSettings,
-		renterhost.RPCFormContractID: h.rpcFormContract,
-		renterhost.RPCLockID:         h.rpcLock,
-		renterhost.RPCUnlockID:       h.rpcUnlock,
-		renterhost.RPCWriteID:        h.rpcWrite,
-		renterhost.RPCSectorRootsID:  h.rpcSectorRoots,
-		renterhost.RPCReadID:         h.rpcRead,
-		// modules.RPCLoopRenewContract: h.managedRPCLoopRenewContract,
+		renterhost.RPCFormContractID:       h.rpcFormContract,
+		renterhost.RPCLockID:               h.rpcLock,
+		renterhost.RPCReadID:               h.rpcRead,
+		renterhost.RPCRenewClearContractID: h.rpcRenewAndClearContract,
+		renterhost.RPCSectorRootsID:        h.rpcSectorRoots,
+		renterhost.RPCSettingsID:           h.rpcSettings,
+		renterhost.RPCUnlockID:             h.rpcUnlock,
+		renterhost.RPCWriteID:              h.rpcWrite,
 	}
 	for {
 		s.extendDeadline(time.Hour)
@@ -150,6 +151,105 @@ func (h *Host) rpcFormContract(s *session) error {
 	hostSigs := &renterhost.RPCFormContractSignatures{
 		ContractSignatures: nil,
 		RevisionSignature:  hostRevisionSig,
+	}
+	if err := s.sess.WriteResponse(hostSigs, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *Host) rpcRenewAndClearContract(s *session) error {
+	s.extendDeadline(120 * time.Second)
+
+	var req renterhost.RPCRenewAndClearContractRequest
+	if err := s.sess.ReadRequest(&req, 4096); err != nil {
+		return err
+	}
+	if len(req.Transactions) == 0 {
+		err := errors.New("transaction set is empty")
+		s.sess.WriteResponse(nil, err)
+		return err
+	}
+	txn := req.Transactions[len(req.Transactions)-1]
+	if len(txn.FileContracts) == 0 {
+		err := errors.New("transaction does not contain a file contract")
+		s.sess.WriteResponse(nil, err)
+		return err
+	}
+	fc := txn.FileContracts[0]
+
+	resp := &renterhost.RPCFormContractAdditions{
+		Parents: nil,
+		Inputs:  nil,
+		Outputs: nil,
+	}
+	if err := s.sess.WriteResponse(resp, nil); err != nil {
+		return err
+	}
+
+	// construct the final revision of the old contract
+	finalRev := s.contract.rev
+	finalRev.NewValidProofOutputs = append([]types.SiacoinOutput(nil), s.contract.rev.NewValidProofOutputs...)
+	for i, v := range req.FinalValidProofValues {
+		finalRev.NewValidProofOutputs[i].Value = v
+	}
+	finalRev.NewMissedProofOutputs = append([]types.SiacoinOutput(nil), s.contract.rev.NewMissedProofOutputs...)
+	for i, v := range req.FinalMissedProofValues {
+		finalRev.NewMissedProofOutputs[i].Value = v
+	}
+	finalRev.NewFileSize = 0
+	finalRev.NewFileMerkleRoot = crypto.Hash{}
+	finalRev.NewRevisionNumber = math.MaxUint64
+
+	// create initial (no-op revision)
+	initRevision := types.FileContractRevision{
+		ParentID: txn.FileContractID(0),
+		UnlockConditions: types.UnlockConditions{
+			PublicKeys: []types.SiaPublicKey{
+				req.RenterKey,
+				h.PublicKey().SiaPublicKey(),
+			},
+			SignaturesRequired: 2,
+		},
+		NewRevisionNumber: 1,
+
+		NewFileSize:           fc.FileSize,
+		NewFileMerkleRoot:     fc.FileMerkleRoot,
+		NewWindowStart:        fc.WindowStart,
+		NewWindowEnd:          fc.WindowEnd,
+		NewValidProofOutputs:  fc.ValidProofOutputs,
+		NewMissedProofOutputs: fc.MissedProofOutputs,
+		NewUnlockHash:         fc.UnlockHash,
+	}
+	hostRevisionSig := types.TransactionSignature{
+		ParentID:       crypto.Hash(initRevision.ParentID),
+		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
+		PublicKeyIndex: 1,
+		Signature:      h.secretKey.SignHash(renterhost.HashRevision(initRevision)),
+	}
+
+	var renterSigs renterhost.RPCRenewAndClearContractSignatures
+	if err := s.sess.ReadResponse(&renterSigs, 4096); err != nil {
+		return err
+	}
+
+	h.contracts[initRevision.ParentID] = &hostContract{
+		rev: initRevision,
+		sigs: [2]types.TransactionSignature{
+			renterSigs.RevisionSignature,
+			hostRevisionSig,
+		},
+		renterKey:   req.RenterKey,
+		sectorData:  h.contracts[s.contract.rev.ParentID].sectorData,
+		sectorRoots: h.contracts[s.contract.rev.ParentID].sectorRoots,
+	}
+	delete(h.contracts, s.contract.rev.ParentID)
+	s.contract.rev = finalRev
+
+	hostSigs := &renterhost.RPCRenewAndClearContractSignatures{
+		ContractSignatures:     nil,
+		RevisionSignature:      hostRevisionSig,
+		FinalRevisionSignature: h.secretKey.SignHash(renterhost.HashRevision(finalRev)),
 	}
 	if err := s.sess.WriteResponse(hostSigs, nil); err != nil {
 		return err
@@ -482,6 +582,11 @@ func (h *Host) rpcRead(s *session) error {
 
 	if s.contract == nil {
 		err := errors.New("no contract locked")
+		s.sess.WriteResponse(nil, err)
+		<-stopSignal
+		return err
+	} else if s.contract.rev.NewRevisionNumber == math.MaxUint64 {
+		err := errors.New("contract cannot be revised")
 		s.sess.WriteResponse(nil, err)
 		<-stopSignal
 		return err

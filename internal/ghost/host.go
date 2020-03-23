@@ -3,6 +3,7 @@
 package ghost
 
 import (
+	"log"
 	"net"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
@@ -29,6 +30,7 @@ type Host struct {
 	listener    net.Listener
 	contracts   map[types.FileContractID]*hostContract
 	blockHeight types.BlockHeight
+	logErrs     bool
 }
 
 func (h *Host) PublicKey() hostdb.HostPublicKey {
@@ -54,8 +56,8 @@ func (h *Host) listen() error {
 		}
 		go func() {
 			err := h.handleConn(conn)
-			if err != nil {
-				println(err.Error())
+			if err != nil && h.logErrs {
+				log.Println("ghost:", err)
 			}
 		}()
 	}
