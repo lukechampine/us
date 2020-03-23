@@ -103,6 +103,79 @@ func TestSession(t *testing.T) {
 	}
 }
 
+func TestRenewAndClear(t *testing.T) {
+	renter, host := createTestingPair(t)
+	defer renter.Close()
+	defer host.Close()
+
+	sector := [renterhost.SectorSize]byte{0: 1}
+	sectorRoot, err := renter.Append(&sector)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newContract, _, err := renter.RenewAndClearContract(stubWallet{}, stubTpool{}, types.ZeroCurrency, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// attempting to revise the old contract should cause an error
+	err = renter.Read(ioutil.Discard, []renterhost.RPCReadRequestSection{{
+		MerkleRoot: sectorRoot,
+		Offset:     0,
+		Length:     renterhost.SectorSize,
+	}})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	oldID, oldKey := renter.Revision().ID(), renter.key
+	renter, err = NewUnlockedSession(host.Settings().NetAddress, host.PublicKey(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// attempting to lock the old contract should cause an error
+	err = renter.Lock(oldID, oldKey)
+	if err == ErrContractFinalized {
+		t.Fatal("expected ErrContractFinalized, got", err)
+	}
+	renter, err = NewUnlockedSession(host.Settings().NetAddress, host.PublicKey(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// we should be able to lock and revise the new contract, and its roots
+	// should be the same as the old contract
+	if err := renter.Lock(newContract.ID(), oldKey); err != nil {
+		t.Fatal(err)
+	}
+
+	roots, err := renter.SectorRoots(0, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if roots[0] != sectorRoot {
+		t.Fatal("reported sector root does not match actual sector root")
+	}
+
+	var sectorBuf bytes.Buffer
+	err = renter.Read(&sectorBuf, []renterhost.RPCReadRequestSection{{
+		MerkleRoot: sectorRoot,
+		Offset:     0,
+		Length:     renterhost.SectorSize,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(sectorBuf.Bytes(), sector[:]) {
+		t.Fatal("downloaded sector does not match uploaded sector")
+	}
+
+	err = renter.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func BenchmarkWrite(b *testing.B) {
 	renter, host := createTestingPair(b)
 	defer renter.Close()
