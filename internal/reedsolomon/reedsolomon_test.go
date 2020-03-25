@@ -14,7 +14,7 @@ import (
 )
 
 func verify(r *ReedSolomon, shards [][]byte) (bool, error) {
-	if len(shards) != r.Shards {
+	if len(shards) != r.shards {
 		return false, ErrTooFewShards
 	}
 	err := checkShards(shards, false)
@@ -87,7 +87,7 @@ func findSingularSubMatrix(m matrix) (matrix, error) {
 	cols := len(m[0])
 	rowIndices := make([]int, cols)
 	for incrementIndicesUntilIncreasingAndContainsDataRow(rowIndices, rows) {
-		subMatrix, _ := newMatrix(cols, cols)
+		subMatrix := newMatrix(cols, cols)
 		for i, r := range rowIndices {
 			for c := 0; c < cols; c++ {
 				subMatrix[i][c] = m[r][c]
@@ -174,8 +174,8 @@ func TestReconstruct(t *testing.T) {
 	}
 
 	// Reconstruct with 10 shards present. Use pre-allocated memory for one of them.
-	shards[0] = nil
-	shards[7] = nil
+	shards[0] = shards[0][:0]
+	shards[7] = shards[7][:0]
 	shard11 := shards[11]
 	shards[11] = shard11[:0]
 	fillRandom(shard11)
@@ -198,10 +198,10 @@ func TestReconstruct(t *testing.T) {
 	}
 
 	// Reconstruct with 9 shards present (should fail)
-	shards[0] = nil
-	shards[4] = nil
-	shards[7] = nil
-	shards[11] = nil
+	shards[0] = shards[0][:0]
+	shards[4] = shards[4][:0]
+	shards[7] = shards[7][:0]
+	shards[11] = shards[11][:0]
 
 	err = r.Reconstruct(shards)
 	if err != ErrTooFewShards {
@@ -246,8 +246,8 @@ func TestReconstructData(t *testing.T) {
 	}
 
 	// Reconstruct with 10 shards present. Use pre-allocated memory for one of them.
-	shards[0] = nil
-	shards[2] = nil
+	shards[0] = shards[0][:0]
+	shards[2] = shards[2][:0]
 	shard4 := shards[4]
 	shards[4] = shard4[:0]
 	fillRandom(shard4)
@@ -271,9 +271,9 @@ func TestReconstructData(t *testing.T) {
 	}
 
 	// Reconstruct with 6 data and 4 parity shards
-	shards[0] = nil
-	shards[2] = nil
-	shards[12] = nil
+	shards[0] = shards[0][:0]
+	shards[2] = shards[2][:0]
+	shards[12] = shards[12][:0]
 
 	err = r.ReconstructData(shards)
 	if err != nil {
@@ -287,11 +287,11 @@ func TestReconstructData(t *testing.T) {
 	}
 
 	// Reconstruct with 7 data and 1 parity shards
-	shards[0] = nil
-	shards[9] = nil
-	shards[10] = nil
-	shards[11] = nil
-	shards[12] = nil
+	shards[0] = shards[0][:0]
+	shards[9] = shards[9][:0]
+	shards[10] = shards[10][:0]
+	shards[11] = shards[11][:0]
+	shards[12] = shards[12][:0]
 
 	err = r.ReconstructData(shards)
 	if err != nil {
@@ -304,12 +304,12 @@ func TestReconstructData(t *testing.T) {
 	}
 
 	// Reconstruct with 6 data and 1 parity shards (should fail)
-	shards[0] = nil
-	shards[1] = nil
-	shards[9] = nil
-	shards[10] = nil
-	shards[11] = nil
-	shards[12] = nil
+	shards[0] = shards[0][:0]
+	shards[1] = shards[1][:0]
+	shards[9] = shards[9][:0]
+	shards[10] = shards[10][:0]
+	shards[11] = shards[11][:0]
+	shards[12] = shards[12][:0]
 
 	err = r.ReconstructData(shards)
 	if err != ErrTooFewShards {
@@ -589,7 +589,8 @@ func BenchmarkVerify10x4x16M(b *testing.B) {
 func corruptRandom(shards [][]byte, dataShards, parityShards int) {
 	shardsToCorrupt := rand.Intn(parityShards)
 	for i := 1; i <= shardsToCorrupt; i++ {
-		shards[rand.Intn(dataShards+parityShards)] = nil
+		j := rand.Intn(dataShards + parityShards)
+		shards[j] = shards[j][:0]
 	}
 }
 
@@ -671,7 +672,8 @@ func BenchmarkReconstruct10x4x16M(b *testing.B) {
 func corruptRandomData(shards [][]byte, dataShards, parityShards int) {
 	shardsToCorrupt := rand.Intn(parityShards)
 	for i := 1; i <= shardsToCorrupt; i++ {
-		shards[rand.Intn(dataShards)] = nil
+		j := rand.Intn(dataShards)
+		shards[j] = shards[j][:0]
 	}
 }
 
@@ -773,7 +775,7 @@ func TestEncoderReconstruct(t *testing.T) {
 	}
 
 	// Delete a shard
-	shards[0] = nil
+	shards[0] = shards[0][:0]
 
 	// Should reconstruct
 	err = enc.Reconstruct(shards)
@@ -798,7 +800,7 @@ func TestEncoderReconstruct(t *testing.T) {
 	}
 
 	// Corrupt a shard
-	shards[0] = nil
+	shards[0] = shards[0][:0]
 	shards[1][0], shards[1][500] = 75, 75
 
 	// Should reconstruct (but with corrupted data)
@@ -859,7 +861,7 @@ func TestSplitJoin(t *testing.T) {
 		t.Errorf("expected %v, got %v", ErrShortData, err)
 	}
 
-	shards[0] = nil
+	shards[0] = shards[0][:0]
 	err = enc.JoinMulti(buf, shards, subsize, 0, len(data))
 	if err != ErrReconstructRequired {
 		t.Errorf("expected %v, got %v", ErrReconstructRequired, err)
@@ -880,8 +882,8 @@ func TestNew(t *testing.T) {
 		{1, 0, ErrInvShardNum},
 		{256, 1, ErrMaxShardNum},
 
-		// overflow causes r.Shards to be negative
-		{256, int(^uint(0) >> 1), errInvalidRowSize},
+		// overflow
+		{256, int(^uint(0) >> 1), ErrMaxShardNum},
 	}
 	for _, test := range tests {
 		_, err := New(test.data, test.parity)
