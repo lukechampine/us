@@ -10,5 +10,4 @@ require (
 	golang.org/x/crypto v0.0.0-20190701094942-4def268fd1a4
 	golang.org/x/sys v0.0.0-20200323222414-85ca7c5b95cd
 	lukechampine.com/frand v1.0.1
-	lukechampine.com/walrus v0.6.0
 )
