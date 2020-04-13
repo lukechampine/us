@@ -26,6 +26,11 @@ func (he HostError) Error() string {
 	return he.HostKey.ShortKey() + ": " + he.Err.Error()
 }
 
+// Unwrap returns the underlying error.
+func (he HostError) Unwrap() error {
+	return he.Err
+}
+
 // A HostErrorSet is a collection of errors from various hosts.
 type HostErrorSet []*HostError
 
