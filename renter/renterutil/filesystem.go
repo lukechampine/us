@@ -1,4 +1,6 @@
-package renterutil
+// Package renterutil provides convenience functions for common renter
+// actions.
+package renterutil // import "lukechampine.com/us/renter/renterutil"
 
 import (
 	"bytes"
@@ -14,6 +16,9 @@ import (
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 )
+
+// assume metafiles have this extension
+const metafileExt = ".usa"
 
 // ErrInvalidFileDescriptor is returned when I/O is attempted on an unknown file
 // descriptor.
