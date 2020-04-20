@@ -1,4 +1,5 @@
-// Package renter provides formats for contracts and files.
+// Package renter provides utilities for managing Sia file metadata and for
+// uploading and downloading sectors.
 package renter // import "lukechampine.com/us/renter"
 
 import (
