@@ -2,6 +2,7 @@ package proto
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"io/ioutil"
 	"testing"
 
@@ -9,7 +10,6 @@ import (
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/internal/ghost"
 	"lukechampine.com/us/renterhost"
 )

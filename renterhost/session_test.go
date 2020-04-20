@@ -2,6 +2,7 @@ package renterhost
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"io"
 	"io/ioutil"
 	"reflect"
@@ -124,11 +125,6 @@ func newFakeConns() (io.ReadWriteCloser, io.ReadWriteCloser) {
 	return pipeRWC{r1, w2}, pipeRWC{r2, w1}
 }
 
-type dummyKey struct{}
-
-func (dummyKey) SignHash(hash crypto.Hash) []byte             { return make([]byte, 64) }
-func (dummyKey) VerifyHash(hash crypto.Hash, sig []byte) bool { return true }
-
 type arb struct {
 	data interface{}
 }
@@ -141,10 +137,11 @@ func (o arb) unmarshalBuffer(b *objBuffer) error {
 
 func TestSession(t *testing.T) {
 	renter, host := newFakeConns()
+	pubkey, privkey, _ := ed25519.GenerateKey(nil)
 	hostErr := make(chan error, 1)
 	go func() {
 		hostErr <- func() error {
-			hs, err := NewHostSession(host, dummyKey{})
+			hs, err := NewHostSession(host, privkey)
 			if err != nil {
 				return err
 			}
@@ -177,7 +174,7 @@ func TestSession(t *testing.T) {
 		}()
 	}()
 
-	rs, err := NewRenterSession(renter, dummyKey{})
+	rs, err := NewRenterSession(renter, pubkey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,10 +219,11 @@ func TestFormContract(t *testing.T) {
 	}
 
 	renter, host := newFakeConns()
+	pubkey, privkey, _ := ed25519.GenerateKey(nil)
 	hostErr := make(chan error, 1)
 	go func() {
 		hostErr <- func() error {
-			hs, err := NewHostSession(host, dummyKey{})
+			hs, err := NewHostSession(host, privkey)
 			if err != nil {
 				return err
 			}
@@ -266,7 +264,7 @@ func TestFormContract(t *testing.T) {
 		}()
 	}()
 
-	rs, err := NewRenterSession(renter, dummyKey{})
+	rs, err := NewRenterSession(renter, pubkey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,10 +294,11 @@ func TestFormContract(t *testing.T) {
 
 func TestRawMessage(t *testing.T) {
 	renter, host := newFakeConns()
+	pubkey, privkey, _ := ed25519.GenerateKey(nil)
 	hostErr := make(chan error, 1)
 	go func() {
 		hostErr <- func() error {
-			hs, err := NewHostSession(host, dummyKey{})
+			hs, err := NewHostSession(host, privkey)
 			if err != nil {
 				return err
 			}
@@ -326,7 +325,7 @@ func TestRawMessage(t *testing.T) {
 		}()
 	}()
 
-	rs, err := NewRenterSession(renter, dummyKey{})
+	rs, err := NewRenterSession(renter, pubkey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,8 +364,9 @@ func TestRawMessage(t *testing.T) {
 func TestChallenge(t *testing.T) {
 	var s Session
 	frand.Read(s.challenge[:])
-	sig := s.SignChallenge(dummyKey{})
-	if !s.VerifyChallenge(sig, dummyKey{}) {
+	pubkey, privkey, _ := ed25519.GenerateKey(nil)
+	sig := s.SignChallenge(privkey)
+	if !s.VerifyChallenge(sig, pubkey) {
 		t.Fatal("challenge was not signed/verified correctly")
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/us/ed25519hash"
 )
 
 // A SeedWallet tracks outputs and transactions relevant to a set of
@@ -305,7 +306,7 @@ func (w *HotWallet) SignTransaction(txn *types.Transaction, toSign []int) error 
 			return errors.New("can't sign")
 		}
 		sk := w.seed.SecretKey(info.KeyIndex)
-		txn.TransactionSignatures[i].Signature = sk.SignHash(txn.SigHash(i, types.ASICHardforkHeight+1))
+		txn.TransactionSignatures[i].Signature = ed25519hash.Sign(sk, txn.SigHash(i, types.ASICHardforkHeight+1))
 		return nil
 	}
 

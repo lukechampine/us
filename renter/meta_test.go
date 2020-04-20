@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"lukechampine.com/frand"
-	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
@@ -47,7 +46,7 @@ func BenchmarkEncryption(b *testing.B) {
 
 func BenchmarkWriteMetaFile(b *testing.B) {
 	const numSlices = 250000 // 1TB of uploaded data
-	hpk := hostdb.HostKeyFromPublicKey(ed25519.NewKeyFromSeed(make([]byte, 32)).PublicKey())
+	hpk := hostdb.HostKeyFromPublicKey(make([]byte, 32))
 	m := NewMetaFile(0660, numSlices*renterhost.SectorSize, []hostdb.HostPublicKey{hpk}, 1)
 	m.Shards[0] = make([]SectorSlice, numSlices)
 	for i := range m.Shards[0] {

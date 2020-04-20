@@ -2,6 +2,7 @@ package proto
 
 import (
 	"bufio"
+	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -16,7 +17,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/ed25519"
+	"lukechampine.com/us/ed25519hash"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
@@ -136,9 +137,9 @@ func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey) (err err
 		return errors.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
 	}
 	revHash := renterhost.HashRevision(resp.Revision)
-	if !key.PublicKey().VerifyHash(revHash, resp.Signatures[0].Signature) {
+	if !ed25519hash.Verify(ed25519hash.ExtractPublicKey(key), revHash, resp.Signatures[0].Signature) {
 		return errors.New("renter's signature on claimed revision is invalid")
-	} else if !s.host.PublicKey.VerifyHash(revHash, resp.Signatures[1].Signature) {
+	} else if !ed25519hash.Verify(s.host.PublicKey.Ed25519(), revHash, resp.Signatures[1].Signature) {
 		return errors.New("host's signature on claimed revision is invalid")
 	}
 	if !resp.Acquired {
@@ -222,7 +223,7 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 		NewRevisionNumber:    rev.NewRevisionNumber,
 		NewValidProofValues:  newValid,
 		NewMissedProofValues: newMissed,
-		Signature:            s.key.SignHash(renterhost.HashRevision(rev)),
+		Signature:            ed25519hash.Sign(s.key, renterhost.HashRevision(rev)),
 	}
 	var resp renterhost.RPCSectorRootsResponse
 	if err := s.call(renterhost.RPCSectorRootsID, req, &resp); err != nil {
@@ -298,7 +299,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	rev := s.rev.Revision
 	rev.NewRevisionNumber++
 	newValid, newMissed := updateRevisionOutputs(&rev, price, types.ZeroCurrency)
-	renterSig := s.key.SignHash(renterhost.HashRevision(rev))
+	renterSig := ed25519hash.Sign(s.key, renterhost.HashRevision(rev))
 
 	// send request
 	uploadBandwidth := 4096 + 4096*uint64(len(sections))
@@ -517,7 +518,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	rev.NewFileSize = newFileSize
 	rev.NewFileMerkleRoot = newRoot
 	renterSig := &renterhost.RPCWriteResponse{
-		Signature: s.key.SignHash(renterhost.HashRevision(rev)),
+		Signature: ed25519hash.Sign(s.key, renterhost.HashRevision(rev)),
 	}
 	if err := s.sess.WriteResponse(renterSig, nil); err != nil {
 		return errors.Wrap(err, "couldn't write signature response")
@@ -649,7 +650,7 @@ func newUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey,
 	}
 	latency := time.Since(start)
 	conn.SetDeadline(time.Now().Add(60 * time.Second))
-	s, err := renterhost.NewRenterSession(conn, hostKey)
+	s, err := renterhost.NewRenterSession(conn, hostKey.Ed25519())
 	if err != nil {
 		conn.Close()
 		return nil, err

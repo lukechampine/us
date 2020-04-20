@@ -5,6 +5,7 @@ package renterhost // import "lukechampine.com/us/renterhost"
 import (
 	"bytes"
 	"crypto/cipher"
+	"crypto/ed25519"
 	"crypto/subtle"
 	"encoding/binary"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/poly1305"
 	"lukechampine.com/frand"
+	"lukechampine.com/us/ed25519hash"
 )
 
 func wrapErr(err *error, fnName string) {
@@ -29,16 +31,6 @@ func wrapErr(err *error, fnName string) {
 // would be smaller than MinMessageSize, the sender MAY pad it with random data.
 // This hinders traffic analysis by obscuring the true sizes of messages.
 const MinMessageSize = 4096
-
-// A HashSigner signs hashes with a secret key.
-type HashSigner interface {
-	SignHash(hash crypto.Hash) []byte
-}
-
-// A HashVerifier verifies that a hash was signed with a secret key.
-type HashVerifier interface {
-	VerifyHash(hash crypto.Hash, sig []byte) bool
-}
 
 // An RPCError may be sent instead of a response object to any RPC.
 type RPCError struct {
@@ -102,13 +94,13 @@ func hashChallenge(challenge [16]byte) [32]byte {
 }
 
 // SignChallenge signs the current session challenge.
-func (s *Session) SignChallenge(hs HashSigner) []byte {
-	return hs.SignHash(hashChallenge(s.challenge))
+func (s *Session) SignChallenge(priv ed25519.PrivateKey) []byte {
+	return ed25519hash.Sign(priv, hashChallenge(s.challenge))
 }
 
 // VerifyChallenge verifies a signature of the current session challenge.
-func (s *Session) VerifyChallenge(sig []byte, hv HashVerifier) bool {
-	return hv.VerifyHash(hashChallenge(s.challenge), sig)
+func (s *Session) VerifyChallenge(sig []byte, pub ed25519.PublicKey) bool {
+	return ed25519hash.Verify(pub, hashChallenge(s.challenge), sig)
 }
 
 func (s *Session) writeMessage(obj ProtocolObject) error {
@@ -365,7 +357,7 @@ func hashKeys(k1, k2 [32]byte) crypto.Hash {
 
 // NewHostSession conducts the hosts's half of the renter-host protocol
 // handshake, returning a Session that can be used to handle RPC requests.
-func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (_ *Session, err error) {
+func NewHostSession(conn io.ReadWriteCloser, priv ed25519.PrivateKey) (_ *Session, err error) {
 	defer wrapErr(&err, "NewHostSession")
 	var req loopKeyExchangeRequest
 	if err := req.readFrom(conn); err != nil {
@@ -387,7 +379,7 @@ func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (_ *Session, err err
 	resp := loopKeyExchangeResponse{
 		Cipher:    cipherChaCha20Poly1305,
 		PublicKey: xpk,
-		Signature: hs.SignHash(hashKeys(req.PublicKey, xpk)),
+		Signature: ed25519hash.Sign(priv, hashKeys(req.PublicKey, xpk)),
 	}
 	if err := resp.writeTo(conn); err != nil {
 		return nil, err
@@ -411,9 +403,7 @@ func NewHostSession(conn io.ReadWriteCloser, hs HashSigner) (_ *Session, err err
 
 // NewRenterSession conducts the renter's half of the renter-host protocol
 // handshake, returning a Session that can be used to make RPC requests.
-//
-// Note that hostdb.HostPublicKey implements the HashVerifier interface.
-func NewRenterSession(conn io.ReadWriteCloser, hv HashVerifier) (_ *Session, err error) {
+func NewRenterSession(conn io.ReadWriteCloser, pub ed25519.PublicKey) (_ *Session, err error) {
 	defer wrapErr(&err, "NewRenterSession")
 
 	xsk, xpk := crypto.GenerateX25519KeyPair()
@@ -429,7 +419,7 @@ func NewRenterSession(conn io.ReadWriteCloser, hv HashVerifier) (_ *Session, err
 		return nil, errors.Wrap(err, "couldn't read host's handshake")
 	}
 	// validate the signature before doing anything else
-	if !hv.VerifyHash(hashKeys(req.PublicKey, resp.PublicKey), resp.Signature) {
+	if !ed25519hash.Verify(pub, hashKeys(req.PublicKey, resp.PublicKey), resp.Signature) {
 		return nil, errors.New("host's handshake signature was invalid")
 	}
 	if resp.Cipher == cipherNoOverlap {

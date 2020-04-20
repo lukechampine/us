@@ -1,13 +1,13 @@
 package wallet
 
 import (
+	"crypto/ed25519"
 	"encoding/binary"
 
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
-	"lukechampine.com/us/ed25519"
 )
 
 // A Seed generates addresses deterministically from some initial entropy.

@@ -3,6 +3,7 @@
 package ghost
 
 import (
+	"crypto/ed25519"
 	"log"
 	"net"
 
@@ -10,7 +11,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/frand"
-	"lukechampine.com/us/ed25519"
+	"lukechampine.com/us/ed25519hash"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renterhost"
 )
@@ -34,7 +35,7 @@ type Host struct {
 }
 
 func (h *Host) PublicKey() hostdb.HostPublicKey {
-	return hostdb.HostKeyFromPublicKey(h.secretKey.PublicKey())
+	return hostdb.HostKeyFromPublicKey(ed25519hash.ExtractPublicKey(h.secretKey))
 }
 
 func (h *Host) Settings() hostdb.HostSettings {
