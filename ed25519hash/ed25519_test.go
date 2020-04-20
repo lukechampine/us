@@ -1,29 +1,17 @@
-// Copyright 2016 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-package ed25519
+package ed25519hash
 
 import (
 	"bytes"
-	"crypto/rand"
-	"crypto/sha256"
+	"crypto/ed25519"
 	"encoding/hex"
 	"testing"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"lukechampine.com/us/ed25519/internal/edwards25519"
+	"lukechampine.com/us/ed25519hash/internal/edwards25519"
 )
 
-func generateKey() (PublicKey, PrivateKey) {
-	seed := make([]byte, SeedSize)
-	rand.Read(seed)
-	priv := NewKeyFromSeed(seed)
-	return priv.PublicKey(), priv
-}
-
 func TestUnmarshalMarshal(t *testing.T) {
-	pub, _ := generateKey()
+	pub, _, _ := ed25519.GenerateKey(nil)
 
 	var A edwards25519.ExtendedGroupElement
 	var pubBytes [32]byte
@@ -41,16 +29,16 @@ func TestUnmarshalMarshal(t *testing.T) {
 }
 
 func TestSignVerify(t *testing.T) {
-	public, private := generateKey()
+	public, private, _ := ed25519.GenerateKey(nil)
 
 	hash := crypto.Hash{0}
-	sig := private.SignHash(hash)
-	if !public.VerifyHash(hash, sig) {
+	sig := Sign(private, hash)
+	if !Verify(public, hash, sig) {
 		t.Errorf("valid signature rejected")
 	}
 
 	wrongHash := crypto.Hash{1}
-	if public.VerifyHash(wrongHash, sig) {
+	if Verify(public, wrongHash, sig) {
 		t.Errorf("signature of different message accepted")
 	}
 }
@@ -60,33 +48,33 @@ func TestGolden(t *testing.T) {
 	msg, _ := hex.DecodeString("a750c232933dc14b1184d86d8b4ce72e16d69744ba69818b6ac33b1d823bb2c3")
 	sig, _ := hex.DecodeString("04266c033b91c1322ceb3446c901ffcf3cc40c4034e887c9597ca1893ba7330becbbd8b48142ef35c012c6ba51a66df9308cb6268ad6b1e4b03e70102495790b")
 
-	priv := PrivateKey(privBytes)
+	priv := ed25519.PrivateKey(privBytes)
 	var hash crypto.Hash
 	copy(hash[:], msg)
-	if !bytes.Equal(sig, priv.SignHash(hash)) {
+	if !bytes.Equal(sig, Sign(priv, hash)) {
 		t.Error("bad signature")
-	} else if !priv.PublicKey().VerifyHash(hash, sig) {
+	} else if !Verify(ExtractPublicKey(priv), hash, sig) {
 		t.Error("signature failed to verify")
 	}
 }
 
 func BenchmarkHashSigning(b *testing.B) {
 	b.ReportAllocs()
-	_, priv := generateKey()
-	hash := sha256.Sum256([]byte("Hello, world!"))
+	_, priv, _ := ed25519.GenerateKey(nil)
+	hash := crypto.Hash{1}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		priv.SignHash(hash)
+		Sign(priv, hash)
 	}
 }
 
 func BenchmarkHashVerification(b *testing.B) {
 	b.ReportAllocs()
-	pub, priv := generateKey()
-	hash := sha256.Sum256([]byte("Hello, world!"))
-	signature := priv.SignHash(hash)
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	hash := crypto.Hash{1}
+	signature := Sign(priv, hash)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pub.VerifyHash(hash, signature)
+		Verify(pub, hash, signature)
 	}
 }

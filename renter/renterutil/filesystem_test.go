@@ -2,6 +2,7 @@ package renterutil
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/hex"
 	"io"
 	"os"
@@ -12,7 +13,6 @@ import (
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/frand"
-	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/internal/ghost"
 	"lukechampine.com/us/renter"

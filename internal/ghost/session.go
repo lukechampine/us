@@ -11,6 +11,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/frand"
+	"lukechampine.com/us/ed25519hash"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
@@ -130,7 +131,7 @@ func (h *Host) rpcFormContract(s *session) error {
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 1,
-		Signature:      h.secretKey.SignHash(renterhost.HashRevision(initRevision)),
+		Signature:      ed25519hash.Sign(h.secretKey, renterhost.HashRevision(initRevision)),
 	}
 
 	var renterSigs renterhost.RPCFormContractSignatures
@@ -225,7 +226,7 @@ func (h *Host) rpcRenewAndClearContract(s *session) error {
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 1,
-		Signature:      h.secretKey.SignHash(renterhost.HashRevision(initRevision)),
+		Signature:      ed25519hash.Sign(h.secretKey, renterhost.HashRevision(initRevision)),
 	}
 
 	var renterSigs renterhost.RPCRenewAndClearContractSignatures
@@ -249,7 +250,7 @@ func (h *Host) rpcRenewAndClearContract(s *session) error {
 	hostSigs := &renterhost.RPCRenewAndClearContractSignatures{
 		ContractSignatures:     nil,
 		RevisionSignature:      hostRevisionSig,
-		FinalRevisionSignature: h.secretKey.SignHash(renterhost.HashRevision(finalRev)),
+		FinalRevisionSignature: ed25519hash.Sign(h.secretKey, renterhost.HashRevision(finalRev)),
 	}
 	if err := s.sess.WriteResponse(hostSigs, nil); err != nil {
 		return err
@@ -272,7 +273,7 @@ func (h *Host) rpcLock(s *session) error {
 	}
 
 	contract, ok := h.contracts[req.ContractID]
-	if !ok || !s.sess.VerifyChallenge(req.Signature, hostdb.HostKeyFromSiaPublicKey(contract.renterKey)) {
+	if !ok || !s.sess.VerifyChallenge(req.Signature, hostdb.HostKeyFromSiaPublicKey(contract.renterKey).Ed25519()) {
 		err := errors.New("bad signature or no such contract")
 		s.sess.WriteResponse(nil, err)
 		return err
@@ -466,7 +467,7 @@ func (h *Host) rpcWrite(s *session) error {
 	}
 	s.contract.rev = newRevision
 	s.contract.sigs[0].Signature = sigResponse.Signature
-	copy(s.contract.sigs[1].Signature, h.secretKey.SignHash(renterhost.HashRevision(newRevision)))
+	copy(s.contract.sigs[1].Signature, ed25519hash.Sign(h.secretKey, renterhost.HashRevision(newRevision)))
 
 	resp := &renterhost.RPCWriteResponse{
 		Signature: s.contract.sigs[1].Signature,
@@ -542,7 +543,7 @@ func (h *Host) rpcSectorRoots(s *session) error {
 	// commit the new revision
 	s.contract.rev = newRevision
 	s.contract.sigs[0].Signature = req.Signature
-	s.contract.sigs[1].Signature = h.secretKey.SignHash(renterhost.HashRevision(newRevision))
+	s.contract.sigs[1].Signature = ed25519hash.Sign(h.secretKey, renterhost.HashRevision(newRevision))
 
 	// send the response
 	resp := &renterhost.RPCSectorRootsResponse{
@@ -652,7 +653,7 @@ func (h *Host) rpcRead(s *session) error {
 	_ = totalCost // TODO: validate revision
 
 	// commit the new revision
-	hostSig := h.secretKey.SignHash(renterhost.HashRevision(newRevision))
+	hostSig := ed25519hash.Sign(h.secretKey, renterhost.HashRevision(newRevision))
 	s.contract.rev = newRevision
 	s.contract.sigs[0].Signature = req.Signature
 	s.contract.sigs[1].Signature = hostSig

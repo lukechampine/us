@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"crypto/ed25519"
 	"math"
 	"time"
 
@@ -9,7 +10,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 
-	"lukechampine.com/us/ed25519"
+	"lukechampine.com/us/ed25519hash"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renterhost"
 )
@@ -192,7 +193,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 0,
-		Signature:      s.key.SignHash(renterhost.HashRevision(initRevision)),
+		Signature:      ed25519hash.Sign(s.key, renterhost.HashRevision(initRevision)),
 	}
 
 	// Send signatures.
@@ -389,14 +390,14 @@ func (s *Session) RenewAndClearContract(w Wallet, tpool TransactionPool, renterP
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 0,
-		Signature:      s.key.SignHash(renterhost.HashRevision(initRevision)),
+		Signature:      ed25519hash.Sign(s.key, renterhost.HashRevision(initRevision)),
 	}
 
 	// Send signatures.
 	renterSigs := &renterhost.RPCRenewAndClearContractSignatures{
 		ContractSignatures:     addedSignatures,
 		RevisionSignature:      renterRevisionSig,
-		FinalRevisionSignature: s.key.SignHash(renterhost.HashRevision(finalOldRevision)),
+		FinalRevisionSignature: ed25519hash.Sign(s.key, renterhost.HashRevision(finalOldRevision)),
 	}
 	if err := s.sess.WriteResponse(renterSigs, nil); err != nil {
 		return ContractRevision{}, nil, err

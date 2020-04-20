@@ -3,6 +3,7 @@ package hostdb // import "lukechampine.com/us/hostdb"
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
 	"net"
@@ -10,10 +11,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/renterhost"
 )
 
@@ -59,14 +58,6 @@ func (hpk HostPublicKey) Ed25519() ed25519.PublicKey {
 func (hpk HostPublicKey) SiaPublicKey() (spk types.SiaPublicKey) {
 	spk.LoadString(string(hpk))
 	return
-}
-
-// VerifyHash verifies that hash was signed by the public key.
-func (hpk HostPublicKey) VerifyHash(hash crypto.Hash, sig []byte) bool {
-	if !strings.HasPrefix(string(hpk), "ed25519") {
-		panic("unsupported signature algorithm")
-	}
-	return hpk.Ed25519().VerifyHash(hash, sig)
 }
 
 // HostKeyFromPublicKey converts an ed25519.PublicKey to a HostPublicKey.
@@ -132,7 +123,7 @@ func Scan(ctx context.Context, addr modules.NetAddress, pubkey HostPublicKey) (h
 	ch := make(chan res, 1)
 	go func() {
 		err := func() error {
-			s, err := renterhost.NewRenterSession(conn, pubkey)
+			s, err := renterhost.NewRenterSession(conn, pubkey.Ed25519())
 			if err != nil {
 				return errors.Wrap(err, "could not initiate RPC session")
 			}

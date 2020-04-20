@@ -3,7 +3,6 @@ package wallet
 import (
 	"testing"
 
-	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/frand"
 )
@@ -33,13 +32,5 @@ func BenchmarkStandardAddress(b *testing.B) {
 	pk := NewSeed().PublicKey(0)
 	for i := 0; i < b.N; i++ {
 		_ = StandardAddress(pk)
-	}
-}
-
-func BenchmarkSignHash(b *testing.B) {
-	b.ReportAllocs()
-	sk := NewSeed().SecretKey(0)
-	for i := 0; i < b.N; i++ {
-		_ = sk.SignHash(crypto.Hash{})
 	}
 }

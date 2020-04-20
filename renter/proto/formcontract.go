@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"crypto/ed25519"
 	"math/big"
 	"sort"
 	"time"
@@ -9,7 +10,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/ed25519"
+	"lukechampine.com/us/ed25519hash"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renterhost"
 )
@@ -55,7 +56,7 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 		PublicKeys: []types.SiaPublicKey{
 			{
 				Algorithm: types.SignatureEd25519,
-				Key:       []byte(key.PublicKey()),
+				Key:       []byte(ed25519hash.ExtractPublicKey(key)),
 			},
 			s.host.PublicKey.SiaPublicKey(),
 		},
@@ -200,7 +201,7 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 0,
-		Signature:      key.SignHash(renterhost.HashRevision(initRevision)),
+		Signature:      ed25519hash.Sign(key, renterhost.HashRevision(initRevision)),
 	}
 
 	// Send signatures.

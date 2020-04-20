@@ -1,8 +1,9 @@
 package renter
 
 import (
+	"crypto/ed25519"
+
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/ed25519"
 	"lukechampine.com/us/hostdb"
 )
 

@@ -1,11 +1,12 @@
 package wallet
 
 import (
+	"crypto/ed25519"
 	"math/big"
 	"unsafe"
 
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/ed25519"
+	"lukechampine.com/us/ed25519hash"
 )
 
 // BytesPerInput is the encoded size of a SiacoinInput and corresponding
@@ -71,7 +72,7 @@ func FundTransaction(amount, feePerByte types.Currency, inputs []ValuedInput) (u
 func AppendTransactionSignature(txn *types.Transaction, txnSig types.TransactionSignature, key ed25519.PrivateKey) {
 	txn.TransactionSignatures = append(txn.TransactionSignatures, txnSig)
 	sigIndex := len(txn.TransactionSignatures) - 1
-	txn.TransactionSignatures[sigIndex].Signature = key.SignHash(txn.SigHash(sigIndex, types.ASICHardforkHeight+1))
+	txn.TransactionSignatures[sigIndex].Signature = ed25519hash.Sign(key, txn.SigHash(sigIndex, types.ASICHardforkHeight+1))
 }
 
 // UnconfirmedParents returns the parents of txn that are in limbo.
