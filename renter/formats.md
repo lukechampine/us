@@ -1,45 +1,10 @@
 ## Formats
 
-The `renter` package defines two important formats: one for storing contract
-metadata, and one for storing file metadata.
-
-### contract
-
-A contract defines a file contract formed with a host. It contains the host's
-public key, the contract's ID, the secret key used to revise the contract, and
-the latest revision of the contract (along with signatures). All of the fields
-are encoded in binary.
-
-The revision and signatures are overwritten after each revision. This can result
-in corruption, but if corruption occurs, the revision and signatures can simply
-be redownloaded from the host. The host's public key, the contract ID, and the
-secret key are never written to after the contract is initially created, so they
-cannot become corrupted.
-
-A contract file may contain trailing "garbage" bytes. This can occur if a new
-revision is written which requires fewer bytes than a prior revision. Decoders
-should halt after decoding the signatures, leaving trailing garbage unexamined.
-
-```go
-type Contract struct {
-	Magic   [11]byte // the string 'us-contract'
-	Version byte     // version of the contract format, currently 3
-	HostKey [32]byte // the ed25519 public key of the host
-	ID      [32]byte // the ID of the contract
-	Key     [32]byte // the ed25519 private key of the renter
-
-	// latest contract revision, with signatures (see Sia/types)
-	Revision   types.FileContractRevision
-	Signatures [2]types.TransactionSignature
-}
-```
-
-### metafile
-
-A metafile is a gzipped tar archive containing one index file (always named
-`index`) followed by one or more shard files (each named after their host's
-public key, plus a ".shard" suffix). The order of the shard files is
-unspecified.
+The `renter` package defines a format for storing file metadata, called a
+*metafile*. A metafile is a gzipped tar archive containing one index file
+(always named `index`) followed by one or more shard files (each named after
+their host's public key, plus a `.shard` suffix). The order of the shard files
+is unspecified.
 
 ### index
 
@@ -87,3 +52,11 @@ type SectorSlice struct {
 	Nonce        [24]byte
 }
 ```
+
+## Contracts
+
+`us` previously defined a format for file contracts, but this functionality
+has been superseded by [`muse`](https://github.com/lukechampine/muse). If you
+need to store contracts on disk, marshalling the `renter.Contract` type to
+binary or JSON should work fine. If you want to really want to use the old
+format, you can find it [here](https://github.com/lukechampine/us/blob/3428b9c63ce0d7a339f2ecaaa794fa08ddb55434/renter/contracts.go#L34-L81).
