@@ -59,6 +59,11 @@ func isDir(path string) bool {
 	return err == nil && stat.IsDir()
 }
 
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
+}
+
 // Chmod changes the mode of the named file to mode.
 func (fs *PseudoFS) Chmod(name string, mode os.FileMode) error {
 	path := fs.path(name)
@@ -247,6 +252,11 @@ func (fs *PseudoFS) Remove(name string) error {
 	path := fs.path(name)
 	if !isDir(path) {
 		path += metafileExt
+	}
+	// if none of the file's data has been flushed to hosts, there won't be a
+	// metafile to remove yet
+	if !exists(path) {
+		return nil
 	}
 	return os.Remove(path)
 }
