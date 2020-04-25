@@ -78,12 +78,12 @@ func (f *openMetaFile) filesize() int64 {
 	return size
 }
 
-func (f *openMetaFile) calcShardSize(offset int64, n int) int {
-	numSegments := n / int(f.m.MinChunkSize())
+func (f *openMetaFile) calcShardSize(offset int64, n int64) int64 {
+	numSegments := n / f.m.MinChunkSize()
 	if offset%f.m.MinChunkSize() != 0 {
 		numSegments++
 	}
-	if (offset+int64(n))%f.m.MinChunkSize() != 0 {
+	if (offset+n)%f.m.MinChunkSize() != 0 {
 		numSegments++
 	}
 	return numSegments * merkle.SegmentSize
@@ -166,27 +166,6 @@ func (fs *PseudoFS) commitChanges(f *openMetaFile) error {
 		return nil
 	}
 	return renter.WriteMetaFile(fs.path(f.name)+metafileExt, f.m)
-}
-
-func (fs *PseudoFS) canFit(f *openMetaFile, shardSize int) bool {
-	sectorSizes := make(map[hostdb.HostPublicKey]int)
-	for _, of := range fs.files {
-		for _, pw := range of.pendingWrites {
-			shardSize := of.calcShardSize(pw.offset, len(pw.data))
-			for _, hostKey := range of.m.Hosts {
-				sectorSizes[hostKey] += shardSize
-			}
-		}
-	}
-	for _, hostKey := range f.m.Hosts {
-		sectorSizes[hostKey] += shardSize
-	}
-	for _, size := range sectorSizes {
-		if size > renterhost.SectorSize {
-			return false
-		}
-	}
-	return true
 }
 
 // fill shared sectors with encoded chunks from pending writes; creates
@@ -520,31 +499,51 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	return lenp, nil
 }
 
+func (fs *PseudoFS) maxWriteSize(f *openMetaFile, off int64, n int64) int64 {
+	sectorSizes := make(map[hostdb.HostPublicKey]int64)
+	for _, of := range fs.files {
+		for _, pw := range of.pendingWrites {
+			shardSize := of.calcShardSize(pw.offset, int64(len(pw.data)))
+			for _, hostKey := range of.m.Hosts {
+				sectorSizes[hostKey] += shardSize
+			}
+		}
+	}
+	var maxRem int64
+	for _, hostKey := range f.m.Hosts {
+		if rem := renterhost.SectorSize - sectorSizes[hostKey]; rem > maxRem {
+			maxRem = rem
+		}
+	}
+	maxSegs := maxRem / f.m.MinChunkSize()
+	if off%f.m.MinChunkSize() != 0 {
+		maxSegs--
+	}
+	if (off+maxRem)%f.m.MinChunkSize() != 0 {
+		maxSegs--
+	}
+	if maxWrite := maxSegs * merkle.SegmentSize; n > maxWrite {
+		n = maxWrite
+	}
+	return n
+}
+
 func (fs *PseudoFS) fileWriteAt(f *openMetaFile, p []byte, off int64) (int, error) {
 	lenp := len(p)
-	for int64(len(p)) > f.m.MaxChunkSize() {
-		if _, err := fs.fileWriteAt(f, p[:f.m.MaxChunkSize()], off); err != nil {
-			return 0, err
+	for len(p) > 0 {
+		if n := fs.maxWriteSize(f, off, int64(len(p))); n == 0 {
+			if err := fs.flushSectors(); err != nil {
+				return 0, err
+			}
+		} else {
+			f.pendingWrites = mergePendingWrites(f.pendingWrites, pendingWrite{
+				data:   append([]byte(nil), p[:n]...),
+				offset: off,
+			})
+			p = p[n:]
+			off += n
 		}
-		p = p[f.m.MaxChunkSize():]
-		off += f.m.MaxChunkSize()
 	}
-
-	// TODO: this is wasteful; if we overwrite another pendingWrite, we might
-	// not overflow.
-	if shardSize := f.calcShardSize(off, len(p)); !fs.canFit(f, shardSize) {
-		if err := fs.flushSectors(); err != nil {
-			return 0, err
-		}
-	}
-
-	// merge this write with the other pending writes
-	f.pendingWrites = mergePendingWrites(f.pendingWrites, pendingWrite{
-		data:   append([]byte(nil), p...),
-		offset: off,
-	})
-
-	// update metadata
 	f.m.ModTime = time.Now()
 	return lenp, nil
 }

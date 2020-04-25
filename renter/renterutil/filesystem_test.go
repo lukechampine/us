@@ -530,6 +530,25 @@ func TestFileSystemRandomAccess(t *testing.T) {
 	}
 }
 
+// https://github.com/lukechampine/us/issues/50
+func TestMisalignedWrite(t *testing.T) {
+	fs, cleanup := createTestingFS(t, 1)
+	defer cleanup()
+
+	metaName := t.Name() + "-" + hex.EncodeToString(frand.Bytes(6))
+	pf, err := fs.Create(metaName, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pf.Close()
+	if _, err := pf.Write(make([]byte, 4023)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pf.Write(make([]byte, renterhost.SectorSize)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFileSystemDelete(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
