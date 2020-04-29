@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"strings"
 
 	"github.com/aead/chacha20/chacha"
 	"github.com/pkg/errors"
@@ -42,6 +43,11 @@ type RPCError struct {
 // Error implements the error interface.
 func (e *RPCError) Error() string {
 	return e.Description
+}
+
+// Is reports whether this error matches target.
+func (e *RPCError) Is(target error) bool {
+	return strings.Contains(e.Description, target.Error())
 }
 
 // helper type for encoding and decoding RPC response messages, which can

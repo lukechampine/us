@@ -6,7 +6,6 @@ import (
 	"io"
 	"io/ioutil"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/pkg/errors"
@@ -16,6 +15,8 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 	"lukechampine.com/frand"
 )
+
+var ErrInvalidName = errors.New("invalid name")
 
 var randomTxn = func() types.Transaction {
 	txn := types.Transaction{
@@ -160,7 +161,7 @@ func TestSession(t *testing.T) {
 						return err
 					}
 					if name == "" {
-						err = hs.WriteResponse(nil, errors.New("invalid name"))
+						err = hs.WriteResponse(nil, ErrInvalidName)
 					} else {
 						err = hs.WriteResponse(arb{"Hello, " + name}, nil)
 					}
@@ -188,7 +189,7 @@ func TestSession(t *testing.T) {
 	}
 	if err := rs.WriteRequest(newSpecifier("Greet"), arb{""}); err != nil {
 		t.Fatal(err)
-	} else if err := rs.ReadResponse(arb{&resp}, 0); !strings.Contains(err.Error(), "invalid name") {
+	} else if err := rs.ReadResponse(arb{&resp}, 0); !errors.Is(err, ErrInvalidName) {
 		t.Fatal(err)
 	}
 	if err := rs.Close(); err != nil {
@@ -317,7 +318,7 @@ func TestRawMessage(t *testing.T) {
 						return err
 					}
 				default:
-					if err := hs.WriteResponse(nil, errors.New("invalid name")); err != nil {
+					if err := hs.WriteResponse(nil, ErrInvalidName); err != nil {
 						return err
 					}
 				}
