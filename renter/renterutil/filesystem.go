@@ -331,9 +331,11 @@ func (fs *PseudoFS) GC() error {
 	// NOTE: we only iterate over the metafiles on disk, not the files
 	// in-memory. We don't need to worry about the latter, because their sectors
 	// have not been flushed to hosts yet.
-	err := filepath.Walk(fs.root, func(path string, info os.FileInfo, _ error) error {
-		if info.IsDir() || !strings.HasSuffix(path, ".usa") {
+	err := filepath.Walk(fs.root, func(path string, info os.FileInfo, err error) error {
+		if (info != nil && info.IsDir()) || !strings.HasSuffix(path, ".usa") {
 			return nil
+		} else if err != nil {
+			return err
 		}
 		m, err := renter.ReadMetaFile(path)
 		if err != nil {
