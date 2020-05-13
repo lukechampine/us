@@ -139,8 +139,11 @@ func (c *SiadClient) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAdd
 // NewSiadClient returns a SiadClient that communicates with the siad API
 // server at the specified address.
 func NewSiadClient(addr, password string) *SiadClient {
-	c := client.New(addr)
-	c.Password = password
+	c := client.New(client.Options{
+		Address:   addr,
+		Password:  password,
+		UserAgent: "Sia-Agent",
+	})
 	return &SiadClient{siad: c}
 }
 
