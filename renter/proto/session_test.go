@@ -66,15 +66,31 @@ func createTestingPair(tb testing.TB) (*Session, *ghost.Host) {
 	return s, host
 }
 
+type testStatsRecorder struct {
+	stats []RPCStats
+}
+
+func (tsr *testStatsRecorder) RecordRPCStats(stats RPCStats) { tsr.stats = append(tsr.stats, stats) }
+
 func TestSession(t *testing.T) {
 	renter, host := createTestingPair(t)
 	defer renter.Close()
 	defer host.Close()
 
+	var tsr testStatsRecorder
+	renter.SetRPCStatsRecorder(&tsr)
+
 	sector := [renterhost.SectorSize]byte{0: 1}
 	sectorRoot, err := renter.Append(&sector)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(tsr.stats) != 1 {
+		t.Fatal("no stats collected")
+	} else if stats := tsr.stats[0]; stats.Host != host.PublicKey() ||
+		stats.RPC != renterhost.RPCWriteID ||
+		stats.Uploaded == 0 || stats.Downloaded == 0 {
+		t.Fatal("bad stats:", stats)
 	}
 
 	roots, err := renter.SectorRoots(0, 1)
@@ -82,6 +98,13 @@ func TestSession(t *testing.T) {
 		t.Fatal(err)
 	} else if roots[0] != sectorRoot {
 		t.Fatal("reported sector root does not match actual sector root")
+	}
+	if len(tsr.stats) != 2 {
+		t.Fatal("no stats collected")
+	} else if stats := tsr.stats[1]; stats.Host != host.PublicKey() ||
+		stats.RPC != renterhost.RPCSectorRootsID ||
+		stats.Uploaded == 0 || stats.Downloaded == 0 {
+		t.Fatal("bad stats:", stats)
 	}
 
 	var sectorBuf bytes.Buffer
@@ -96,10 +119,24 @@ func TestSession(t *testing.T) {
 	if !bytes.Equal(sectorBuf.Bytes(), sector[:]) {
 		t.Fatal("downloaded sector does not match uploaded sector")
 	}
+	if len(tsr.stats) != 3 {
+		t.Fatal("no stats collected")
+	} else if stats := tsr.stats[2]; stats.Host != host.PublicKey() ||
+		stats.RPC != renterhost.RPCReadID ||
+		stats.Uploaded == 0 || stats.Downloaded == 0 {
+		t.Fatal("bad stats:", stats)
+	}
 
 	err = renter.Unlock()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(tsr.stats) != 4 {
+		t.Fatal("no stats collected")
+	} else if stats := tsr.stats[3]; stats.Host != host.PublicKey() ||
+		stats.RPC != renterhost.RPCUnlockID ||
+		stats.Uploaded == 0 || stats.Downloaded != 0 {
+		t.Fatal("bad stats:", stats)
 	}
 }
 

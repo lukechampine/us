@@ -2,6 +2,8 @@
 package proto // import "lukechampine.com/us/renter/proto"
 
 import (
+	"time"
+
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
@@ -14,22 +16,43 @@ func wrapErr(err *error, fnName string) {
 	*err = errors.Wrap(*err, fnName)
 }
 
-type (
-	// A Wallet provides addresses and outputs, and can sign transactions.
-	Wallet interface {
-		NewWalletAddress() (types.UnlockHash, error)
-		SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error
-		UnspentOutputs(limbo bool) ([]modules.UnspentOutput, error)
-		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
-		UnlockConditions(addr types.UnlockHash) (types.UnlockConditions, error)
-	}
-	// A TransactionPool can broadcast transactions and estimate transaction
-	// fees.
-	TransactionPool interface {
-		AcceptTransactionSet([]types.Transaction) error
-		FeeEstimate() (min types.Currency, max types.Currency, err error)
-	}
-)
+// A Wallet provides addresses and outputs, and can sign transactions.
+type Wallet interface {
+	NewWalletAddress() (types.UnlockHash, error)
+	SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error
+	UnspentOutputs(limbo bool) ([]modules.UnspentOutput, error)
+	UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
+	UnlockConditions(addr types.UnlockHash) (types.UnlockConditions, error)
+}
+
+// A TransactionPool can broadcast transactions and estimate transaction
+// fees.
+type TransactionPool interface {
+	AcceptTransactionSet([]types.Transaction) error
+	FeeEstimate() (min types.Currency, max types.Currency, err error)
+}
+
+// RPCStats contains various statistics related to an RPC.
+type RPCStats struct {
+	Host     hostdb.HostPublicKey
+	Contract types.FileContractID // empty if no contract is locked
+	RPC      renterhost.Specifier
+	// Timestamp is the moment the RPC method was invoked; likewise, Elapsed is
+	// measured at the moment the RPC method returns. Consequently, these stats
+	// do *not* enable direct measurement of host throughput. However, stats may
+	// be compared *across* hosts in order to rank their relative performance.
+	Timestamp  time.Time
+	Elapsed    time.Duration
+	Err        error
+	Uploaded   uint64
+	Downloaded uint64
+	Cost       types.Currency
+}
+
+// A RPCStatsRecorder records RPCStats, as reported by a Session.
+type RPCStatsRecorder interface {
+	RecordRPCStats(stats RPCStats)
+}
 
 // A ContractRevision contains the most recent revision to a file contract and
 // its signatures.
