@@ -50,15 +50,33 @@ func wrapResponseErr(err error, readCtx, rejectCtx string) error {
 	return errors.Wrap(err, readCtx)
 }
 
+type statsConn struct {
+	net.Conn
+	r, w uint64
+}
+
+func (sc *statsConn) Read(p []byte) (int, error) {
+	n, err := sc.Conn.Read(p)
+	sc.r += uint64(n)
+	return n, err
+}
+
+func (sc *statsConn) Write(p []byte) (int, error) {
+	n, err := sc.Conn.Write(p)
+	sc.w += uint64(n)
+	return n, err
+}
+
 // A Session is an ongoing exchange of RPCs via the renter-host protocol.
 type Session struct {
 	sess        *renterhost.Session
-	conn        net.Conn
+	conn        *statsConn
 	appendRoots []crypto.Hash
 
 	latency       time.Duration
 	readDeadline  time.Duration
 	writeDeadline time.Duration
+	stats         RPCStatsRecorder
 
 	host   hostdb.ScannedHost
 	height types.BlockHeight
@@ -102,6 +120,36 @@ func (s *Session) extendBandwidthDeadline(up, down uint64) {
 	s.extendDeadline(s.writeDeadline*time.Duration(up) + s.readDeadline*time.Duration(down))
 }
 
+// SetRPCStatsRecorder sets the RPCStatsRecorder for the Session.
+func (s *Session) SetRPCStatsRecorder(stats RPCStatsRecorder) { s.stats = stats }
+
+func (s *Session) collectStats(id renterhost.Specifier, err *error) (record func()) {
+	if s.stats == nil {
+		return func() {}
+	}
+	stats := RPCStats{
+		Host:      s.host.PublicKey,
+		Contract:  s.rev.Revision.ID(),
+		RPC:       id,
+		Timestamp: time.Now(),
+	}
+	var startFunds types.Currency
+	if s.rev.IsValid() {
+		startFunds = s.rev.RenterFunds()
+	}
+	oldW, oldR := s.conn.w, s.conn.r
+	return func() {
+		stats.Err = *err
+		stats.Elapsed = time.Since(stats.Timestamp)
+		stats.Uploaded = s.conn.w - oldW
+		stats.Downloaded = s.conn.r - oldR
+		if s.rev.IsValid() && startFunds.Cmp(s.rev.RenterFunds()) > 0 {
+			stats.Cost = startFunds.Sub(s.rev.RenterFunds())
+		}
+		s.stats.RecordRPCStats(stats)
+	}
+}
+
 // call is a helper method that writes a request and then reads a response.
 func (s *Session) call(rpcID renterhost.Specifier, req, resp renterhost.ProtocolObject) error {
 	if err := s.sess.WriteRequest(rpcID, req); err != nil {
@@ -121,6 +169,7 @@ func (s *Session) call(rpcID renterhost.Specifier, req, resp renterhost.Protocol
 // other RPCs may result in errors or panics.
 func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey) (err error) {
 	defer wrapErr(&err, "Lock")
+	defer s.collectStats(renterhost.RPCLockID, &err)()
 	req := &renterhost.RPCLockRequest{
 		ContractID: id,
 		Signature:  s.sess.SignChallenge(key),
@@ -163,6 +212,7 @@ func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey) (err err
 // automatically unlock any locked contracts when the connection closes.
 func (s *Session) Unlock() (err error) {
 	defer wrapErr(&err, "Unlock")
+	defer s.collectStats(renterhost.RPCUnlockID, &err)()
 	if s.key == nil {
 		return errors.New("no contract locked")
 	}
@@ -178,6 +228,7 @@ func (s *Session) Unlock() (err error) {
 // Settings calls the Settings RPC, returning the host's reported settings.
 func (s *Session) Settings() (_ hostdb.HostSettings, err error) {
 	defer wrapErr(&err, "Settings")
+	defer s.collectStats(renterhost.RPCSettingsID, &err)()
 	s.extendBandwidthDeadline(renterhost.MinMessageSize, renterhost.MinMessageSize)
 	var resp renterhost.RPCSettingsResponse
 	if err := s.call(renterhost.RPCSettingsID, nil, &resp); err != nil {
@@ -192,6 +243,8 @@ func (s *Session) Settings() (_ hostdb.HostSettings, err error) {
 // sector Merkle roots of the currently-locked contract.
 func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 	defer wrapErr(&err, "SectorRoots")
+	defer s.collectStats(renterhost.RPCSectorRootsID, &err)()
+
 	if offset < 0 || n < 0 || offset+n > s.rev.NumSectors() {
 		return nil, errors.New("requested range is out-of-bounds")
 	} else if n == 0 {
@@ -269,6 +322,8 @@ func (sw *segWriter) Write(p []byte) (int, error) {
 // is non-nil. Failure to do so may allow an attacker to inject malicious data.
 func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection) (err error) {
 	defer wrapErr(&err, "Read")
+	defer s.collectStats(renterhost.RPCReadID, &err)()
+
 	if len(sections) == 0 {
 		return nil
 	}
@@ -407,6 +462,8 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 // always requested.
 func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	defer wrapErr(&err, "Write")
+	defer s.collectStats(renterhost.RPCWriteID, &err)()
+
 	if len(actions) == 0 {
 		return nil
 	}
@@ -644,11 +701,12 @@ func NewUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey,
 // same as above, but without error wrapping, since we call it from NewSession too.
 func newUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (_ *Session, err error) {
 	start := time.Now()
-	conn, err := net.DialTimeout("tcp", string(hostIP), 60*time.Second)
+	tcpConn, err := net.DialTimeout("tcp", string(hostIP), 60*time.Second)
 	if err != nil {
 		return nil, err
 	}
 	latency := time.Since(start)
+	conn := &statsConn{Conn: tcpConn}
 	conn.SetDeadline(time.Now().Add(60 * time.Second))
 	s, err := renterhost.NewRenterSession(conn, hostKey.Ed25519())
 	if err != nil {

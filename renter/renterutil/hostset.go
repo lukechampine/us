@@ -85,6 +85,7 @@ type HostSet struct {
 	sessions      map[hostdb.HostPublicKey]*lockedHost
 	hkr           renter.HostKeyResolver
 	currentHeight types.BlockHeight
+	stats         proto.RPCStatsRecorder
 }
 
 // HasHost returns true if the specified host is in the set.
@@ -142,6 +143,10 @@ func (set *HostSet) release(host hostdb.HostPublicKey) {
 	lh.mu.Unlock()
 }
 
+// SetRPCStatsRecorder sets the RPCStatsRecorder for all Sessions initiated by
+// the HostSet.
+func (set *HostSet) SetRPCStatsRecorder(r proto.RPCStatsRecorder) { set.stats = r }
+
 // AddHost adds a host to the set for later use.
 func (set *HostSet) AddHost(c renter.Contract) {
 	lh := new(lockedHost)
@@ -176,7 +181,11 @@ func (set *HostSet) AddHost(c renter.Contract) {
 			return errors.Wrap(err, "could not resolve host key")
 		}
 		lh.s, err = proto.NewSession(hostIP, c.HostKey, c.ID, c.RenterKey, set.currentHeight)
-		return err
+		if err != nil {
+			return err
+		}
+		lh.s.SetRPCStatsRecorder(set.stats)
+		return nil
 	}
 	set.sessions[c.HostKey] = lh
 }
