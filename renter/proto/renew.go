@@ -74,6 +74,10 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		timeExtension := uint64((endHeight + s.host.WindowSize) - currentRevision.NewWindowEnd)
 		basePrice = s.host.StoragePrice.Mul64(currentRevision.NewFileSize).Mul64(timeExtension)    // cost of data already covered by contract
 		baseCollateral = s.host.Collateral.Mul64(currentRevision.NewFileSize).Mul64(timeExtension) // same but collateral
+		// prevent underflow
+		if baseCollateral.Cmp(hostCollateral) > 0 {
+			baseCollateral = hostCollateral
+		}
 	}
 
 	// calculate payouts
@@ -261,6 +265,10 @@ func (s *Session) RenewAndClearContract(w Wallet, tpool TransactionPool, renterP
 		timeExtension := uint64((endHeight + s.host.WindowSize) - currentRevision.NewWindowEnd)
 		basePrice = s.host.StoragePrice.Mul64(currentRevision.NewFileSize).Mul64(timeExtension)    // cost of data already covered by contract
 		baseCollateral = s.host.Collateral.Mul64(currentRevision.NewFileSize).Mul64(timeExtension) // same but collateral
+		// prevent underflow
+		if baseCollateral.Cmp(hostCollateral) > 0 {
+			baseCollateral = hostCollateral
+		}
 	}
 
 	// calculate payouts
