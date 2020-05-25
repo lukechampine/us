@@ -516,10 +516,10 @@ func (fs *PseudoFS) maxWriteSize(f *openMetaFile, off int64, n int64) int64 {
 		}
 	}
 	maxSegs := maxRem / f.m.MinChunkSize()
-	if off%f.m.MinChunkSize() != 0 {
+	if maxSegs > 0 && off%f.m.MinChunkSize() != 0 {
 		maxSegs--
 	}
-	if (off+maxRem)%f.m.MinChunkSize() != 0 {
+	if maxSegs > 0 && (off+maxRem)%f.m.MinChunkSize() != 0 {
 		maxSegs--
 	}
 	if maxWrite := maxSegs * merkle.SegmentSize; n > maxWrite {
@@ -531,7 +531,7 @@ func (fs *PseudoFS) maxWriteSize(f *openMetaFile, off int64, n int64) int64 {
 func (fs *PseudoFS) fileWriteAt(f *openMetaFile, p []byte, off int64) (int, error) {
 	lenp := len(p)
 	for len(p) > 0 {
-		if n := fs.maxWriteSize(f, off, int64(len(p))); n == 0 {
+		if n := fs.maxWriteSize(f, off, int64(len(p))); n <= 0 {
 			if err := fs.flushSectors(); err != nil {
 				return 0, err
 			}
