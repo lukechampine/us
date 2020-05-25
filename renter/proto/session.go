@@ -24,6 +24,10 @@ import (
 )
 
 var (
+	// ErrInsufficientFunds is returned by various RPCs when the cost of the RPC
+	// exceeds the remaining funds in the renter contract payout.
+	ErrInsufficientFunds = errors.New("contract has insufficient funds to pay for revision")
+
 	// ErrInvalidMerkleProof is returned by various RPCs when the host supplies
 	// an invalid Merkle proof.
 	ErrInvalidMerkleProof = errors.New("host supplied invalid Merkle proof")
@@ -260,7 +264,7 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 	bandwidthPrice := s.host.DownloadBandwidthPrice.Mul64(downloadBandwidth)
 	price := s.host.BaseRPCPrice.Add(bandwidthPrice)
 	if s.rev.RenterFunds().Cmp(price) < 0 {
-		return nil, errors.New("contract has insufficient funds to support sector roots download")
+		return nil, ErrInsufficientFunds
 	}
 
 	// construct new revision
@@ -347,7 +351,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	bandwidthPrice := s.host.DownloadBandwidthPrice.Mul64(bandwidth)
 	price := s.host.BaseRPCPrice.Add(sectorAccessPrice).Add(bandwidthPrice)
 	if s.rev.RenterFunds().Cmp(price) < 0 {
-		return errors.New("contract has insufficient funds to support download")
+		return ErrInsufficientFunds
 	}
 
 	// construct new revision
@@ -514,7 +518,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	// NOTE: hosts can be picky about price, so add 5% just to be sure.
 	price = price.MulFloat(1.05)
 	if rev.NewValidProofOutputs[0].Value.Cmp(price) < 0 {
-		return errors.New("contract has insufficient funds to support modification")
+		return ErrInsufficientFunds
 	}
 
 	// cap the collateral to whatever is left; no sense complaining if there is
