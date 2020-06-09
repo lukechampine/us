@@ -113,3 +113,20 @@ func UnconfirmedParents(txn types.Transaction, limbo []LimboTransaction) []Limbo
 	}
 	return parents
 }
+
+// DistributeFunds is a helper function for distributing the value in a set of
+// inputs among a set of outputs, each containin per siacoins. It returns the
+// number of such outputs that can be funded, along with the transaction fee and
+// change amount. Note that such a transaction is only worthwhile if numOuts is
+// at least 2.
+func DistributeFunds(inputs []UnspentOutput, per, feePerByte types.Currency) (numOuts uint64, fee, change types.Currency) {
+	total := SumOutputs(inputs)
+	fee = feePerByte.Mul64(BytesPerInput).Mul64(uint64(len(inputs)))
+	if fee.Cmp(total) >= 0 {
+		return 0, types.ZeroCurrency, types.ZeroCurrency
+	}
+	total = total.Sub(fee)
+	numOuts = total.Div(per).Big().Uint64()
+	change = total.Sub(per.Mul64(numOuts))
+	return numOuts, fee, change
+}
