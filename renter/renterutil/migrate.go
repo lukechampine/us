@@ -108,7 +108,7 @@ func (m *Migrator) AddFile(f *renter.MetaFile, source io.Reader, onFinish func(*
 				continue // no migration necessary
 			}
 			s := m.shards[hostKey]
-			s.Append(shards[i], f.MasterKey)
+			s.Append(shards[i], f.MasterKey, renter.RandomNonce())
 			sliceIndices[i] = len(s.Slices()) - 1
 		}
 		// append to newShards when this sector is flushed (which should be on

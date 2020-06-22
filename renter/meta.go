@@ -66,6 +66,12 @@ type SectorSlice struct {
 	Nonce        [24]byte
 }
 
+// RandomNonce returns a random nonce, suitable for encrypting sector data.
+func RandomNonce() (nonce [24]byte) {
+	frand.Read(nonce[:])
+	return
+}
+
 // A KeySeed derives subkeys and uses them to encrypt and decrypt messages.
 type KeySeed [32]byte
 
