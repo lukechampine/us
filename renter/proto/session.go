@@ -159,8 +159,8 @@ func (s *Session) call(rpcID renterhost.Specifier, req, resp renterhost.Protocol
 	if err := s.sess.WriteRequest(rpcID, req); err != nil {
 		return err
 	}
-	// use a maxlen large enough for all RPCs except Read and Write (which don't
-	// use call anyway)
+	// use a maxlen large enough for all RPCs except Read, Write, and
+	// SectorRoots (which don't use call anyway)
 	err := s.sess.ReadResponse(resp, 4096)
 	return wrapResponseErr(err, fmt.Sprintf("couldn't read %v response", rpcID), fmt.Sprintf("host rejected %v request", rpcID))
 }
@@ -283,8 +283,13 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 		Signature:            ed25519hash.Sign(s.key, renterhost.HashRevision(rev)),
 	}
 	var resp renterhost.RPCSectorRootsResponse
-	if err := s.call(renterhost.RPCSectorRootsID, req, &resp); err != nil {
+	if err := s.sess.WriteRequest(renterhost.RPCSectorRootsID, req); err != nil {
 		return nil, err
+	}
+	if err := s.sess.ReadResponse(&resp, uint64(4096+32*n)); err != nil {
+		readCtx := fmt.Sprintf("couldn't read %v response", renterhost.RPCSectorRootsID)
+		rejectCtx := fmt.Sprintf("host rejected %v request", renterhost.RPCSectorRootsID)
+		return nil, wrapResponseErr(err, readCtx, rejectCtx)
 	}
 	s.rev.Revision = rev
 	s.rev.Signatures[0].Signature = req.Signature
