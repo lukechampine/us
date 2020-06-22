@@ -616,13 +616,22 @@ func (s *Session) DeleteSectors(roots []crypto.Hash) error {
 		return nil
 	}
 	// download the full set of SectorRoots
-	allRoots, err := s.SectorRoots(0, s.Revision().NumSectors())
-	if err != nil {
-		return err
-	}
-	rootIndices := make(map[crypto.Hash]int, len(allRoots))
-	for i := range allRoots {
-		rootIndices[allRoots[i]] = i
+
+	numRoots := s.Revision().NumSectors()
+	rootIndices := make(map[crypto.Hash]int, numRoots)
+	for offset := 0; offset < numRoots; {
+		n := 130000 // a little less than 4MiB of roots
+		if offset+n > numRoots {
+			n = numRoots - offset
+		}
+		roots, err := s.SectorRoots(offset, n)
+		if err != nil {
+			return err
+		}
+		for i, root := range roots {
+			rootIndices[root] = offset + i
+		}
+		offset += n
 	}
 
 	// look up the index of each sector
