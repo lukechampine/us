@@ -310,13 +310,21 @@ func (fs *PseudoFS) GC() error {
 			}
 			defer fs.hosts.release(hostKey)
 
-			roots, err := h.SectorRoots(0, h.Revision().NumSectors())
-			if err != nil {
-				return err
-			}
-			rootMap := make(map[crypto.Hash]struct{}, len(roots))
-			for _, r := range roots {
-				rootMap[r] = struct{}{}
+			numRoots := h.Revision().NumSectors()
+			rootMap := make(map[crypto.Hash]struct{}, numRoots)
+			for offset := 0; offset < numRoots; {
+				n := 130000 // a little less than 4MiB of roots
+				if offset+n > numRoots {
+					n = numRoots - offset
+				}
+				roots, err := h.SectorRoots(offset, n)
+				if err != nil {
+					return err
+				}
+				for _, r := range roots {
+					rootMap[r] = struct{}{}
+				}
+				offset += n
 			}
 			hostRoots[hostKey] = rootMap
 			return nil
