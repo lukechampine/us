@@ -37,13 +37,13 @@ func (sb *SectorBuilder) SliceForAppend() []byte {
 }
 
 // Append appends data to the sector being constructed, encrypting it with the
-// given key and chunkIndex. The data must be a multiple of merkle.SegmentSize.
+// given key and nonce. len(data) must be a multiple of merkle.SegmentSize.
 //
 // Each call to Append creates a SectorSlice that is accessible via the Slices
 // method, using the index returned by Append.
 //
 // Append panics if len(data) > sb.Remaining().
-func (sb *SectorBuilder) Append(data []byte, key KeySeed) int {
+func (sb *SectorBuilder) Append(data []byte, key KeySeed, nonce [24]byte) int {
 	if len(data)%merkle.SegmentSize != 0 {
 		// NOTE: instead of panicking, we could silently pad the data; however,
 		// this is very dangerous, because the SectorSlice will not record the
@@ -63,8 +63,6 @@ func (sb *SectorBuilder) Append(data []byte, key KeySeed) int {
 
 	// encrypt the data in place
 	segmentIndex := sb.sectorLen / merkle.SegmentSize
-	var nonce [24]byte
-	frand.Read(nonce[:])
 	key.XORKeyStream(sectorSlice, nonce[:], uint64(segmentIndex))
 
 	// record the new slice and update sectorLen
@@ -155,7 +153,7 @@ func (u *ShardUploader) EncryptAndUpload(data []byte, chunkIndex int64) (SectorS
 		return SectorSlice{}, errors.New("data exceeds sector size")
 	}
 	u.Sector.Reset()
-	u.Sector.Append(data, u.Key)
+	u.Sector.Append(data, u.Key, RandomNonce())
 	if err := u.Upload(chunkIndex); err != nil {
 		return SectorSlice{}, err
 	}
