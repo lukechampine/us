@@ -525,6 +525,8 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	if rev.NewValidProofOutputs[0].Value.Cmp(price) < 0 {
 		return ErrInsufficientFunds
 	}
+	// hosts can also be picky about collateral, so subtract 5%.
+	collateral = collateral.MulFloat(0.95)
 
 	// cap the collateral to whatever is left; no sense complaining if there is
 	// insufficient collateral, as we agreed to the amount when we formed the

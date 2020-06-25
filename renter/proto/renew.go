@@ -327,8 +327,12 @@ func (s *Session) RenewAndClearContract(w Wallet, tpool TransactionPool, renterP
 	}
 
 	// construct the final revision of the old contract
+	finalPayment := s.host.BaseRPCPrice
+	if finalPayment.Cmp(currentRevision.ValidRenterPayout()) > 0 {
+		finalPayment = currentRevision.ValidRenterPayout()
+	}
 	finalOldRevision := currentRevision
-	newValid, _ := updateRevisionOutputs(&finalOldRevision, s.host.BaseRPCPrice, types.ZeroCurrency)
+	newValid, _ := updateRevisionOutputs(&finalOldRevision, finalPayment, types.ZeroCurrency)
 	finalOldRevision.NewMissedProofOutputs = finalOldRevision.NewValidProofOutputs
 	finalOldRevision.NewFileSize = 0
 	finalOldRevision.NewFileMerkleRoot = crypto.Hash{}
