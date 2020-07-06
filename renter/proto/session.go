@@ -13,10 +13,12 @@ import (
 	"sort"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+
 	"lukechampine.com/us/ed25519hash"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
@@ -384,7 +386,11 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 
 	// host will now stream back responses; ensure we send RPCLoopReadStop
 	// before returning
-	defer s.sess.WriteResponse(&renterhost.RPCReadStop, nil)
+	defer func() {
+		if e := s.sess.WriteResponse(&renterhost.RPCReadStop, nil); e != nil {
+			err = multierror.Append(err, e)
+		}
+	}()
 	var hostSig []byte
 	for _, sec := range sections {
 		// NOTE: normally, we would call ReadResponse here to read an AEAD RPC
@@ -577,7 +583,9 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	<-precompChan
 	if newFileSize > 0 && !merkle.VerifyDiffProof(actions, s.rev.NumSectors(), proofHashes, leafHashes, oldRoot, newRoot, s.appendRoots) {
 		err := ErrInvalidMerkleProof
-		s.sess.WriteResponse(nil, err)
+		if e := s.sess.WriteResponse(nil, err); e != nil {
+			err = multierror.Append(err, e)
+		}
 		return err
 	}
 
@@ -701,11 +709,15 @@ func NewSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, id type
 		return nil, err
 	}
 	if err := s.Lock(id, key); err != nil {
-		s.Close()
+		if e := s.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
 		return nil, err
 	}
 	if _, err := s.Settings(); err != nil {
-		s.Close()
+		if e := s.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
 		return nil, err
 	}
 	return s, nil
@@ -727,10 +739,15 @@ func newUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey,
 	}
 	latency := time.Since(start)
 	conn := &statsConn{Conn: tcpConn}
-	conn.SetDeadline(time.Now().Add(60 * time.Second))
+	err = conn.SetDeadline(time.Now().Add(60 * time.Second))
+	if err != nil {
+		return nil, err
+	}
 	s, err := renterhost.NewRenterSession(conn, hostKey.Ed25519())
 	if err != nil {
-		conn.Close()
+		if e := conn.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
 		return nil, err
 	}
 	return &Session{

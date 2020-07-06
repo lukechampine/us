@@ -11,8 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
+
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 )
@@ -460,11 +462,17 @@ func (fs *PseudoFS) Close() error {
 		}
 		delete(fs.files, fd)
 	}
+	var err *multierror.Error
 	for fd, d := range fs.dirs {
-		d.Close()
+		if e := d.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
 		delete(fs.dirs, fd)
 	}
-	return fs.hosts.Close()
+	if e := fs.hosts.Close(); e != nil {
+		err = multierror.Append(err, e)
+	}
+	return err.ErrorOrNil()
 }
 
 // NewFileSystem returns a new pseudo-filesystem rooted at root, which must be a

@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
+
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
@@ -96,15 +98,18 @@ func (set *HostSet) HasHost(hostKey hostdb.HostPublicKey) bool {
 
 // Close closes all of the sessions in the set.
 func (set *HostSet) Close() error {
+	var err error
 	for hostKey, lh := range set.sessions {
 		lh.mu.Lock()
 		if lh.s != nil {
-			lh.s.Close()
+			if e := lh.s.Close(); e != nil {
+				err = multierror.Append(err, e)
+			}
 			lh.s = nil
 		}
 		delete(set.sessions, hostKey)
 	}
-	return nil
+	return err
 }
 
 func (set *HostSet) acquire(host hostdb.HostPublicKey) (*proto.Session, error) {

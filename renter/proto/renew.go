@@ -5,6 +5,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/build"
 	"gitlab.com/NebulousLabs/Sia/crypto"
@@ -17,13 +18,18 @@ import (
 
 // RenewContract negotiates a new file contract and initial revision for data
 // already stored with a host.
-func RenewContract(w Wallet, tpool TransactionPool, id types.FileContractID, key ed25519.PrivateKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, []types.Transaction, error) {
+func RenewContract(w Wallet, tpool TransactionPool, id types.FileContractID, key ed25519.PrivateKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (_ ContractRevision, _ []types.Transaction, err error) {
 	s, err := NewUnlockedSession(host.NetAddress, host.PublicKey, 0)
 	if err != nil {
 		return ContractRevision{}, nil, err
 	}
 	s.host = host
-	defer s.Close()
+	defer func() {
+		if e := s.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
+	}()
+
 	if err := s.Lock(id, key); err != nil {
 		return ContractRevision{}, nil, err
 	}
@@ -164,7 +170,9 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	err = w.SignTransaction(&txn, toSign)
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
-		s.sess.WriteResponse(nil, err)
+		if e := s.sess.WriteResponse(nil, err); e != nil {
+			err = multierror.Append(err, e)
+		}
 		return ContractRevision{}, nil, err
 	}
 
@@ -369,7 +377,9 @@ func (s *Session) RenewAndClearContract(w Wallet, tpool TransactionPool, renterP
 	err = w.SignTransaction(&txn, toSign)
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
-		s.sess.WriteResponse(nil, err)
+		if e := s.sess.WriteResponse(nil, err); e != nil {
+			err = multierror.Append(err, e)
+		}
 		return ContractRevision{}, nil, err
 	}
 

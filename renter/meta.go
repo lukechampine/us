@@ -15,9 +15,11 @@ import (
 	"unsafe"
 
 	"github.com/aead/chacha20/chacha"
+	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/frand"
+
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
@@ -190,7 +192,7 @@ func NewMetaFile(mode os.FileMode, size int64, hosts []hostdb.HostPublicKey, min
 
 // WriteMetaFile creates a gzipped tar archive containing m's index and shards,
 // and writes it to filename. The write is atomic.
-func WriteMetaFile(filename string, m *MetaFile) error {
+func WriteMetaFile(filename string, m *MetaFile) (err error) {
 	// validate before writing
 	if err := validateShards(m.Shards); err != nil {
 		return errors.Wrap(err, "invalid shards")
@@ -200,7 +202,11 @@ func WriteMetaFile(filename string, m *MetaFile) error {
 	if err != nil {
 		return errors.Wrap(err, "could not create archive")
 	}
-	defer f.Close()
+	defer func() {
+		if e := f.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
+	}()
 	zip := gzip.NewWriter(f)
 	tw := tar.NewWriter(zip)
 
@@ -256,12 +262,16 @@ func WriteMetaFile(filename string, m *MetaFile) error {
 }
 
 // ReadMetaFile reads a metafile archive into memory.
-func ReadMetaFile(filename string) (*MetaFile, error) {
+func ReadMetaFile(filename string) (_ *MetaFile, err error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not open archive")
 	}
-	defer f.Close()
+	defer func() {
+		if e := f.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
+	}()
 	zip, err := gzip.NewReader(f)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not read gzip header")
@@ -331,18 +341,26 @@ func ReadMetaFile(filename string) (*MetaFile, error) {
 }
 
 // ReadMetaIndex reads the index of a metafile without reading any shards.
-func ReadMetaIndex(filename string) (MetaIndex, error) {
+func ReadMetaIndex(filename string) (_ MetaIndex, err error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return MetaIndex{}, errors.Wrap(err, "could not open archive")
 	}
-	defer f.Close()
+	defer func() {
+		if e := f.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
+	}()
 
 	zip, err := gzip.NewReader(f)
 	if err != nil {
 		return MetaIndex{}, errors.Wrap(err, "could not read gzip header")
 	}
-	defer zip.Close()
+	defer func() {
+		if e := zip.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
+	}()
 
 	var index MetaIndex
 	tr := tar.NewReader(zip)
@@ -387,18 +405,26 @@ func MetaFileCanDownload(filename string) (bool, error) {
 
 // readMetaFileShards reads a metafile and returns its index and the number of
 // shards that represent fully-uploaded shards of the erasure-encoded file.
-func readMetaFileShards(filename string) (MetaIndex, int, error) {
+func readMetaFileShards(filename string) (_ MetaIndex, _ int, err error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return MetaIndex{}, 0, errors.Wrap(err, "could not open archive")
 	}
-	defer f.Close()
+	defer func() {
+		if e := f.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
+	}()
 
 	zip, err := gzip.NewReader(f)
 	if err != nil {
 		return MetaIndex{}, 0, errors.Wrap(err, "could not read gzip header")
 	}
-	defer zip.Close()
+	defer func() {
+		if e := zip.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
+	}()
 
 	var haveIndex bool
 	var index MetaIndex

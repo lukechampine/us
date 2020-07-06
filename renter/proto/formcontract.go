@@ -6,10 +6,12 @@ import (
 	"sort"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+
 	"lukechampine.com/us/ed25519hash"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renterhost"
@@ -23,13 +25,17 @@ const (
 
 // FormContract forms a contract with a host. The resulting contract will have
 // renterPayout coins in the renter output.
-func FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (ContractRevision, []types.Transaction, error) {
+func FormContract(w Wallet, tpool TransactionPool, key ed25519.PrivateKey, host hostdb.ScannedHost, renterPayout types.Currency, startHeight, endHeight types.BlockHeight) (_ ContractRevision, _ []types.Transaction, err error) {
 	s, err := NewUnlockedSession(host.NetAddress, host.PublicKey, 0)
 	if err != nil {
 		return ContractRevision{}, nil, err
 	}
 	s.host = host
-	defer s.Close()
+	defer func() {
+		if e := s.Close(); e != nil {
+			err = multierror.Append(err, e)
+		}
+	}()
 	return s.FormContract(w, tpool, key, renterPayout, startHeight, endHeight)
 }
 
@@ -168,7 +174,10 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	err = w.SignTransaction(&txn, toSign)
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
-		s.sess.WriteResponse(nil, errors.New("internal error")) // don't want to reveal too much
+		// don't want to reveal too much
+		if e := s.sess.WriteResponse(nil, errors.New("internal error")); e != nil {
+			err = multierror.Append(err, e)
+		}
 		return ContractRevision{}, nil, err
 	}
 
