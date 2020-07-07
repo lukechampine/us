@@ -10,7 +10,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/us/internal/ghost"
+	"lukechampine.com/us/ghost"
 	"lukechampine.com/us/renterhost"
 )
 
