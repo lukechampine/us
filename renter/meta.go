@@ -203,7 +203,7 @@ func WriteMetaFile(filename string, m *MetaFile) (err error) {
 		return errors.Wrap(err, "could not create archive")
 	}
 	defer func() {
-		if e := f.Close(); e != nil {
+		if e := f.Close(); e != nil && !errors.Is(e, os.ErrClosed) {
 			err = multierror.Append(err, e)
 		}
 	}()
