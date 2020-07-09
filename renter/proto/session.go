@@ -165,6 +165,14 @@ func (s *Session) call(rpcID renterhost.Specifier, req, resp renterhost.Protocol
 	return wrapResponseErr(err, fmt.Sprintf("couldn't read %v response", rpcID), fmt.Sprintf("host rejected %v request", rpcID))
 }
 
+func (s *Session) sufficientFunds(price types.Currency) bool {
+	// We need some funds in order to renew a contract; specifically, we need to
+	// pay the host's BaseRPCPrice. Since the host may increase their price,
+	// multiply it by 5 just to be safe.
+	renewPrice := s.host.BaseRPCPrice.Mul64(5)
+	return s.rev.RenterFunds().Cmp(price.Add(renewPrice)) >= 0
+}
+
 // Lock calls the Lock RPC, locking the supplied contract and synchronizing its
 // state with the host's most recent revision.
 //
@@ -263,7 +271,7 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 	}
 	bandwidthPrice := s.host.DownloadBandwidthPrice.Mul64(downloadBandwidth)
 	price := s.host.BaseRPCPrice.Add(bandwidthPrice)
-	if s.rev.RenterFunds().Cmp(price) < 0 {
+	if !s.sufficientFunds(price) {
 		return nil, ErrInsufficientFunds
 	}
 
@@ -355,7 +363,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	}
 	bandwidthPrice := s.host.DownloadBandwidthPrice.Mul64(bandwidth)
 	price := s.host.BaseRPCPrice.Add(sectorAccessPrice).Add(bandwidthPrice)
-	if s.rev.RenterFunds().Cmp(price) < 0 {
+	if !s.sufficientFunds(price) {
 		return ErrInsufficientFunds
 	}
 
@@ -522,7 +530,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	price := s.host.BaseRPCPrice.Add(bandwidthPrice).Add(storagePrice)
 	// NOTE: hosts can be picky about price, so add 5% just to be sure.
 	price = price.MulFloat(1.05)
-	if rev.NewValidProofOutputs[0].Value.Cmp(price) < 0 {
+	if !s.sufficientFunds(price) {
 		return ErrInsufficientFunds
 	}
 	// hosts can also be picky about collateral, so subtract 5%.
