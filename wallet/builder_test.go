@@ -20,32 +20,42 @@ func BenchmarkSumOutputs(b *testing.B) {
 func TestDistributeFunds(t *testing.T) {
 	outputs := make([]UnspentOutput, 10)
 	for i := range outputs {
-		outputs[i].Value = types.SiacoinPrecision
+		outputs[i].Value = types.SiacoinPrecision.Mul64(uint64(i + 1))
 	}
 
-	n, fee, change := DistributeFunds(outputs, types.SiacoinPrecision, types.ZeroCurrency)
-	if n != 10 || !fee.IsZero() || !change.IsZero() {
-		t.Fatal(n, fee, change)
+	ins, fee, change := DistributeFunds(outputs, 5, types.SiacoinPrecision.Mul64(3), types.NewCurrency64(1e6))
+	tot := types.SiacoinPrecision.Mul64(3).Mul64(5).Add(fee).Add(change)
+	if !SumOutputs(ins).Equals(tot) {
+		t.Error(len(ins), fee, change)
 	}
 
-	n, fee, change = DistributeFunds(outputs, types.SiacoinPrecision.Div64(2), types.ZeroCurrency)
-	if n != 20 || !fee.IsZero() || !change.IsZero() {
-		t.Fatal(n, fee, change)
+	// should use the most valuable output, worth 10 SC
+	ins, fee, change = DistributeFunds(outputs, 3, types.SiacoinPrecision.Mul64(3), types.ZeroCurrency)
+	if len(ins) != 1 || !fee.IsZero() || !change.Equals(types.SiacoinPrecision) {
+		t.Error(len(ins), fee, change)
 	}
 
-	n, fee, change = DistributeFunds(outputs, types.SiacoinPrecision.Mul64(3), types.ZeroCurrency)
-	if n != 3 || !fee.IsZero() || !change.Equals(types.SiacoinPrecision) {
-		t.Fatal(n, fee, change)
+	ins, fee, change = DistributeFunds(outputs, 30, types.SiacoinPrecision.Div64(2), types.ZeroCurrency)
+	if len(ins) != 2 || !fee.IsZero() || !change.Equals(types.SiacoinPrecision.Mul64(4)) {
+		t.Error(len(ins), fee, change)
 	}
 
-	n, fee, change = DistributeFunds(outputs, types.SiacoinPrecision.Mul64(3), types.NewCurrency64(1e6))
-	tot := types.SiacoinPrecision.Mul64(3).Mul64(n).Add(fee).Add(change)
-	if n != 3 || !SumOutputs(outputs).Equals(tot) {
-		t.Fatal(n, fee, change)
+	// should use outputs worth 9+8+7=24 SC, ignoring output already worth 10 SC
+	ins, fee, change = DistributeFunds(outputs, 2, types.SiacoinPrecision.Mul64(10), types.ZeroCurrency)
+	if len(ins) != 3 || !fee.IsZero() || !change.Equals(types.SiacoinPrecision.Mul64(4)) {
+		t.Error(len(ins), fee, change)
 	}
 
-	n, fee, change = DistributeFunds(outputs, types.SiacoinPrecision.Mul64(100), types.ZeroCurrency)
-	if n != 0 {
-		t.Fatal(n)
+	// insufficient funds
+	ins, fee, change = DistributeFunds(outputs, 1, types.SiacoinPrecision.Mul64(100), types.ZeroCurrency)
+	if len(ins) != 0 {
+		t.Error(len(ins), fee, change)
 	}
+
+	// all outputs already worth 1 SC
+	ins, fee, change = DistributeFunds(outputs[:1], 1, types.SiacoinPrecision.Mul64(100), types.ZeroCurrency)
+	if len(ins) != 0 {
+		t.Error(len(ins), fee, change)
+	}
+
 }
