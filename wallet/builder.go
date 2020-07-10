@@ -3,6 +3,7 @@ package wallet
 import (
 	"crypto/ed25519"
 	"math/big"
+	"sort"
 	"unsafe"
 
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -115,18 +116,36 @@ func UnconfirmedParents(txn types.Transaction, limbo []LimboTransaction) []Limbo
 }
 
 // DistributeFunds is a helper function for distributing the value in a set of
-// inputs among a set of outputs, each containin per siacoins. It returns the
-// number of such outputs that can be funded, along with the transaction fee and
-// change amount. Note that such a transaction is only worthwhile if numOuts is
-// at least 2.
-func DistributeFunds(inputs []UnspentOutput, per, feePerByte types.Currency) (numOuts uint64, fee, change types.Currency) {
-	total := SumOutputs(inputs)
-	fee = feePerByte.Mul64(BytesPerInput).Mul64(uint64(len(inputs)))
-	if fee.Cmp(total) >= 0 {
-		return 0, types.ZeroCurrency, types.ZeroCurrency
+// inputs among n outputs, each containing per siacoins. It returns the minimal
+// set of inputs that will fund such a transaction, along with the resulting fee
+// and change. Inputs with value equal to per are ignored. If the inputs are not
+// sufficient to fund n outputs, DistrubteFunds returns nil.
+func DistributeFunds(inputs []UnspentOutput, n int, per, feePerByte types.Currency) (ins []UnspentOutput, fee, change types.Currency) {
+	// sort
+	ins = append([]UnspentOutput(nil), inputs...)
+	sort.Slice(ins, func(i, j int) bool {
+		return ins[i].Value.Cmp(ins[j].Value) > 0
+	})
+	// filter
+	filtered := ins[:0]
+	for _, in := range ins {
+		if !in.Value.Equals(per) {
+			filtered = append(filtered, in)
+		}
 	}
-	total = total.Sub(fee)
-	numOuts = total.Div(per).Big().Uint64()
-	change = total.Sub(per.Mul64(numOuts))
-	return numOuts, fee, change
+	ins = filtered
+
+	// search for minimal set
+	want := per.Mul64(uint64(n))
+	i := sort.Search(len(ins)+1, func(i int) bool {
+		fee = feePerByte.Mul64(BytesPerInput).Mul64(uint64(i))
+		return SumOutputs(ins[:i]).Cmp(want.Add(fee)) >= 0
+	})
+	if i == len(ins)+1 {
+		// insufficient funds
+		return nil, types.ZeroCurrency, types.ZeroCurrency
+	}
+	fee = feePerByte.Mul64(BytesPerInput).Mul64(uint64(i))
+	change = SumOutputs(ins[:i]).Sub(want.Add(fee))
+	return ins[:i], fee, change
 }
