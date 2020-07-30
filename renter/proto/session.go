@@ -24,9 +24,9 @@ import (
 )
 
 var (
-	// ErrInsufficientFunds is returned by various RPCs when the cost of the RPC
-	// exceeds the remaining funds in the renter contract payout.
-	ErrInsufficientFunds = errors.New("contract has insufficient funds to pay for revision")
+	// ErrInsufficientFunds is returned by various RPCs when the renter is
+	// unable to provide sufficient payment to the host.
+	ErrInsufficientFunds = errors.New("insufficient funds")
 
 	// ErrInvalidMerkleProof is returned by various RPCs when the host supplies
 	// an invalid Merkle proof.

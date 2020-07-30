@@ -262,7 +262,7 @@ func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr type
 		}
 	}
 	if outputSum.Cmp(amount) < 0 {
-		return nil, errors.New("insufficient funds to fund contract transaction")
+		return nil, ErrInsufficientFunds
 	}
 
 	var toSign []crypto.Hash
