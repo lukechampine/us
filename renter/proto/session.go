@@ -23,6 +23,10 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
+const (
+	DefaultDialTimeout = 60000 // 60 seconds
+)
+
 var (
 	// ErrInsufficientFunds is returned by various RPCs when the renter is
 	// unable to provide sufficient payment to the host.
@@ -41,7 +45,14 @@ var (
 	// question has reached its maximum revision number, meaning the contract
 	// can no longer be revised.
 	ErrContractFinalized = errors.New("contract cannot be revised further")
+
+	dialTimeout uint64 = DefaultDialTimeout
 )
+
+// SetDialTimeout sets the timeout for dialing a host to the given value.
+func SetDialTimeout(timeout uint64) {
+	dialTimeout = timeout
+}
 
 // wrapResponseErr formats RPC response errors nicely, wrapping them in either
 // readCtx or rejectCtx depending on whether we encountered an I/O error or the
@@ -729,13 +740,13 @@ func NewUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey,
 // same as above, but without error wrapping, since we call it from NewSession too.
 func newUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (_ *Session, err error) {
 	start := time.Now()
-	tcpConn, err := net.DialTimeout("tcp", string(hostIP), 60*time.Second)
+	tcpConn, err := net.DialTimeout("tcp", string(hostIP), time.Duration(dialTimeout)*time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
 	latency := time.Since(start)
 	conn := &statsConn{Conn: tcpConn}
-	conn.SetDeadline(time.Now().Add(60 * time.Second))
+	conn.SetDeadline(time.Now().Add(time.Duration(dialTimeout) * time.Millisecond))
 	s, err := renterhost.NewRenterSession(conn, hostKey.Ed25519())
 	if err != nil {
 		conn.Close()
