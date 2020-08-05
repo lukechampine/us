@@ -59,7 +59,7 @@ func createTestingPair(tb testing.TB) (*Session, *ghost.Host) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	err = s.Lock(rev.ID(), key)
+	err = s.Lock(rev.ID(), key, 0)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestRenewAndClear(t *testing.T) {
 	}
 
 	// attempting to lock the old contract should cause an error
-	err = renter.Lock(oldID, oldKey)
+	err = renter.Lock(oldID, oldKey, 0)
 	if err == ErrContractFinalized {
 		t.Fatal("expected ErrContractFinalized, got", err)
 	}
@@ -183,7 +183,7 @@ func TestRenewAndClear(t *testing.T) {
 
 	// we should be able to lock and revise the new contract, and its roots
 	// should be the same as the old contract
-	if err := renter.Lock(newContract.ID(), oldKey); err != nil {
+	if err := renter.Lock(newContract.ID(), oldKey, 0); err != nil {
 		t.Fatal(err)
 	}
 
