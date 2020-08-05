@@ -86,6 +86,7 @@ type HostSet struct {
 	hkr           renter.HostKeyResolver
 	currentHeight types.BlockHeight
 	stats         proto.RPCStatsRecorder
+	lockTimeout   time.Duration
 }
 
 // HasHost returns true if the specified host is in the set.
@@ -147,6 +148,10 @@ func (set *HostSet) release(host hostdb.HostPublicKey) {
 // the HostSet.
 func (set *HostSet) SetRPCStatsRecorder(r proto.RPCStatsRecorder) { set.stats = r }
 
+// SetLockTimeout sets the timeout used for all Lock RPCs in Sessions initiated
+// by the HostSet.
+func (set *HostSet) SetLockTimeout(timeout time.Duration) { set.lockTimeout = timeout }
+
 // AddHost adds a host to the set for later use.
 func (set *HostSet) AddHost(c renter.Contract) {
 	lh := new(lockedHost)
@@ -180,8 +185,17 @@ func (set *HostSet) AddHost(c renter.Contract) {
 		if err != nil {
 			return errors.Wrap(err, "could not resolve host key")
 		}
-		lh.s, err = proto.NewSession(hostIP, c.HostKey, c.ID, c.RenterKey, set.currentHeight)
+		// create and lock the session manually so that we can use our custom
+		// lock timeout
+		lh.s, err = proto.NewUnlockedSession(hostIP, c.HostKey, set.currentHeight)
 		if err != nil {
+			return err
+		}
+		if err := lh.s.Lock(c.ID, c.RenterKey, set.lockTimeout); err != nil {
+			lh.s.Close()
+			return err
+		} else if _, err := lh.s.Settings(); err != nil {
+			lh.s.Close()
 			return err
 		}
 		lh.s.SetRPCStatsRecorder(set.stats)
@@ -197,5 +211,6 @@ func NewHostSet(hkr renter.HostKeyResolver, currentHeight types.BlockHeight) *Ho
 		hkr:           hkr,
 		currentHeight: currentHeight,
 		sessions:      make(map[hostdb.HostPublicKey]*lockedHost),
+		lockTimeout:   10 * time.Second,
 	}
 }
