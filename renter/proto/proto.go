@@ -13,7 +13,13 @@ import (
 )
 
 func wrapErr(err *error, fnName string) {
-	*err = errors.Wrap(*err, fnName)
+	*err = errors.WithMessage(*err, fnName)
+}
+
+func wrapErrWithReplace(err *error, fnName string) {
+	if *err != nil {
+		*err = errors.Wrap(errors.Unwrap(*err), fnName)
+	}
 }
 
 // A Wallet provides addresses and outputs, and can sign transactions.
