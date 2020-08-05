@@ -174,18 +174,23 @@ func (s *Session) sufficientFunds(price types.Currency) bool {
 }
 
 // Lock calls the Lock RPC, locking the supplied contract and synchronizing its
-// state with the host's most recent revision.
+// state with the host's most recent revision. The timeout specifies how long
+// the host should wait while attempting to acquire the lock. Note that timeouts
+// are serialized in milliseconds, so a timeout of less than 1ms will be rounded
+// down to 0. (A timeout of 0 is valid: it means that the lock will only be
+// acquired if the contract is unlocked at the moment the host receives the
+// RPC.)
 //
 // Lock returns ErrContractFinalized if the contract can no longer be revised.
 // The contract will still be available via the Revision method, but invoking
 // other RPCs may result in errors or panics.
-func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey) (err error) {
+func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey, timeout time.Duration) (err error) {
 	defer wrapErr(&err, "Lock")
 	defer s.collectStats(renterhost.RPCLockID, &err)()
 	req := &renterhost.RPCLockRequest{
 		ContractID: id,
 		Signature:  s.sess.SignChallenge(key),
-		Timeout:    10e3, // 10 seconds
+		Timeout:    uint64(timeout.Milliseconds()),
 	}
 	s.extendDeadline(time.Duration(req.Timeout) * time.Millisecond)
 	var resp renterhost.RPCLockResponse
@@ -708,7 +713,7 @@ func NewSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, id type
 	if err != nil {
 		return nil, err
 	}
-	if err := s.Lock(id, key); err != nil {
+	if err := s.Lock(id, key, 10*time.Second); err != nil {
 		s.Close()
 		return nil, err
 	}
