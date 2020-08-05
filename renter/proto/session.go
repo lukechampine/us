@@ -703,8 +703,8 @@ func (s *Session) Close() (err error) {
 // host. The supplied contract will be locked and synchronized with the host.
 // The host's settings will also be requested.
 func NewSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, id types.FileContractID, key ed25519.PrivateKey, currentHeight types.BlockHeight) (_ *Session, err error) {
-	defer wrapErr(&err, "NewSession")
-	s, err := newUnlockedSession(hostIP, hostKey, currentHeight)
+	defer wrapErrWithReplace(&err, "NewSession")
+	s, err := NewUnlockedSession(hostIP, hostKey, currentHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -722,28 +722,32 @@ func NewSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, id type
 // NewUnlockedSession initiates a new renter-host protocol session with the specified
 // host, without locking an associated contract or requesting the host's settings.
 func NewUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (_ *Session, err error) {
-	defer wrapErr(&err, "NewUnlockedSession")
-	return newUnlockedSession(hostIP, hostKey, currentHeight)
+	defer wrapErrWithReplace(&err, "NewUnlockedSession")
+	conn, err := net.DialTimeout("tcp", string(hostIP), 60*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	conn.SetDeadline(time.Now().Add(60 * time.Second))
+	return NewUnlockedSessionFromConn(conn, hostKey, currentHeight)
 }
 
-// same as above, but without error wrapping, since we call it from NewSession too.
-func newUnlockedSession(hostIP modules.NetAddress, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (_ *Session, err error) {
+// NewUnlockedSessionFromConn initiates a new renter-host protocol session on
+// top of the provided conn, without locking an associated contract or
+// requesting the host's settings. The conn should have a deadline appropriate
+// for the renter-host protocol handshake.
+func NewUnlockedSessionFromConn(conn net.Conn, hostKey hostdb.HostPublicKey, currentHeight types.BlockHeight) (_ *Session, err error) {
+	defer wrapErr(&err, "NewUnlockedSessionFromConn")
+	sc := &statsConn{Conn: conn}
 	start := time.Now()
-	tcpConn, err := net.DialTimeout("tcp", string(hostIP), 60*time.Second)
+	s, err := renterhost.NewRenterSession(sc, hostKey.Ed25519())
 	if err != nil {
+		sc.Close()
 		return nil, err
 	}
 	latency := time.Since(start)
-	conn := &statsConn{Conn: tcpConn}
-	conn.SetDeadline(time.Now().Add(60 * time.Second))
-	s, err := renterhost.NewRenterSession(conn, hostKey.Ed25519())
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
 	return &Session{
 		sess:   s,
-		conn:   conn,
+		conn:   sc,
 		height: currentHeight,
 		host: hostdb.ScannedHost{
 			PublicKey: hostKey,

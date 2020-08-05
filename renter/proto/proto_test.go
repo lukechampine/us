@@ -1,11 +1,23 @@
 package proto
 
 import (
+	"io"
 	"testing"
 
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/frand"
 )
+
+func TestReplaceError(t *testing.T) {
+	err := io.EOF
+	wrapErr(&err, "foo")
+	err2 := io.EOF
+	wrapErr(&err2, "bar")
+	wrapErrWithReplace(&err2, "foo")
+	if err.Error() != err2.Error() {
+		t.Fatal(err, err2)
+	}
+}
 
 func TestTaxAdjustedPayout(t *testing.T) {
 	tests := []struct {
