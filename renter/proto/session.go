@@ -23,6 +23,10 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
+const (
+	DefaultLockTimeout = 10e3 // 10 seconds
+)
+
 var (
 	// ErrInsufficientFunds is returned by various RPCs when the renter is
 	// unable to provide sufficient payment to the host.
@@ -41,7 +45,14 @@ var (
 	// question has reached its maximum revision number, meaning the contract
 	// can no longer be revised.
 	ErrContractFinalized = errors.New("contract cannot be revised further")
+
+	lockTimeout uint64 = DefaultLockTimeout
 )
+
+// SetLockTimeout sets the timeout for lock requests to the given value.
+func SetLockTimeout(timeout uint64) {
+	lockTimeout = timeout
+}
 
 // wrapResponseErr formats RPC response errors nicely, wrapping them in either
 // readCtx or rejectCtx depending on whether we encountered an I/O error or the
@@ -185,7 +196,7 @@ func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey) (err err
 	req := &renterhost.RPCLockRequest{
 		ContractID: id,
 		Signature:  s.sess.SignChallenge(key),
-		Timeout:    10e3, // 10 seconds
+		Timeout:    lockTimeout,
 	}
 	s.extendDeadline(time.Duration(req.Timeout) * time.Millisecond)
 	var resp renterhost.RPCLockResponse
