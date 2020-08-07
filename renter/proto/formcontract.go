@@ -3,7 +3,7 @@ package proto
 import (
 	"crypto/ed25519"
 	"math/big"
-	"sort"
+	"math/rand"
 	"time"
 
 	"github.com/pkg/errors"
@@ -244,10 +244,7 @@ func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr type
 			return nil, err
 		}
 	}
-	// sort outputs by value, high to low
-	sort.Slice(outputs, func(i, j int) bool {
-		return outputs[i].Value.Cmp(outputs[j].Value) > 0
-	})
+	shuffle(outputs)
 
 	// keep adding outputs until we have enough
 	var fundingOutputs []modules.UnspentOutput
@@ -333,4 +330,12 @@ func taxAdjustedPayout(target types.Currency) types.Currency {
 	guess.Add(guess, tm)
 
 	return types.NewCurrency(guess)
+}
+
+func shuffle(data []modules.UnspentOutput) {
+	n := len(data)
+	for i := n - 1; i >= 0; i-- {
+		j := rand.Intn(i + 1)
+		data[i], data[j] = data[j], data[i]
+	}
 }
