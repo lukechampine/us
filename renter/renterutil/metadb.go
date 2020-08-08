@@ -10,7 +10,6 @@ import (
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/bolt"
 	"golang.org/x/crypto/blake2b"
-	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 )
@@ -22,6 +21,31 @@ var ErrKeyNotFound = errors.New("key not found")
 type DBBlob struct {
 	Key    []byte
 	Chunks []uint64
+	Seed   [32]byte
+}
+
+// DeriveKey derives an encryption key from a seed and a chunk ID.
+func (b *DBBlob) DeriveKey(chunk uint64) (key renter.KeySeed) {
+	buf := make([]byte, 7+32+8)
+	n := copy(buf, "keyseed")
+	n += copy(buf[n:], b.Seed[:])
+	binary.LittleEndian.PutUint64(buf[n:], chunk)
+	h := blake2b.Sum256(buf)
+	copy(key[:], h[:])
+	return
+}
+
+// DeriveNonce derives a nonce from a seed, chunk ID, and shard index.
+func (b *DBBlob) DeriveNonce(chunk uint64, shard int) (nonce [24]byte) {
+	buf := make([]byte, 5+32+8+8)
+	n := copy(buf, "nonce")
+	n += copy(buf[n:], b.Seed[:])
+	binary.LittleEndian.PutUint64(buf[n:], chunk)
+	n += 8
+	binary.LittleEndian.PutUint64(buf[n:], uint64(shard))
+	h := blake2b.Sum256(buf)
+	copy(nonce[:], h[:])
+	return
 }
 
 // A DBChunk is a set of erasure-encoded shards.
@@ -40,34 +64,6 @@ type DBShard struct {
 	// NOTE: Length is not stored, as it can be derived from the DBChunk.Len
 }
 
-// A DBSeed contains entropy that can be used to derive encryption keys and
-// nonces.
-type DBSeed [32]byte
-
-// KeySeed derives an encryption key from the seed and chunk ID.
-func (s *DBSeed) KeySeed(chunk uint64) (key renter.KeySeed) {
-	buf := make([]byte, 7+32+8)
-	n := copy(buf, "keyseed")
-	n += copy(buf[n:], s[:])
-	binary.LittleEndian.PutUint64(buf[n:], chunk)
-	h := blake2b.Sum256(buf)
-	copy(key[:], h[:])
-	return
-}
-
-// Nonce derives an encryption nonce from the seed, chunk ID, and shard index.
-func (s *DBSeed) Nonce(chunk uint64, shard int) (nonce [24]byte) {
-	buf := make([]byte, 5+32+8+8)
-	n := copy(buf, "nonce")
-	n += copy(buf[n:], s[:])
-	binary.LittleEndian.PutUint64(buf[n:], chunk)
-	n += 8
-	binary.LittleEndian.PutUint64(buf[n:], uint64(shard))
-	h := blake2b.Sum256(buf)
-	copy(nonce[:], h[:])
-	return
-}
-
 // A MetaDB stores the metadata of blobs stored on Sia hosts.
 type MetaDB interface {
 	AddBlob(b DBBlob) error
@@ -82,9 +78,6 @@ type MetaDB interface {
 
 	UnreferencedSectors() (map[hostdb.HostPublicKey][]crypto.Hash, error)
 
-	// The entropy must be the same across calls.
-	Seed() *DBSeed
-
 	Close() error
 }
 
@@ -94,13 +87,7 @@ type EphemeralMetaDB struct {
 	chunks []DBChunk
 	blobs  map[string]DBBlob
 	refs   map[uint64]int
-	seed   DBSeed
 	mu     sync.Mutex
-}
-
-// Seed implements MetaDB.
-func (db *EphemeralMetaDB) Seed() *DBSeed {
-	return &db.seed
 }
 
 // AddShard implements MetaDB.
@@ -214,28 +201,19 @@ func NewEphemeralMetaDB() *EphemeralMetaDB {
 		refs:  make(map[uint64]int),
 		blobs: make(map[string]DBBlob),
 	}
-	frand.Read(db.seed[:])
 	return db
 }
 
 // BoltMetaDB implements MetaDB with a Bolt database.
 type BoltMetaDB struct {
-	bdb  *bolt.DB
-	seed DBSeed
+	bdb *bolt.DB
 }
 
 var (
-	bucketMeta   = []byte("meta")
-	keySeed      = []byte("seed")
 	bucketBlobs  = []byte("blobs")
 	bucketChunks = []byte("chunks")
 	bucketShards = []byte("shards")
 )
-
-// Seed implements MetaDB.
-func (db *BoltMetaDB) Seed() *DBSeed {
-	return &db.seed
-}
 
 // AddShard implements MetaDB.
 func (db *BoltMetaDB) AddShard(s DBShard) (id uint64, err error) {
@@ -290,7 +268,7 @@ func (db *BoltMetaDB) Chunk(id uint64) (c DBChunk, err error) {
 // AddBlob implements MetaDB.
 func (db *BoltMetaDB) AddBlob(b DBBlob) error {
 	return db.bdb.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketBlobs).Put(b.Key, encoding.Marshal(b.Chunks))
+		return tx.Bucket(bucketBlobs).Put(b.Key, encoding.MarshalAll(b.Chunks, b.Seed))
 	})
 }
 
@@ -301,7 +279,7 @@ func (db *BoltMetaDB) Blob(key []byte) (b DBBlob, err error) {
 		if len(blobBytes) == 0 {
 			return ErrKeyNotFound
 		}
-		return encoding.Unmarshal(blobBytes, &b.Chunks)
+		return encoding.UnmarshalAll(blobBytes, &b.Chunks, &b.Seed)
 	})
 	b.Key = key
 	return
@@ -340,7 +318,6 @@ func NewBoltMetaDB(path string) (*BoltMetaDB, error) {
 	// initialize
 	err = bdb.Update(func(tx *bolt.Tx) error {
 		for _, bucket := range [][]byte{
-			bucketMeta,
 			bucketBlobs,
 			bucketChunks,
 			bucketShards,
@@ -349,11 +326,6 @@ func NewBoltMetaDB(path string) (*BoltMetaDB, error) {
 				return err
 			}
 		}
-		bm := tx.Bucket(bucketMeta)
-		if bm.Get(keySeed) == nil {
-			bm.Put(keySeed, frand.Bytes(32))
-		}
-		copy(db.seed[:], bm.Get(keySeed))
 		return nil
 	})
 	if err != nil {
