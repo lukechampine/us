@@ -140,3 +140,5 @@ gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8
 gopkg.in/yaml.v2 v2.2.2/go.mod h1:hI93XBmqTisBFMUTm0b8Fm+jr3Dg1NNxqwp+5A1VGuI=
 lukechampine.com/frand v1.0.1 h1:awSripFy7kz8l2rV9fCgqNhbdJ6D/LHJwC4NCmJXGMg=
 lukechampine.com/frand v1.0.1/go.mod h1:4S/TM2ZgrKejMcKMbeLjISpJMO+/eZ1zu3vYX9dtj3s=
+lukechampine.com/frand v1.2.0 h1:YjUqUiPtAZxOtK8tru43XUw18JIoZszlupraMSk3aZc=
+lukechampine.com/frand v1.2.0/go.mod h1:4S/TM2ZgrKejMcKMbeLjISpJMO+/eZ1zu3vYX9dtj3s=
