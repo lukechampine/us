@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 
+	"lukechampine.com/frand"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renterhost"
 )
@@ -23,6 +24,7 @@ func (kv PseudoKV) Put(key []byte, r io.Reader) error {
 	b, err := kv.DB.Blob(key)
 	if err == ErrKeyNotFound {
 		b = DBBlob{Key: key}
+		frand.Read(b.Seed[:])
 		err = kv.DB.AddBlob(b)
 	}
 	if err != nil {
@@ -60,7 +62,7 @@ func (kv PseudoKV) Resume(key []byte, rs io.ReadSeeker) error {
 				// TODO: only attempt repair if erasure params match
 				if _, err := rs.Seek(int64(offset), io.SeekStart); err != nil {
 					return err
-				} else if err := kv.repairChunk(c, rs); err != nil {
+				} else if err := kv.repairChunk(b, c, rs); err != nil {
 					return err
 				}
 			}
@@ -138,7 +140,7 @@ func (kv *PseudoKV) Close() error {
 	return kv.DB.Close()
 }
 
-func (kv PseudoKV) repairChunk(c DBChunk, r io.Reader) error {
+func (kv PseudoKV) repairChunk(b DBBlob, c DBChunk, r io.Reader) error {
 	buf := make([]byte, c.Len)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return err
@@ -149,7 +151,7 @@ func (kv PseudoKV) repairChunk(c DBChunk, r io.Reader) error {
 		shards[i] = make([]byte, renterhost.SectorSize)
 	}
 	rsc.Encode(buf, shards)
-	if err := kv.Uploader.UploadChunk(kv.DB, c, shards); err != nil {
+	if err := kv.Uploader.UploadChunk(kv.DB, b, c, shards); err != nil {
 		return err
 	}
 	return nil

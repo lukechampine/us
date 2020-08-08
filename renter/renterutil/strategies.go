@@ -16,7 +16,7 @@ import (
 
 // A ChunkUploader uploads shards, associating them with a given chunk.
 type ChunkUploader interface {
-	UploadChunk(db MetaDB, c DBChunk, shards [][]byte) error
+	UploadChunk(db MetaDB, b DBBlob, c DBChunk, shards [][]byte) error
 }
 
 // SerialChunkUploader uploads chunks to hosts one shard at a time.
@@ -25,7 +25,7 @@ type SerialChunkUploader struct {
 }
 
 // UploadChunk implements ChunkUploader.
-func (scu SerialChunkUploader) UploadChunk(db MetaDB, c DBChunk, shards [][]byte) error {
+func (scu SerialChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, shards [][]byte) error {
 	// choose hosts, preserving any that at already present
 	newHosts := make(map[hostdb.HostPublicKey]struct{})
 	for h := range scu.Hosts.sessions {
@@ -60,7 +60,7 @@ func (scu SerialChunkUploader) UploadChunk(db MetaDB, c DBChunk, shards [][]byte
 
 		var sb renter.SectorBuilder // TODO: reuse
 		offset := uint32(sb.Len())
-		sb.Append(shard, db.Seed().KeySeed(c.ID), db.Seed().Nonce(c.ID, i))
+		sb.Append(shard, b.DeriveKey(c.ID), b.DeriveNonce(c.ID, i))
 		sector := sb.Finish()
 		h, err := scu.Hosts.acquire(hostKey)
 		if err != nil {
@@ -88,7 +88,7 @@ type ParallelChunkUploader struct {
 }
 
 // UploadChunk implements ChunkUploader.
-func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, shards [][]byte) error {
+func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, shards [][]byte) error {
 	if len(shards) > len(pcu.Hosts.sessions) {
 		return errors.New("more shards than hosts")
 	}
@@ -164,8 +164,8 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, shards [][]by
 		if skip[i] {
 			continue
 		}
-		key := db.Seed().KeySeed(c.ID)
-		nonce := db.Seed().Nonce(c.ID, i)
+		key := b.DeriveKey(c.ID)
+		nonce := b.DeriveNonce(c.ID, i)
 		var sb renter.SectorBuilder
 		sb.Append(shard, key, nonce)
 		sectors[i] = sb.Finish()
@@ -236,7 +236,7 @@ type MinimumChunkUploader struct {
 }
 
 // UploadChunk implements ChunkUploader.
-func (mcu MinimumChunkUploader) UploadChunk(db MetaDB, c DBChunk, shards [][]byte) error {
+func (mcu MinimumChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, shards [][]byte) error {
 	// choose hosts, preserving any that at already present
 	newHosts := make(map[hostdb.HostPublicKey]struct{})
 	for h := range mcu.Hosts.sessions {
@@ -273,9 +273,9 @@ func (mcu MinimumChunkUploader) UploadChunk(db MetaDB, c DBChunk, shards [][]byt
 		hostKey := chooseHost()
 
 		var sb renter.SectorBuilder // TODO: reuse
-		nonce := db.Seed().Nonce(c.ID, i)
+		nonce := b.DeriveNonce(c.ID, i)
 		offset := uint32(sb.Len())
-		sb.Append(shard, db.Seed().KeySeed(c.ID), nonce)
+		sb.Append(shard, b.DeriveKey(c.ID), nonce)
 		sector := sb.Finish()
 		h, err := mcu.Hosts.acquire(hostKey)
 		if err != nil {
@@ -303,7 +303,7 @@ func (mcu MinimumChunkUploader) UploadChunk(db MetaDB, c DBChunk, shards [][]byt
 
 // A ChunkDownloader downloads the shards of a chunk.
 type ChunkDownloader interface {
-	DownloadChunk(db MetaDB, c DBChunk, off, n int64) ([][]byte, error)
+	DownloadChunk(db MetaDB, b DBBlob, c DBChunk, off, n int64) ([][]byte, error)
 }
 
 // SerialChunkDownloader downloads the shards of a chunk one at a time.
@@ -312,7 +312,7 @@ type SerialChunkDownloader struct {
 }
 
 // DownloadChunk implements ChunkDownloader.
-func (scd SerialChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, off, n int64) ([][]byte, error) {
+func (scd SerialChunkDownloader) DownloadChunk(db MetaDB, b DBBlob, c DBChunk, off, n int64) ([][]byte, error) {
 	minChunkSize := merkle.SegmentSize * int64(c.MinShards)
 	shards := make([][]byte, len(c.Shards))
 	for i := range shards {
@@ -342,12 +342,12 @@ func (scd SerialChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, off, n int6
 		buf := bytes.NewBuffer(shards[i])
 		err = (&renter.ShardDownloader{
 			Downloader: sess,
-			Key:        db.Seed().KeySeed(c.ID),
+			Key:        b.DeriveKey(c.ID),
 			Slices: []renter.SectorSlice{{
 				MerkleRoot:   shard.SectorRoot,
 				SegmentIndex: shard.Offset,
 				NumSegments:  merkle.SegmentsPerSector - shard.Offset, // inconsequential
-				Nonce:        db.Seed().Nonce(c.ID, i),
+				Nonce:        b.DeriveNonce(c.ID, i),
 			}},
 		}).CopySection(buf, offset, length)
 		scd.Hosts.release(shard.HostKey)
@@ -372,7 +372,7 @@ type ParallelChunkDownloader struct {
 }
 
 // DownloadChunk implements ChunkDownloader.
-func (pcd ParallelChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, off, n int64) ([][]byte, error) {
+func (pcd ParallelChunkDownloader) DownloadChunk(db MetaDB, b DBBlob, c DBChunk, off, n int64) ([][]byte, error) {
 	minChunkSize := merkle.SegmentSize * int64(c.MinShards)
 	start := (off / minChunkSize) * merkle.SegmentSize
 	end := ((off + n) / minChunkSize) * merkle.SegmentSize
@@ -422,12 +422,12 @@ func (pcd ParallelChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, off, n in
 				buf := bytes.NewBuffer(shards[req.shardIndex])
 				err = (&renter.ShardDownloader{
 					Downloader: sess,
-					Key:        db.Seed().KeySeed(c.ID),
+					Key:        b.DeriveKey(c.ID),
 					Slices: []renter.SectorSlice{{
 						MerkleRoot:   shard.SectorRoot,
 						SegmentIndex: shard.Offset,
 						NumSegments:  merkle.SegmentsPerSector - shard.Offset, // inconsequential
-						Nonce:        db.Seed().Nonce(c.ID, req.shardIndex),
+						Nonce:        b.DeriveNonce(c.ID, req.shardIndex),
 					}},
 				}).CopySection(buf, offset, length)
 				pcd.Hosts.release(shard.HostKey)
@@ -478,7 +478,7 @@ func (pcd ParallelChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, off, n in
 // A ChunkUpdater updates or replaces an existing chunk, returning the ID of the
 // new chunk.
 type ChunkUpdater interface {
-	UpdateChunk(db MetaDB, c DBChunk) (uint64, error)
+	UpdateChunk(db MetaDB, b DBBlob, c DBChunk) (uint64, error)
 }
 
 // GenericChunkUpdater updates chunks by downloading them with D and reuploading
@@ -490,9 +490,9 @@ type GenericChunkUpdater struct {
 }
 
 // UpdateChunk implements ChunkUpdater.
-func (gcu GenericChunkUpdater) UpdateChunk(db MetaDB, c DBChunk) (uint64, error) {
+func (gcu GenericChunkUpdater) UpdateChunk(db MetaDB, b DBBlob, c DBChunk) (uint64, error) {
 	// download
-	shards, err := gcu.D.DownloadChunk(db, c, 0, int64(c.Len))
+	shards, err := gcu.D.DownloadChunk(db, b, c, 0, int64(c.Len))
 	if err != nil {
 		return 0, err
 	}
@@ -522,7 +522,7 @@ func (gcu GenericChunkUpdater) UpdateChunk(db MetaDB, c DBChunk) (uint64, error)
 		return 0, err
 	}
 	rc.ID = rid
-	if err := gcu.U.UploadChunk(db, rc, shards); err != nil {
+	if err := gcu.U.UploadChunk(db, b, rc, shards); err != nil {
 		return 0, err
 	}
 
@@ -571,7 +571,7 @@ func (sbu SerialBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) error
 		if err := db.AddBlob(b); err != nil {
 			return err
 		}
-		if err := sbu.U.UploadChunk(db, c, shards); err != nil {
+		if err := sbu.U.UploadChunk(db, b, c, shards); err != nil {
 			return err
 		}
 	}
@@ -598,7 +598,7 @@ func (pbu ParallelBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) err
 	for i := 0; i < pbu.P; i++ {
 		go func() {
 			for req := range reqChan {
-				respChan <- pbu.U.UploadChunk(db, req.c, req.shards)
+				respChan <- pbu.U.UploadChunk(db, b, req.c, req.shards)
 			}
 		}()
 	}
@@ -688,7 +688,7 @@ func (sbd SerialBlobDownloader) DownloadBlob(db MetaDB, b DBBlob, w io.Writer, o
 		if reqLen < 0 || reqLen > int64(c.Len) {
 			reqLen = int64(c.Len)
 		}
-		shards, err := sbd.D.DownloadChunk(db, c, off, reqLen)
+		shards, err := sbd.D.DownloadChunk(db, b, c, off, reqLen)
 		if err != nil {
 			return err
 		}
@@ -731,16 +731,15 @@ func (pbd ParallelBlobDownloader) DownloadBlob(db MetaDB, b DBBlob, w io.Writer,
 	defer close(reqChan)
 	for i := 0; i < pbd.P; i++ {
 		go func() {
-			var buf bytes.Buffer
 			for req := range reqChan {
-				shards, err := pbd.D.DownloadChunk(db, req.c, req.off, req.n)
+				shards, err := pbd.D.DownloadChunk(db, b, req.c, req.off, req.n)
 				if err != nil {
 					respChan <- resp{req.index, nil, err}
 					continue
 				}
 				rsc := renter.NewRSCode(int(req.c.MinShards), len(req.c.Shards))
 				skip := int(req.off % (merkle.SegmentSize * int64(req.c.MinShards)))
-				buf.Reset()
+				var buf bytes.Buffer
 				if err := rsc.Recover(&buf, shards, skip, int(req.n)); err != nil {
 					respChan <- resp{req.index, nil, err}
 					continue
@@ -844,7 +843,7 @@ func (sbu SerialBlobUpdater) UpdateBlob(db MetaDB, b DBBlob) error {
 		if err != nil {
 			return err
 		}
-		id, err := sbu.U.UpdateChunk(db, c)
+		id, err := sbu.U.UpdateChunk(db, b, c)
 		if err != nil {
 			return err
 		}
