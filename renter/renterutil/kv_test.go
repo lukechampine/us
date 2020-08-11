@@ -261,7 +261,7 @@ func TestKVResumeHost(t *testing.T) {
 	}
 }
 
-func TestKVMigrate(t *testing.T) {
+func TestKVUpdate(t *testing.T) {
 	kv, cleanup := createTestingKV(t, 2, 3)
 	defer cleanup()
 
@@ -296,6 +296,44 @@ func TestKVMigrate(t *testing.T) {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, bigdata) {
 		t.Fatal("bad data")
+	}
+}
+
+func TestKVMigrate(t *testing.T) {
+	kv, cleanup := createTestingKV(t, 2, 3)
+	defer cleanup()
+
+	bigdata := frand.Bytes(renterhost.SectorSize * 4)
+	err := kv.PutBytes([]byte("foo"), bigdata)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// replace a host in the set
+	hs := kv.Uploader.(SerialChunkUploader).Hosts
+	for hostKey := range hs.sessions {
+		s, _ := hs.acquire(hostKey)
+		s.Close()
+		hs.release(hostKey)
+		delete(hs.sessions, hostKey)
+		break
+	}
+	h, c := createHostWithContract(t)
+	defer h.Close()
+	hs.hkr.(testHKR)[h.PublicKey()] = h.Settings().NetAddress
+	hs.AddHost(c)
+
+	// migrate
+	err = kv.Migrate([]byte("foo"), hs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := kv.GetBytes([]byte("foo"))
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(data, bigdata) {
+		t.Fatal("bad data", data, bigdata)
 	}
 }
 
