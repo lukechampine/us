@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"lukechampine.com/frand"
+	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renterhost"
 )
@@ -115,6 +116,23 @@ func (kv *PseudoKV) Update(key []byte, bu BlobUpdater) error {
 		return err
 	}
 	return bu.UpdateBlob(kv.DB, b)
+}
+
+// Migrate updates an existing key, migrating each each of its chunks to the
+// provided HostSet.
+func (kv *PseudoKV) Migrate(key []byte, hosts *HostSet) error {
+	whitelist := make([]hostdb.HostPublicKey, 0, len(hosts.sessions))
+	for hostKey := range hosts.sessions {
+		whitelist = append(whitelist, hostKey)
+	}
+	return kv.Update(key, SerialBlobUpdater{
+		U: GenericChunkUpdater{
+			D:            kv.Downloader,
+			U:            kv.Uploader,
+			ShouldUpdate: NewMigrationWhitelist(whitelist),
+			InPlace:      true,
+		},
+	})
 }
 
 // Delete deletes the value associated with key.

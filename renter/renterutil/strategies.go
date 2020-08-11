@@ -31,6 +31,7 @@ func (scu SerialChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, shard
 	for h := range scu.Hosts.sessions {
 		newHosts[h] = struct{}{}
 	}
+	need := len(shards)
 	skip := make([]bool, len(shards))
 	for i, sid := range c.Shards {
 		if sid != 0 {
@@ -40,9 +41,13 @@ func (scu SerialChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, shard
 			}
 			if scu.Hosts.HasHost(s.HostKey) {
 				skip[i] = true
+				need--
 				delete(newHosts, s.HostKey)
 			}
 		}
+	}
+	if need > len(newHosts) {
+		return errors.New("fewer hosts than shards")
 	}
 	chooseHost := func() (h hostdb.HostPublicKey) {
 		for h = range newHosts {
@@ -72,10 +77,10 @@ func (scu SerialChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, shard
 			return &HostError{hostKey, err}
 		}
 
-		c.Shards[i], err = db.AddShard(DBShard{hostKey, root, offset})
+		sid, err := db.AddShard(DBShard{hostKey, root, offset})
 		if err != nil {
 			return err
-		} else if _, err := db.AddChunk(c); err != nil {
+		} else if err := db.SetChunkShard(c.ID, i, sid); err != nil {
 			return err
 		}
 	}
@@ -97,6 +102,7 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, sha
 	for h := range pcu.Hosts.sessions {
 		newHosts[h] = struct{}{}
 	}
+	need := len(shards)
 	skip := make([]bool, len(shards))
 	for i, sid := range c.Shards {
 		if sid != 0 {
@@ -106,10 +112,15 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, sha
 			}
 			if pcu.Hosts.HasHost(s.HostKey) {
 				skip[i] = true
+				need--
 				delete(newHosts, s.HostKey)
 			}
 		}
 	}
+	if need > len(newHosts) {
+		return errors.New("fewer hosts than shards")
+	}
+
 	chooseHost := func() (h hostdb.HostPublicKey) {
 		for h = range newHosts {
 			delete(newHosts, h)
@@ -172,10 +183,8 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, sha
 	}
 
 	// start by requesting uploads to len(c.Shards) hosts, non-blocking.
-	need := len(c.Shards)
 	for shardIndex := range c.Shards {
 		if skip[shardIndex] {
-			need--
 			continue
 		}
 		reqChan <- req{
@@ -194,8 +203,7 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, sha
 	for need > 0 {
 		resp := <-respChan
 		if resp.err == nil {
-			c.Shards[resp.req.shardIndex] = resp.sliceID
-			if _, err := db.AddChunk(c); err != nil {
+			if err := db.SetChunkShard(c.ID, resp.req.shardIndex, resp.sliceID); err != nil {
 				return err // TODO: need to wait for outstanding workers
 			}
 			need--
@@ -242,7 +250,7 @@ func (mcu MinimumChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, shar
 	for h := range mcu.Hosts.sessions {
 		newHosts[h] = struct{}{}
 	}
-	rem := c.MinShards
+	need := int(c.MinShards)
 	skip := make([]bool, len(shards))
 	for i, sid := range c.Shards {
 		if sid != 0 {
@@ -252,11 +260,14 @@ func (mcu MinimumChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, shar
 			}
 			if mcu.Hosts.HasHost(s.HostKey) {
 				skip[i] = true
+				need--
 				delete(newHosts, s.HostKey)
 			}
 		}
 	}
-	if rem <= 0 {
+	if need > len(newHosts) {
+		return errors.New("fewer hosts than shards")
+	} else if need <= 0 {
 		return nil // already have minimum
 	}
 	chooseHost := func() (h hostdb.HostPublicKey) {
@@ -287,14 +298,13 @@ func (mcu MinimumChunkUploader) UploadChunk(db MetaDB, b DBBlob, c DBChunk, shar
 			return &HostError{hostKey, err}
 		}
 
-		c.Shards[i], err = db.AddShard(DBShard{hostKey, root, offset})
-		if err != nil {
+		if sid, err := db.AddShard(DBShard{hostKey, root, offset}); err != nil {
 			return err
-		} else if _, err := db.AddChunk(c); err != nil {
+		} else if err := db.SetChunkShard(c.ID, i, sid); err != nil {
 			return err
 		}
 
-		if rem--; rem == 0 {
+		if need--; need == 0 {
 			break
 		}
 	}
@@ -487,10 +497,26 @@ type GenericChunkUpdater struct {
 	D    ChunkDownloader
 	U    ChunkUploader
 	M, N int
+
+	// If true, the chunk's encoding parameters are used, and the chunk is
+	// updated directly instead of a new chunk being added to the DB.
+	InPlace bool
+
+	// If non-nil, skip any chunk for which this function returns false.
+	ShouldUpdate func(MetaDB, DBChunk) (bool, error)
 }
 
 // UpdateChunk implements ChunkUpdater.
 func (gcu GenericChunkUpdater) UpdateChunk(db MetaDB, b DBBlob, c DBChunk) (uint64, error) {
+	if gcu.ShouldUpdate != nil {
+		shouldUpdate, err := gcu.ShouldUpdate(db, c)
+		if err != nil {
+			return 0, err
+		} else if !shouldUpdate {
+			return c.ID, nil
+		}
+	}
+
 	// download
 	shards, err := gcu.D.DownloadChunk(db, b, c, 0, int64(c.Len))
 	if err != nil {
@@ -498,35 +524,77 @@ func (gcu GenericChunkUpdater) UpdateChunk(db MetaDB, b DBBlob, c DBChunk) (uint
 	}
 
 	// reshard
-	var buf bytes.Buffer
-	rsc := renter.NewRSCode(int(c.MinShards), len(shards))
-	if err := rsc.Recover(&buf, shards, 0, int(c.Len)); err != nil {
-		return 0, err
+	m, n := gcu.M, gcu.N
+	if gcu.InPlace {
+		m, n = int(c.MinShards), len(c.Shards)
 	}
-	shards = make([][]byte, gcu.N)
-	for i := range shards {
-		shards[i] = make([]byte, renterhost.SectorSize)
+	if m == int(c.MinShards) && n == len(c.Shards) {
+		if err := renter.NewRSCode(m, n).Reconstruct(shards); err != nil {
+			return 0, err
+		}
+	} else {
+		var buf bytes.Buffer
+		if err := renter.NewRSCode(int(c.MinShards), len(c.Shards)).Recover(&buf, shards, 0, int(c.Len)); err != nil {
+			return 0, err
+		}
+		shards = make([][]byte, n)
+		for i := range shards {
+			shards[i] = make([]byte, renterhost.SectorSize)
+		}
+		renter.NewRSCode(m, n).Encode(buf.Bytes(), shards)
 	}
-	rsc = renter.NewRSCode(gcu.M, gcu.N)
-	rsc.Encode(buf.Bytes(), shards)
 
 	// upload
-	rc := DBChunk{
-		ID:        0, // create new chunk
-		Shards:    make([]uint64, len(shards)),
-		MinShards: uint8(gcu.M),
-		Len:       c.Len,
+	if !gcu.InPlace {
+		c, err = db.AddChunk(m, n, c.Len)
+		if err != nil {
+			return 0, err
+		}
 	}
-	rid, err := db.AddChunk(rc)
-	if err != nil {
+	if err := gcu.U.UploadChunk(db, b, c, shards); err != nil {
 		return 0, err
 	}
-	rc.ID = rid
-	if err := gcu.U.UploadChunk(db, b, rc, shards); err != nil {
-		return 0, err
-	}
+	return c.ID, nil
+}
 
-	return rid, nil
+// NewMigrationWhitelist returns a filter for use with GenericChunkUpdater. It
+// returns true for chunks that store all of their shards on whitelisted host.
+func NewMigrationWhitelist(whitelist []hostdb.HostPublicKey) func(MetaDB, DBChunk) (bool, error) {
+	return func(db MetaDB, c DBChunk) (bool, error) {
+		for _, id := range c.Shards {
+			s, err := db.Shard(id)
+			if err != nil {
+				return false, err
+			}
+			whitelisted := false
+			for _, h := range whitelist {
+				whitelisted = whitelisted || h == s.HostKey
+			}
+			if !whitelisted {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+}
+
+// NewMigrationBlacklist returns a filter for use with GenericChunkUpdater. It
+// returns true for chunks that store any of their shards on a blacklisted host.
+func NewMigrationBlacklist(blacklist []hostdb.HostPublicKey) func(MetaDB, DBChunk) (bool, error) {
+	return func(db MetaDB, c DBChunk) (bool, error) {
+		for _, id := range c.Shards {
+			s, err := db.Shard(id)
+			if err != nil {
+				return false, err
+			}
+			for _, h := range blacklist {
+				if h == s.HostKey {
+					return true, nil
+				}
+			}
+		}
+		return false, nil
+	}
 }
 
 // A BlobUploader uploads a DBBlob.
@@ -556,17 +624,10 @@ func (sbu SerialBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) error
 			return err
 		}
 		rsc.Encode(buf[:chunkLen], shards)
-		c := DBChunk{
-			ID:        0, // create new chunk
-			Shards:    make([]uint64, sbu.N),
-			MinShards: uint8(sbu.M),
-			Len:       uint64(chunkLen),
-		}
-		cid, err := db.AddChunk(c)
+		c, err := db.AddChunk(sbu.M, sbu.N, uint64(chunkLen))
 		if err != nil {
 			return err
 		}
-		c.ID = cid
 		b.Chunks = append(b.Chunks, c.ID)
 		if err := db.AddBlob(b); err != nil {
 			return err
@@ -631,16 +692,10 @@ func (pbu ParallelBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) err
 			shards[i] = make([]byte, renterhost.SectorSize)
 		}
 		rsc.Encode(buf[:chunkLen], shards)
-		c := DBChunk{
-			Shards:    make([]uint64, pbu.N),
-			MinShards: uint8(pbu.M),
-			Len:       uint64(chunkLen),
-		}
-		cid, err := db.AddChunk(c)
+		c, err := db.AddChunk(pbu.M, pbu.N, uint64(chunkLen))
 		if err != nil {
 			return err
 		}
-		c.ID = cid
 		b.Chunks = append(b.Chunks, c.ID)
 		if err := db.AddBlob(b); err != nil {
 			return err
