@@ -460,8 +460,6 @@ func TestKVMinimumAvailability(t *testing.T) {
 		t.Fatal("expected 1x redundancy, got", float64(totalUploaded)/float64(len(bigdata)))
 	}
 
-	// TODO: ndf here!
-
 	// should be able to download
 	data, err := kv.GetBytes([]byte("foo"))
 	if err != nil {
