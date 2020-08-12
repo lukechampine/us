@@ -35,13 +35,11 @@ func (b *DBBlob) DeriveKey(chunk uint64) (key renter.KeySeed) {
 	return
 }
 
-// DeriveNonce derives a nonce from a seed, chunk ID, and shard index.
-func (b *DBBlob) DeriveNonce(chunk uint64, shard int) (nonce [24]byte) {
-	buf := make([]byte, 5+32+8+8)
+// DeriveNonce derives a nonce from a seed and shard index.
+func DeriveNonce(seed renter.KeySeed, shard int) (nonce [24]byte) {
+	buf := make([]byte, 5+32+8)
 	n := copy(buf, "nonce")
-	n += copy(buf[n:], b.Seed[:])
-	binary.LittleEndian.PutUint64(buf[n:], chunk)
-	n += 8
+	n += copy(buf[n:], seed[:])
 	binary.LittleEndian.PutUint64(buf[n:], uint64(shard))
 	h := blake2b.Sum256(buf)
 	copy(nonce[:], h[:])
