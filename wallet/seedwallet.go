@@ -62,9 +62,8 @@ func (w *SeedWallet) ChainHeight() types.BlockHeight {
 // OwnsAddress reports whether addr is being tracked by the wallet.
 func (w *SeedWallet) OwnsAddress(addr types.UnlockHash) bool {
 	w.mu.Lock()
-	owned := w.store.OwnsAddress(addr)
-	w.mu.Unlock()
-	return owned
+	defer w.mu.Unlock()
+	return w.store.OwnsAddress(addr)
 }
 
 // Addresses returns the set of addresses tracked by the wallet.
