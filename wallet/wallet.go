@@ -514,3 +514,55 @@ func FilterConsensusChange(cc modules.ConsensusChange, owner AddressOwner, curre
 
 	return reverted, applied, cc.ID
 }
+
+// RelevantTransaction returns true if txn is relevant to owner.
+func RelevantTransaction(owner AddressOwner, txn types.Transaction) bool {
+	for i := range txn.SiacoinInputs {
+		if owner.OwnsAddress(CalculateUnlockHash(txn.SiacoinInputs[i].UnlockConditions)) {
+			return true
+		}
+	}
+	for i := range txn.SiacoinOutputs {
+		if owner.OwnsAddress(txn.SiacoinOutputs[i].UnlockHash) {
+			return true
+		}
+	}
+	for i := range txn.SiafundInputs {
+		if owner.OwnsAddress(CalculateUnlockHash(txn.SiafundInputs[i].UnlockConditions)) {
+			return true
+		}
+		if owner.OwnsAddress(txn.SiafundInputs[i].ClaimUnlockHash) {
+			return true
+		}
+	}
+	for i := range txn.SiafundOutputs {
+		if owner.OwnsAddress(txn.SiafundOutputs[i].UnlockHash) {
+			return true
+		}
+	}
+	for i := range txn.FileContracts {
+		for _, sco := range txn.FileContracts[i].ValidProofOutputs {
+			if owner.OwnsAddress(sco.UnlockHash) {
+				return true
+			}
+		}
+		for _, sco := range txn.FileContracts[i].MissedProofOutputs {
+			if owner.OwnsAddress(sco.UnlockHash) {
+				return true
+			}
+		}
+	}
+	for i := range txn.FileContractRevisions {
+		for _, sco := range txn.FileContractRevisions[i].NewValidProofOutputs {
+			if owner.OwnsAddress(sco.UnlockHash) {
+				return true
+			}
+		}
+		for _, sco := range txn.FileContractRevisions[i].NewMissedProofOutputs {
+			if owner.OwnsAddress(sco.UnlockHash) {
+				return true
+			}
+		}
+	}
+	return false
+}
