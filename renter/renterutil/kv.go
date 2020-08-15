@@ -20,15 +20,12 @@ type PseudoKV struct {
 	Deleter    SectorDeleter
 }
 
-// Put uploads r to hosts and associates it with the specified key.
+// Put uploads r to hosts and associates it with the specified key. Any existing
+// data associated with the key will be overwritten.
 func (kv PseudoKV) Put(key []byte, r io.Reader) error {
-	b, err := kv.DB.Blob(key)
-	if err == ErrKeyNotFound {
-		b = DBBlob{Key: key}
-		frand.Read(b.Seed[:])
-		err = kv.DB.AddBlob(b)
-	}
-	if err != nil {
+	b := DBBlob{Key: key}
+	frand.Read(b.Seed[:])
+	if err := kv.DB.AddBlob(b); err != nil {
 		return err
 	}
 	bu := ParallelBlobUploader{
