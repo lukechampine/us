@@ -69,29 +69,26 @@ func TestKVPutGet(t *testing.T) {
 	kv, cleanup := createTestingKV(t, 2, 3)
 	defer cleanup()
 
-	var err error
-	if false {
-		err := kv.PutBytes([]byte("foo"), []byte("bar"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, err := kv.GetBytes([]byte("foo"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(data) != "bar" {
-			t.Fatalf("bad data: %q", data)
-		}
+	err := kv.PutBytes([]byte("foo"), []byte("bar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := kv.GetBytes([]byte("foo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "bar" {
+		t.Fatalf("bad data: %q", data)
 	}
 
 	// large value, using streaming API
 	bigdata := frand.Bytes(renterhost.SectorSize * 4)
-	err = kv.Put([]byte("baz"), bytes.NewReader(bigdata))
+	err = kv.Put([]byte("foo"), bytes.NewReader(bigdata))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	err = kv.Get([]byte("baz"), &buf)
+	err = kv.Get([]byte("foo"), &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +99,7 @@ func TestKVPutGet(t *testing.T) {
 	// range request
 	buf.Reset()
 	off, n := int64(renterhost.SectorSize+10), int64(497)
-	err = kv.GetRange([]byte("baz"), &buf, off, n)
+	err = kv.GetRange([]byte("foo"), &buf, off, n)
 	if err != nil {
 		t.Fatal(err)
 	}
