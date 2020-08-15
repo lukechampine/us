@@ -102,7 +102,7 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 	for h := range pcu.Hosts.sessions {
 		newHosts[h] = struct{}{}
 	}
-	need := len(shards)
+	rem := len(shards)
 	skip := make([]bool, len(shards))
 	for i, sid := range c.Shards {
 		if sid != 0 {
@@ -112,13 +112,13 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 			}
 			if pcu.Hosts.HasHost(s.HostKey) {
 				skip[i] = true
-				need--
+				rem--
 				delete(newHosts, s.HostKey)
 			}
 		}
 	}
-	if need > len(newHosts) {
-		return errors.New("fewer hosts than shards")
+	if rem > len(newHosts) {
+		rem = len(newHosts)
 	}
 
 	chooseHost := func() (h hostdb.HostPublicKey) {
@@ -141,9 +141,9 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 		sliceID uint64
 		err     error
 	}
-	reqChan := make(chan req, len(c.Shards))
-	respChan := make(chan resp, len(c.Shards))
-	for range c.Shards {
+	reqChan := make(chan req, rem)
+	respChan := make(chan resp, rem)
+	for i := 0; i < rem; i++ {
 		go func() {
 			for req := range reqChan {
 				sess, err := pcu.Hosts.tryAcquire(req.hostKey)
@@ -180,9 +180,10 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 		sectors[i] = sb.Finish()
 	}
 
-	// start by requesting uploads to len(c.Shards) hosts, non-blocking.
+	// start by requesting uploads to rem hosts, non-blocking.
+	var inflight int
 	for shardIndex := range c.Shards {
-		if skip[shardIndex] {
+		if skip[shardIndex] || len(newHosts) == 0 {
 			continue
 		}
 		reqChan <- req{
@@ -191,20 +192,21 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 			shard:      sectors[shardIndex],
 			block:      false,
 		}
+		inflight++
 	}
 
 	// for those that return errors, add the next host to the queue, non-blocking.
 	// for those that block, add the same host to the queue, blocking.
-	// abort once there are not enough hosts remaining (even if they all succeeded)
 	var reqQueue []req
 	var errs HostErrorSet
-	for need > 0 {
+	for inflight > 0 {
 		resp := <-respChan
+		inflight--
 		if resp.err == nil {
 			if err := db.SetChunkShard(c.ID, resp.req.shardIndex, resp.sliceID); err != nil {
 				return err // TODO: need to wait for outstanding workers
 			}
-			need--
+			rem--
 		} else {
 			if resp.err == errHostAcquired {
 				// host could not be acquired without blocking; add it to the back
@@ -212,7 +214,7 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 				resp.req.block = true
 				reqQueue = append(reqQueue, resp.req)
 			} else {
-				// downloading from this host failed; don't try it again
+				// uploading to this host failed; don't try it again
 				errs = append(errs, &HostError{resp.req.hostKey, resp.err})
 				// add a different host to the queue, if able
 				if len(newHosts) > 0 {
@@ -225,11 +227,12 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 			if len(reqQueue) > 0 {
 				reqChan <- reqQueue[0]
 				reqQueue = reqQueue[1:]
+				inflight++
 			}
 		}
 	}
 	close(reqChan)
-	if need > 0 {
+	if rem > 0 {
 		return fmt.Errorf("could not upload to enough hosts: %w", errs)
 	}
 	return nil
