@@ -52,8 +52,8 @@ func createTestingKV(tb testing.TB, m, n int) (PseudoKV, func()) {
 		M:          m,
 		N:          n,
 		P:          3, // TODO: is this a sane default?
-		Uploader:   SerialChunkUploader{Hosts: hs},
-		Downloader: SerialChunkDownloader{Hosts: hs},
+		Uploader:   ParallelChunkUploader{Hosts: hs},
+		Downloader: ParallelChunkDownloader{Hosts: hs},
 		Deleter:    SerialSectorDeleter{Hosts: hs},
 	}
 	cleanups = append(cleanups, func() { kv.Close() })
@@ -212,8 +212,7 @@ func TestKVResumeHost(t *testing.T) {
 		N:  3,
 		P:  1, // parallelism would cause a race with fnAfterNReader
 
-		// TODO: debug deadlock when using ParallelChunkUploader here
-		Uploader:   SerialChunkUploader{Hosts: hs},
+		Uploader:   ParallelChunkUploader{Hosts: hs},
 		Downloader: SerialChunkDownloader{Hosts: hs},
 	}
 
@@ -307,7 +306,7 @@ func TestKVMigrate(t *testing.T) {
 	}
 
 	// replace a host in the set
-	hs := kv.Uploader.(SerialChunkUploader).Hosts
+	hs := kv.Uploader.(ParallelChunkUploader).Hosts
 	for hostKey := range hs.sessions {
 		s, _ := hs.acquire(hostKey)
 		s.Close()
@@ -362,7 +361,7 @@ func TestKVPutGetParallel(t *testing.T) {
 	}
 	kv, cleanup := createTestingKV(t, 2, 3)
 	defer cleanup()
-	hs := kv.Uploader.(SerialChunkUploader).Hosts
+	hs := kv.Uploader.(ParallelChunkUploader).Hosts
 	kv.Uploader = ParallelChunkUploader{Hosts: hs}
 	kv.Downloader = ParallelChunkDownloader{Hosts: hs}
 
@@ -437,7 +436,7 @@ func TestKVPutGetParallel(t *testing.T) {
 func TestKVMinimumAvailability(t *testing.T) {
 	kv, cleanup := createTestingKV(t, 1, 3)
 	defer cleanup()
-	hs := kv.Uploader.(SerialChunkUploader).Hosts
+	hs := kv.Uploader.(ParallelChunkUploader).Hosts
 	kv.Uploader = MinimumChunkUploader{Hosts: hs}
 
 	bigdata := frand.Bytes(renterhost.SectorSize * 4)
