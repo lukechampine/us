@@ -3,6 +3,7 @@ package renterutil
 import (
 	"encoding/binary"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -67,6 +68,7 @@ type MetaDB interface {
 	AddBlob(b DBBlob) error
 	Blob(key []byte) (DBBlob, error)
 	DeleteBlob(key []byte) error
+	ForEachBlob(func(key []byte) error) error
 
 	AddChunk(m, n int, length uint64) (DBChunk, error)
 	Chunk(id uint64) (DBChunk, error)
@@ -171,6 +173,23 @@ func (db *EphemeralMetaDB) DeleteBlob(key []byte) error {
 		}
 	}
 	delete(db.blobs, string(key))
+	return nil
+}
+
+// ForEachBlob implements MetaDB.
+func (db *EphemeralMetaDB) ForEachBlob(fn func(key []byte) error) error {
+	db.mu.Lock()
+	var keys []string
+	for key := range db.blobs {
+		keys = append(keys, key)
+	}
+	db.mu.Unlock()
+	sort.Strings(keys)
+	for _, key := range keys {
+		if err := fn([]byte(key)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -307,6 +326,15 @@ func (db *BoltMetaDB) DeleteBlob(key []byte) error {
 	return db.bdb.Update(func(tx *bolt.Tx) error {
 		// TODO: refcounts
 		return tx.Bucket(bucketBlobs).Delete(key)
+	})
+}
+
+// ForEachBlob implements MetaDB.
+func (db *BoltMetaDB) ForEachBlob(fn func(key []byte) error) error {
+	return db.bdb.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketBlobs).ForEach(func(k, _ []byte) error {
+			return fn(k)
+		})
 	})
 }
 
