@@ -209,7 +209,16 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 		inflight--
 		if resp.err == nil {
 			if err := db.SetChunkShard(c.ID, resp.req.shardIndex, resp.sliceID); err != nil {
-				return err // TODO: need to wait for outstanding workers
+				// NOTE: in theory, we could attempt to continue storing the
+				// remaining successful shards, but in practice, if
+				// SetChunkShards fails, it indicates a serious problem with the
+				// db, and subsequent calls to SetChunkShards are not likely to
+				// succeed.
+				for inflight > 0 {
+					<-respChan
+					inflight--
+				}
+				return err
 			}
 			rem--
 		} else {

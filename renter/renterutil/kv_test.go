@@ -210,7 +210,7 @@ func TestKVResumeHost(t *testing.T) {
 		DB: db,
 		M:  2,
 		N:  3,
-		P:  1, // parallelism would cause a race with fnAfterNReader
+		P:  2,
 
 		Uploader:   ParallelChunkUploader{Hosts: hs},
 		Downloader: SerialChunkDownloader{Hosts: hs},
@@ -223,7 +223,10 @@ func TestKVResumeHost(t *testing.T) {
 		N: renterhost.SectorSize * 2,
 		Fn: func() {
 			hosts[1].Close()
-			s, _ := hs.acquire(hosts[1].PublicKey())
+			s, err := hs.acquire(hosts[1].PublicKey())
+			if err != nil {
+				return
+			}
 			s.Close()
 			hs.release(hosts[1].PublicKey())
 		},
