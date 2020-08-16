@@ -45,6 +45,15 @@ func (hes HostErrorSet) Error() string {
 	return "\n" + strings.Join(strs, "\n")
 }
 
+func (hse HostErrorSet) Is(target error) bool {
+	for _, e := range hse {
+		if errors.Is(e, target) {
+			return true
+		}
+	}
+	return false
+}
+
 type tryLock struct {
 	c    chan struct{}
 	once sync.Once
