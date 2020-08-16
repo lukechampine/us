@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/frand"
@@ -143,8 +144,12 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 	}
 	reqChan := make(chan req, rem)
 	respChan := make(chan resp, rem)
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for i := 0; i < rem; i++ {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			for req := range reqChan {
 				sess, err := pcu.Hosts.tryAcquire(req.hostKey)
 				if err == errHostAcquired && req.block {
@@ -412,8 +417,12 @@ func (pcd ParallelChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, key rente
 	for i, shardIndex := range frand.Perm(len(reqQueue)) {
 		reqQueue[i] = req{shardIndex, false}
 	}
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for len(reqQueue) > len(c.Shards)-int(c.MinShards) {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			for req := range reqChan {
 				shard, err := db.Shard(c.Shards[req.shardIndex])
 				if err != nil {
@@ -655,9 +664,12 @@ func (pbu ParallelBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) err
 	}
 	reqChan := make(chan req)
 	respChan := make(chan error)
-	defer close(reqChan)
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for i := 0; i < pbu.P; i++ {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			for req := range reqChan {
 				respChan <- pbu.U.UploadChunk(db, req.c, b.DeriveKey(req.c.ID), req.shards)
 			}
@@ -671,6 +683,7 @@ func (pbu ParallelBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) err
 		return err
 	}
 	defer func() {
+		close(reqChan)
 		for inflight > 0 {
 			_ = consumeResp()
 		}
@@ -783,9 +796,12 @@ func (pbd ParallelBlobDownloader) DownloadBlob(db MetaDB, b DBBlob, w io.Writer,
 	}
 	reqChan := make(chan req)
 	respChan := make(chan resp)
-	defer close(reqChan)
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for i := 0; i < pbd.P; i++ {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			for req := range reqChan {
 				shards, err := pbd.D.DownloadChunk(db, req.c, b.DeriveKey(req.c.ID), req.off, req.n)
 				if err != nil {
@@ -833,6 +849,7 @@ func (pbd ParallelBlobDownloader) DownloadBlob(db MetaDB, b DBBlob, w io.Writer,
 	// if we return early (due to an error), ensure that we consume all
 	// outstanding requests
 	defer func() {
+		close(reqChan)
 		for inflight > 0 {
 			_ = consumeResp()
 		}
