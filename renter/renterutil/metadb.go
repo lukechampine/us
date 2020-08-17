@@ -20,9 +20,10 @@ var ErrKeyNotFound = errors.New("key not found")
 
 // A DBBlob is the concatenation of one or more chunks.
 type DBBlob struct {
-	Key    []byte
-	Chunks []uint64
-	Seed   [32]byte
+	Key     []byte
+	Chunks  []uint64
+	Seed    [32]byte
+	ModTime time.Time
 }
 
 // DeriveKey derives an encryption key from a seed and a chunk ID.
@@ -144,6 +145,9 @@ func (db *EphemeralMetaDB) Chunk(id uint64) (DBChunk, error) {
 func (db *EphemeralMetaDB) AddBlob(b DBBlob) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
+	if b.ModTime.IsZero() {
+		b.ModTime = time.Now()
+	}
 	db.blobs[string(b.Key)] = b
 	return nil
 }
