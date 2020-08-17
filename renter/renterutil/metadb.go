@@ -79,6 +79,9 @@ type MetaDB interface {
 
 	UnreferencedSectors() (map[hostdb.HostPublicKey][]crypto.Hash, error)
 
+	AddMetadata(key, val []byte) error
+	Metadata(key []byte) ([]byte, error)
+
 	Close() error
 }
 
@@ -88,6 +91,7 @@ type EphemeralMetaDB struct {
 	chunks []DBChunk
 	blobs  map[string]DBBlob
 	refs   map[uint64]int
+	meta   map[string]string
 	mu     sync.Mutex
 }
 
@@ -208,6 +212,25 @@ func (db *EphemeralMetaDB) UnreferencedSectors() (map[hostdb.HostPublicKey][]cry
 	return m, nil
 }
 
+// AddMetadata implements MetaDB.
+func (db *EphemeralMetaDB) AddMetadata(key, val []byte) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	db.meta[string(key)] = string(val)
+	return nil
+}
+
+// Metadata implements MetaDB.
+func (db *EphemeralMetaDB) Metadata(key []byte) ([]byte, error) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	md, ok := db.meta[string(key)]
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+	return []byte(md), nil
+}
+
 // Close implements MetaDB.
 func (db *EphemeralMetaDB) Close() error {
 	return nil
@@ -231,6 +254,7 @@ var (
 	bucketBlobs  = []byte("blobs")
 	bucketChunks = []byte("chunks")
 	bucketShards = []byte("shards")
+	bucketMeta   = []byte("meta")
 )
 
 // AddShard implements MetaDB.
@@ -344,6 +368,25 @@ func (db *BoltMetaDB) UnreferencedSectors() (map[hostdb.HostPublicKey][]crypto.H
 	return nil, nil // TODO
 }
 
+// AddMetadata implements MetaDB.
+func (db *BoltMetaDB) AddMetadata(key, val []byte) error {
+	return db.bdb.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketMeta).Put(key, val)
+	})
+}
+
+// Metadata implements MetaDB.
+func (db *BoltMetaDB) Metadata(key []byte) (val []byte, err error) {
+	err = db.bdb.View(func(tx *bolt.Tx) error {
+		val = append(val, tx.Bucket(bucketMeta).Get(key)...)
+		return nil
+	})
+	if err == nil && val == nil {
+		err = ErrKeyNotFound
+	}
+	return
+}
+
 // Close implements MetaDB.
 func (db *BoltMetaDB) Close() error {
 	return db.bdb.Close()
@@ -366,6 +409,7 @@ func NewBoltMetaDB(path string) (*BoltMetaDB, error) {
 			bucketBlobs,
 			bucketChunks,
 			bucketShards,
+			bucketMeta,
 		} {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
