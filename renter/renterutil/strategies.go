@@ -2,6 +2,7 @@ package renterutil
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -17,7 +18,7 @@ import (
 
 // A ChunkUploader uploads shards, associating them with a given chunk.
 type ChunkUploader interface {
-	UploadChunk(db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error
+	UploadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error
 }
 
 // SerialChunkUploader uploads chunks to hosts one shard at a time.
@@ -94,7 +95,7 @@ type ParallelChunkUploader struct {
 }
 
 // UploadChunk implements ChunkUploader.
-func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
+func (pcu ParallelChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
 	if len(shards) > len(pcu.Hosts.sessions) {
 		return errors.New("more shards than hosts")
 	}
@@ -146,6 +147,9 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 	respChan := make(chan resp, rem)
 	var wg sync.WaitGroup
 	defer wg.Wait()
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	for i := 0; i < rem; i++ {
 		wg.Add(1)
 		go func() {
@@ -160,6 +164,11 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 					continue
 				}
 
+				if ctx.Err() != nil {
+					pcu.Hosts.release(req.hostKey)
+					respChan <- resp{req, 0, ctx.Err()}
+					continue
+				}
 				root, err := sess.Append(req.shard)
 				pcu.Hosts.release(req.hostKey)
 				if err != nil {
@@ -173,6 +182,14 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 			}
 		}()
 	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		for req := range reqChan {
+			respChan <- resp{req, 0, ctx.Err()}
+		}
+	}()
 
 	// construct sectors
 	sectors := make([]*[renterhost.SectorSize]byte, len(c.Shards))
@@ -187,7 +204,19 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 
 	// start by requesting uploads to rem hosts, non-blocking.
 	var inflight int
+	defer func() {
+		for inflight > 0 {
+			<-respChan
+			inflight--
+		}
+		close(reqChan)
+	}()
+
 	for shardIndex := range c.Shards {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		if skip[shardIndex] || len(newHosts) == 0 {
 			continue
 		}
@@ -205,6 +234,10 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 	var reqQueue []req
 	var errs HostErrorSet
 	for inflight > 0 {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		resp := <-respChan
 		inflight--
 		if resp.err == nil {
@@ -245,7 +278,6 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 			}
 		}
 	}
-	close(reqChan)
 	if rem > 0 {
 		return fmt.Errorf("could not upload to enough hosts: %w", errs)
 	}
@@ -259,7 +291,7 @@ type MinimumChunkUploader struct {
 }
 
 // UploadChunk implements ChunkUploader.
-func (mcu MinimumChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
+func (mcu MinimumChunkUploader) UploadChunk(_ context.Context, db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
 	// choose hosts, preserving any that at already present
 	newHosts := make(map[hostdb.HostPublicKey]struct{})
 	for h := range mcu.Hosts.sessions {
@@ -506,7 +538,7 @@ func (pcd ParallelChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, key rente
 // A ChunkUpdater updates or replaces an existing chunk, returning the ID of the
 // new chunk.
 type ChunkUpdater interface {
-	UpdateChunk(db MetaDB, b DBBlob, c DBChunk) (uint64, error)
+	UpdateChunk(ctx context.Context, db MetaDB, b DBBlob, c DBChunk) (uint64, error)
 }
 
 // GenericChunkUpdater updates chunks by downloading them with D and reuploading
@@ -525,7 +557,7 @@ type GenericChunkUpdater struct {
 }
 
 // UpdateChunk implements ChunkUpdater.
-func (gcu GenericChunkUpdater) UpdateChunk(db MetaDB, b DBBlob, c DBChunk) (uint64, error) {
+func (gcu GenericChunkUpdater) UpdateChunk(ctx context.Context, db MetaDB, b DBBlob, c DBChunk) (uint64, error) {
 	if gcu.ShouldUpdate != nil {
 		shouldUpdate, err := gcu.ShouldUpdate(db, c)
 		if err != nil {
@@ -569,7 +601,7 @@ func (gcu GenericChunkUpdater) UpdateChunk(db MetaDB, b DBBlob, c DBChunk) (uint
 			return 0, err
 		}
 	}
-	if err := gcu.U.UploadChunk(db, c, b.DeriveKey(c.ID), shards); err != nil {
+	if err := gcu.U.UploadChunk(ctx, db, c, b.DeriveKey(c.ID), shards); err != nil {
 		return 0, err
 	}
 	return c.ID, nil
@@ -617,7 +649,7 @@ func NewMigrationBlacklist(blacklist []hostdb.HostPublicKey) func(MetaDB, DBChun
 
 // A BlobUploader uploads a DBBlob.
 type BlobUploader interface {
-	UploadBlob(db MetaDB, b DBBlob, r io.Reader) error
+	UploadBlob(ctx context.Context, db MetaDB, b DBBlob, r io.Reader) error
 }
 
 // SerialBlobUploader uploads the chunks of a blob one at a time.
@@ -627,7 +659,7 @@ type SerialBlobUploader struct {
 }
 
 // UploadBlob implements BlobUploader.
-func (sbu SerialBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) error {
+func (sbu SerialBlobUploader) UploadBlob(ctx context.Context, db MetaDB, b DBBlob, r io.Reader) error {
 	rsc := renter.NewRSCode(sbu.M, sbu.N)
 	shards := make([][]byte, sbu.N)
 	for i := range shards {
@@ -650,7 +682,7 @@ func (sbu SerialBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) error
 		if err := db.AddBlob(b); err != nil {
 			return err
 		}
-		if err := sbu.U.UploadChunk(db, c, b.DeriveKey(c.ID), shards); err != nil {
+		if err := sbu.U.UploadChunk(ctx, db, c, b.DeriveKey(c.ID), shards); err != nil {
 			return err
 		}
 	}
@@ -665,7 +697,7 @@ type ParallelBlobUploader struct {
 }
 
 // UploadBlob implements BlobUploader.
-func (pbu ParallelBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) error {
+func (pbu ParallelBlobUploader) UploadBlob(ctx context.Context, db MetaDB, b DBBlob, r io.Reader) error {
 	// spawn p workers
 	type req struct {
 		c      DBChunk
@@ -675,15 +707,26 @@ func (pbu ParallelBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) err
 	respChan := make(chan error)
 	var wg sync.WaitGroup
 	defer wg.Wait()
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	for i := 0; i < pbu.P; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for req := range reqChan {
-				respChan <- pbu.U.UploadChunk(db, req.c, b.DeriveKey(req.c.ID), req.shards)
+				respChan <- pbu.U.UploadChunk(ctx, db, req.c, b.DeriveKey(req.c.ID), req.shards)
 			}
 		}()
 	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		for range reqChan {
+			respChan <- ctx.Err()
+		}
+	}()
 
 	var inflight int
 	consumeResp := func() error {
@@ -692,16 +735,20 @@ func (pbu ParallelBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) err
 		return err
 	}
 	defer func() {
-		close(reqChan)
 		for inflight > 0 {
 			_ = consumeResp()
 		}
+		close(reqChan)
 	}()
 
 	// read+encode chunks, add to db, send requests to workers
 	rsc := renter.NewRSCode(pbu.M, pbu.N)
 	buf := make([]byte, renterhost.SectorSize*pbu.M)
 	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		chunkLen, err := io.ReadFull(r, buf)
 		if err == io.EOF {
 			break
@@ -909,7 +956,7 @@ func (pbd ParallelBlobDownloader) DownloadBlob(db MetaDB, b DBBlob, w io.Writer,
 
 // A BlobUpdater updates the contents of a blob.
 type BlobUpdater interface {
-	UpdateBlob(db MetaDB, b DBBlob) error
+	UpdateBlob(ctx context.Context, db MetaDB, b DBBlob) error
 }
 
 // SerialBlobUpdater uploads the chunks of a blob one at a time.
@@ -918,13 +965,17 @@ type SerialBlobUpdater struct {
 }
 
 // UpdateBlob implements BlobUpdater.
-func (sbu SerialBlobUpdater) UpdateBlob(db MetaDB, b DBBlob) error {
+func (sbu SerialBlobUpdater) UpdateBlob(ctx context.Context, db MetaDB, b DBBlob) error {
 	for i, cid := range b.Chunks {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		c, err := db.Chunk(cid)
 		if err != nil {
 			return err
 		}
-		id, err := sbu.U.UpdateChunk(db, b, c)
+		id, err := sbu.U.UpdateChunk(ctx, db, b, c)
 		if err != nil {
 			return err
 		}

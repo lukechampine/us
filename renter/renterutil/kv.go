@@ -2,6 +2,7 @@ package renterutil
 
 import (
 	"bytes"
+	"context"
 	"io"
 
 	"lukechampine.com/frand"
@@ -22,7 +23,7 @@ type PseudoKV struct {
 
 // Put uploads r to hosts and associates it with the specified key. Any existing
 // data associated with the key will be overwritten.
-func (kv PseudoKV) Put(key []byte, r io.Reader) error {
+func (kv PseudoKV) Put(ctx context.Context, key []byte, r io.Reader) error {
 	b := DBBlob{Key: key}
 	frand.Read(b.Seed[:])
 	if err := kv.DB.AddBlob(b); err != nil {
@@ -34,16 +35,16 @@ func (kv PseudoKV) Put(key []byte, r io.Reader) error {
 		N: kv.N,
 		P: kv.P,
 	}
-	return bu.UploadBlob(kv.DB, b, r)
+	return bu.UploadBlob(ctx, kv.DB, b, r)
 }
 
 // PutBytes uploads val to hosts and associates it with the specified key.
-func (kv PseudoKV) PutBytes(key []byte, val []byte) error {
-	return kv.Put(key, bytes.NewReader(val))
+func (kv PseudoKV) PutBytes(ctx context.Context, key []byte, val []byte) error {
+	return kv.Put(ctx, key, bytes.NewReader(val))
 }
 
 // Resume resumes uploading the value associated with key.
-func (kv PseudoKV) Resume(key []byte, rs io.ReadSeeker) error {
+func (kv PseudoKV) Resume(ctx context.Context, key []byte, rs io.ReadSeeker) error {
 	b, err := kv.DB.Blob(key)
 	if err != nil {
 		return err
@@ -56,11 +57,15 @@ func (kv PseudoKV) Resume(key []byte, rs io.ReadSeeker) error {
 			return err
 		}
 		for _, ssid := range c.Shards {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
 			if ssid == 0 {
 				// TODO: only attempt repair if erasure params match
 				if _, err := rs.Seek(int64(offset), io.SeekStart); err != nil {
 					return err
-				} else if err := kv.repairChunk(b, c, rs); err != nil {
+				} else if err := kv.repairChunk(ctx, b, c, rs); err != nil {
 					return err
 				}
 			}
@@ -77,7 +82,7 @@ func (kv PseudoKV) Resume(key []byte, rs io.ReadSeeker) error {
 		N: kv.N,
 		P: kv.P,
 	}
-	return bu.UploadBlob(kv.DB, b, rs)
+	return bu.UploadBlob(ctx, kv.DB, b, rs)
 }
 
 // GetRange downloads a range of bytes within the value associated with key and
@@ -107,22 +112,22 @@ func (kv PseudoKV) GetBytes(key []byte) ([]byte, error) {
 }
 
 // Update updates an existing key, passing each of its chunks to bu.
-func (kv *PseudoKV) Update(key []byte, bu BlobUpdater) error {
+func (kv *PseudoKV) Update(ctx context.Context, key []byte, bu BlobUpdater) error {
 	b, err := kv.DB.Blob(key)
 	if err != nil {
 		return err
 	}
-	return bu.UpdateBlob(kv.DB, b)
+	return bu.UpdateBlob(ctx, kv.DB, b)
 }
 
 // Migrate updates an existing key, migrating each each of its chunks to the
 // provided HostSet.
-func (kv *PseudoKV) Migrate(key []byte, hosts *HostSet) error {
+func (kv *PseudoKV) Migrate(ctx context.Context, key []byte, hosts *HostSet) error {
 	whitelist := make([]hostdb.HostPublicKey, 0, len(hosts.sessions))
 	for hostKey := range hosts.sessions {
 		whitelist = append(whitelist, hostKey)
 	}
-	return kv.Update(key, SerialBlobUpdater{
+	return kv.Update(ctx, key, SerialBlobUpdater{
 		U: GenericChunkUpdater{
 			D:            kv.Downloader,
 			U:            kv.Uploader,
@@ -155,7 +160,7 @@ func (kv *PseudoKV) Close() error {
 	return kv.DB.Close()
 }
 
-func (kv PseudoKV) repairChunk(b DBBlob, c DBChunk, r io.Reader) error {
+func (kv PseudoKV) repairChunk(ctx context.Context, b DBBlob, c DBChunk, r io.Reader) error {
 	buf := make([]byte, c.Len)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return err
@@ -166,7 +171,7 @@ func (kv PseudoKV) repairChunk(b DBBlob, c DBChunk, r io.Reader) error {
 		shards[i] = make([]byte, renterhost.SectorSize)
 	}
 	rsc.Encode(buf, shards)
-	if err := kv.Uploader.UploadChunk(kv.DB, c, b.DeriveKey(c.ID), shards); err != nil {
+	if err := kv.Uploader.UploadChunk(ctx, kv.DB, c, b.DeriveKey(c.ID), shards); err != nil {
 		return err
 	}
 	return nil
