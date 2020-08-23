@@ -545,6 +545,9 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 			panic("unknown/unsupported action type")
 		}
 	}
+	if uploadBandwidth < renterhost.MinMessageSize {
+		uploadBandwidth = renterhost.MinMessageSize
+	}
 	var storagePrice, collateral types.Currency
 	if newFileSize > rev.NewFileSize {
 		storageDuration := uint64(rev.NewWindowEnd - s.height)

@@ -40,12 +40,9 @@ func (stubTpool) FeeEstimate() (_, _ types.Currency, _ error)                   
 func createTestingPair(tb testing.TB) (*Session, *ghost.Host) {
 	tb.Helper()
 
-	host, err := ghost.New(":0")
-	if err != nil {
-		tb.Fatal(err)
-	}
+	host := ghost.New(tb, stubWallet{}, stubTpool{})
 
-	s, err := NewUnlockedSession(host.Settings().NetAddress, host.PublicKey(), 0)
+	s, err := NewUnlockedSession(host.Settings.NetAddress, host.PublicKey, 0)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -54,7 +51,7 @@ func createTestingPair(tb testing.TB) (*Session, *ghost.Host) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	if !deepEqual(settings, host.Settings()) {
+	if !deepEqual(settings, host.Settings) {
 		tb.Fatal("received settings do not match host's actual settings")
 	}
 
@@ -91,7 +88,7 @@ func TestSession(t *testing.T) {
 	}
 	if len(tsr.stats) != 1 {
 		t.Fatal("no stats collected")
-	} else if stats := tsr.stats[0]; stats.Host != host.PublicKey() ||
+	} else if stats := tsr.stats[0]; stats.Host != host.PublicKey ||
 		stats.RPC != renterhost.RPCWriteID ||
 		stats.Uploaded == 0 || stats.Downloaded == 0 {
 		t.Fatal("bad stats:", stats)
@@ -105,7 +102,7 @@ func TestSession(t *testing.T) {
 	}
 	if len(tsr.stats) != 2 {
 		t.Fatal("no stats collected")
-	} else if stats := tsr.stats[1]; stats.Host != host.PublicKey() ||
+	} else if stats := tsr.stats[1]; stats.Host != host.PublicKey ||
 		stats.RPC != renterhost.RPCSectorRootsID ||
 		stats.Uploaded == 0 || stats.Downloaded == 0 {
 		t.Fatal("bad stats:", stats)
@@ -125,7 +122,7 @@ func TestSession(t *testing.T) {
 	}
 	if len(tsr.stats) != 3 {
 		t.Fatal("no stats collected")
-	} else if stats := tsr.stats[2]; stats.Host != host.PublicKey() ||
+	} else if stats := tsr.stats[2]; stats.Host != host.PublicKey ||
 		stats.RPC != renterhost.RPCReadID ||
 		stats.Uploaded == 0 || stats.Downloaded == 0 {
 		t.Fatal("bad stats:", stats)
@@ -137,7 +134,7 @@ func TestSession(t *testing.T) {
 	}
 	if len(tsr.stats) != 4 {
 		t.Fatal("no stats collected")
-	} else if stats := tsr.stats[3]; stats.Host != host.PublicKey() ||
+	} else if stats := tsr.stats[3]; stats.Host != host.PublicKey ||
 		stats.RPC != renterhost.RPCUnlockID ||
 		stats.Uploaded == 0 || stats.Downloaded != 0 {
 		t.Fatal("bad stats:", stats)
@@ -170,7 +167,7 @@ func TestRenew(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	oldID, oldKey := renter.Revision().ID(), renter.key
-	renter, err = NewUnlockedSession(host.Settings().NetAddress, host.PublicKey(), 0)
+	renter, err = NewUnlockedSession(host.Settings.NetAddress, host.PublicKey, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +177,7 @@ func TestRenew(t *testing.T) {
 		t.Fatal("expected ErrContractFinalized, got", err)
 	}
 	renter.Close()
-	renter, err = NewUnlockedSession(host.Settings().NetAddress, host.PublicKey(), 0)
+	renter, err = NewUnlockedSession(host.Settings.NetAddress, host.PublicKey, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

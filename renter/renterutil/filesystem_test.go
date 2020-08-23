@@ -46,13 +46,10 @@ func (hkr testHKR) ResolveHostKey(pubkey hostdb.HostPublicKey) (modules.NetAddre
 // createTestingPair creates a renter and host, initiates a Session between
 // them, and forms and locks a contract.
 func createHostWithContract(tb testing.TB) (*ghost.Host, renter.Contract) {
-	host, err := ghost.New(":0")
-	if err != nil {
-		tb.Fatal(err)
-	}
+	host := ghost.New(tb, stubWallet{}, stubTpool{})
 	sh := hostdb.ScannedHost{
-		HostSettings: host.Settings(),
-		PublicKey:    host.PublicKey(),
+		HostSettings: host.Settings,
+		PublicKey:    host.PublicKey,
 	}
 
 	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
@@ -75,7 +72,7 @@ func createTestingFS(tb testing.TB, numHosts int) (*PseudoFS, func()) {
 	for i := range hosts {
 		h, c := createHostWithContract(tb)
 		hosts[i] = h
-		hkr[h.PublicKey()] = h.Settings().NetAddress
+		hkr[h.PublicKey] = h.Settings.NetAddress
 		hs.AddHost(c)
 	}
 
@@ -96,7 +93,7 @@ func TestHostErrorSet(t *testing.T) {
 	for i := range hosts {
 		h, c := createHostWithContract(t)
 		hosts[i] = h
-		hkr[h.PublicKey()] = h.Settings().NetAddress
+		hkr[h.PublicKey] = h.Settings.NetAddress
 		hs.AddHost(c)
 		h.Close()
 	}
