@@ -217,18 +217,19 @@ type Transaction struct {
 	BlockHeight types.BlockHeight
 	Timestamp   time.Time
 	FeePerByte  types.Currency
+	InputValues []types.Currency
 }
 
 // MarshalSia implements encoding.SiaMarshaler.
 func (txn Transaction) MarshalSia(w io.Writer) error {
 	stamp := txn.Timestamp.Unix()
-	return encoding.NewEncoder(w).EncodeAll(txn.Transaction, txn.BlockID, txn.BlockHeight, stamp, txn.FeePerByte)
+	return encoding.NewEncoder(w).EncodeAll(txn.Transaction, txn.BlockID, txn.BlockHeight, stamp, txn.FeePerByte, txn.InputValues)
 }
 
 // UnmarshalSia implements encoding.SiaUnmarshaler.
 func (txn *Transaction) UnmarshalSia(r io.Reader) error {
 	var stamp int64
-	err := encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&txn.Transaction, &txn.BlockID, &txn.BlockHeight, &stamp, &txn.FeePerByte)
+	err := encoding.NewDecoder(r, encoding.DefaultAllocLimit).DecodeAll(&txn.Transaction, &txn.BlockID, &txn.BlockHeight, &stamp, &txn.FeePerByte, &txn.InputValues)
 	txn.Timestamp = time.Unix(stamp, 0)
 	return err
 }
@@ -323,7 +324,9 @@ func FilterConsensusChange(cc modules.ConsensusChange, owner AddressOwner, curre
 	// ignore "ephemeral" outputs (outputs created and spent in the same
 	// ConsensusChange).
 	survivingOutputs := make(map[types.SiacoinOutputID]struct{})
+	outputValues := make(map[types.SiacoinOutputID]types.Currency)
 	for _, diff := range cc.SiacoinOutputDiffs {
+		outputValues[diff.ID] = diff.SiacoinOutput.Value
 		if _, ok := survivingOutputs[diff.ID]; !ok {
 			survivingOutputs[diff.ID] = struct{}{}
 		} else {
@@ -428,12 +431,17 @@ func FilterConsensusChange(cc modules.ConsensusChange, owner AddressOwner, curre
 			for _, fee := range txn.MinerFees {
 				totalFee = totalFee.Add(fee)
 			}
+			inputVals := make([]types.Currency, len(txn.SiacoinInputs))
+			for i, sci := range txn.SiacoinInputs {
+				inputVals[i] = outputValues[sci.ParentID]
+			}
 			pcc.Transactions = append(pcc.Transactions, Transaction{
 				Transaction: txn,
 				BlockID:     bid,
 				BlockHeight: height,
 				Timestamp:   time.Unix(int64(b.Timestamp), 0),
 				FeePerByte:  totalFee.Div64(uint64(txn.MarshalSiaSize())),
+				InputValues: inputVals,
 			})
 
 			for i, fc := range txn.FileContracts {
