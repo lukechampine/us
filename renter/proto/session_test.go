@@ -140,7 +140,7 @@ func TestSession(t *testing.T) {
 	}
 }
 
-func TestRenewAndClear(t *testing.T) {
+func TestRenew(t *testing.T) {
 	renter, host := createTestingPair(t)
 	defer renter.Close()
 	defer host.Close()
@@ -151,7 +151,7 @@ func TestRenewAndClear(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newContract, _, err := renter.RenewAndClearContract(stubWallet{}, stubTpool{}, types.ZeroCurrency, 0, 0)
+	newContract, _, err := renter.RenewContract(stubWallet{}, stubTpool{}, types.ZeroCurrency, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
