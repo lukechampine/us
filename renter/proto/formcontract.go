@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"math/big"
 	"reflect"
+	"sort"
 	"time"
 
 	"github.com/pkg/errors"
@@ -234,6 +235,9 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 }
 
 func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr types.UnlockHash, w Wallet) ([]crypto.Hash, error) {
+	if amount.IsZero() {
+		return nil, nil
+	}
 	// w.UnspentOutputs(true) returns the outputs that exist after Limbo
 	// transactions are applied. This is not ideal, because the host is more
 	// likely to reject transactions that have unconfirmed parents. On the other
@@ -284,6 +288,15 @@ func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr type
 	}
 	if outputSum.Cmp(amount) < 0 {
 		return nil, ErrInsufficientFunds
+	}
+	// due to the random selection, we may have more outputs than we need; sort
+	// by value and discard as many as possible
+	sort.Slice(fundingOutputs, func(i, j int) bool {
+		return fundingOutputs[i].Value.Cmp(fundingOutputs[j].Value) < 0
+	})
+	for outputSum.Sub(fundingOutputs[0].Value).Cmp(amount) >= 0 {
+		outputSum = outputSum.Sub(fundingOutputs[0].Value)
+		fundingOutputs = fundingOutputs[1:]
 	}
 
 	var toSign []crypto.Hash
