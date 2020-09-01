@@ -89,7 +89,33 @@ func (c *SiadClient) UnspentOutputs(limbo bool) ([]modules.UnspentOutput, error)
 // UnconfirmedParents returns any currently-unconfirmed parents of the specified
 // transaction.
 func (c *SiadClient) UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error) {
-	return nil, nil // not supported
+	tptg, err := c.siad.TransactionPoolTransactionsGet()
+	if err != nil {
+		return nil, err
+	}
+	// see wallet.UnconfirmedParents
+	outputToParent := make(map[types.OutputID]*types.Transaction)
+	for i, txn := range tptg.Transactions {
+		for j := range txn.SiacoinOutputs {
+			scoid := txn.SiacoinOutputID(uint64(j))
+			outputToParent[types.OutputID(scoid)] = &tptg.Transactions[i]
+		}
+	}
+	var parents []types.Transaction
+	seen := make(map[types.TransactionID]struct{})
+	addParent := func(parent *types.Transaction) {
+		txid := parent.ID()
+		if _, ok := seen[txid]; !ok {
+			seen[txid] = struct{}{}
+			parents = append(parents, *parent)
+		}
+	}
+	for _, sci := range txn.SiacoinInputs {
+		if parent, ok := outputToParent[types.OutputID(sci.ParentID)]; ok {
+			addParent(parent)
+		}
+	}
+	return parents, nil
 }
 
 // UnlockConditions returns the UnlockConditions that correspond to the
