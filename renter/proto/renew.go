@@ -107,14 +107,15 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	}
 
 	// Calculate how much the renter needs to pay. On top of the renterPayout,
-	// the renter is responsible for paying host.ContractPrice, the siafund
-	// tax, and a transaction fee.
+	// the renter is responsible for paying host.ContractPrice, the siafund tax,
+	// and a transaction fee. Or, more simply, the renter has to pay for
+	// everything *except* the host's collateral contribution.
 	_, maxFee, err := tpool.FeeEstimate()
 	if err != nil {
 		return ContractRevision{}, nil, errors.Wrap(err, "could not estimate transaction fee")
 	}
 	fee := maxFee.Mul64(estTxnSize)
-	totalCost := renterPayout.Add(s.host.ContractPrice).Add(types.Tax(startHeight, fc.Payout)).Add(fee)
+	totalCost := fc.Payout.Sub(hostCollateral).Add(fee)
 
 	// create and fund a transaction containing fc
 	txn := types.Transaction{
