@@ -77,13 +77,8 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		}
 	}
 
-	// The host adjusts its contract price dynamically based on the current
-	// recommended transaction fee. We don't know how much it will have changed
-	// since we last scanned, but adding 5% leeway seems reasonable.
-	contractPrice := s.host.ContractPrice.MulFloat(1.05)
-
 	// calculate payouts
-	hostPayout := contractPrice.Add(hostCollateral).Add(basePrice)
+	hostPayout := s.host.ContractPrice.Add(hostCollateral).Add(basePrice)
 	payout := taxAdjustedPayout(renterPayout.Add(hostPayout))
 
 	// create file contract
@@ -112,14 +107,14 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	}
 
 	// Calculate how much the renter needs to pay. On top of the renterPayout,
-	// the renter is responsible for paying the contractPrice, the siafund tax,
-	// and a transaction fee.
+	// the renter is responsible for paying host.ContractPrice, the siafund
+	// tax, and a transaction fee.
 	_, maxFee, err := tpool.FeeEstimate()
 	if err != nil {
 		return ContractRevision{}, nil, errors.Wrap(err, "could not estimate transaction fee")
 	}
 	fee := maxFee.Mul64(estTxnSize)
-	totalCost := renterPayout.Add(contractPrice).Add(types.Tax(startHeight, fc.Payout)).Add(fee)
+	totalCost := renterPayout.Add(s.host.ContractPrice).Add(types.Tax(startHeight, fc.Payout)).Add(fee)
 
 	// create and fund a transaction containing fc
 	txn := types.Transaction{
