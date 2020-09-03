@@ -169,7 +169,8 @@ func (s *Session) call(rpcID renterhost.Specifier, req, resp renterhost.Protocol
 	return wrapResponseErr(err, fmt.Sprintf("couldn't read %v response", rpcID), fmt.Sprintf("host rejected %v request", rpcID))
 }
 
-func (s *Session) isLocked() bool { return s.rev.IsValid() }
+func (s *Session) isLocked() bool    { return s.rev.IsValid() }
+func (s *Session) isRevisable() bool { return s.rev.Revision.NewRevisionNumber < math.MaxUint64 }
 
 func (s *Session) sufficientFunds(price types.Currency) bool {
 	if !s.rev.IsValid() {
@@ -274,6 +275,8 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 
 	if !s.isLocked() {
 		return nil, ErrNoContractLocked
+	} else if !s.isRevisable() {
+		return nil, ErrContractFinalized
 	} else if offset < 0 || n < 0 || offset+n > s.rev.NumSectors() {
 		return nil, errors.New("requested range is out-of-bounds")
 	} else if n == 0 {
@@ -360,6 +363,8 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 
 	if !s.isLocked() {
 		return ErrNoContractLocked
+	} else if !s.isRevisable() {
+		return ErrContractFinalized
 	} else if len(sections) == 0 {
 		return nil
 	}
@@ -502,6 +507,8 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 
 	if !s.isLocked() {
 		return ErrNoContractLocked
+	} else if !s.isRevisable() {
+		return ErrContractFinalized
 	} else if len(actions) == 0 {
 		return nil
 	}
