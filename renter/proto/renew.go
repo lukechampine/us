@@ -48,38 +48,37 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		return ContractRevision{}, nil, errors.Wrap(err, "could not get an address to use")
 	}
 
-	// estimate collateral
-	var hostCollateral types.Currency
-	blockBytes := s.host.UploadBandwidthPrice.Add(s.host.StoragePrice).Add(s.host.DownloadBandwidthPrice).Mul64(uint64(endHeight - startHeight))
-	if !blockBytes.IsZero() {
-		bytes := renterPayout.Div(blockBytes)
-		hostCollateral = s.host.Collateral.Mul(bytes).Mul64(uint64(endHeight - startHeight))
-	}
-	// hostCollateral can't be greater than MaxCollateral, and (due to a host-
-	// side bug) it can't be zero either.
-	if hostCollateral.Cmp(s.host.MaxCollateral) > 0 {
-		hostCollateral = s.host.MaxCollateral
-	} else if hostCollateral.IsZero() {
-		hostCollateral = types.NewCurrency64(1)
-	}
-
-	// Calculate additional basePrice and baseCollateral. If the contract
+	// calculate "base" price and collateral -- the storage cost and collateral
+	// contribution for the amount of data already in contract. If the contract
 	// height did not increase, basePrice and baseCollateral are zero.
 	currentRevision := s.rev.Revision
 	var basePrice, baseCollateral types.Currency
-	if endHeight+s.host.WindowSize > currentRevision.NewWindowEnd {
-		timeExtension := uint64((endHeight + s.host.WindowSize) - currentRevision.NewWindowEnd)
-		basePrice = s.host.StoragePrice.Mul64(currentRevision.NewFileSize).Mul64(timeExtension)    // cost of data already covered by contract
-		baseCollateral = s.host.Collateral.Mul64(currentRevision.NewFileSize).Mul64(timeExtension) // same but collateral
-		// prevent underflow
-		if baseCollateral.Cmp(hostCollateral) > 0 {
-			baseCollateral = hostCollateral
-		}
+	if contractEnd := endHeight + s.host.WindowSize; contractEnd > currentRevision.NewWindowEnd {
+		timeExtension := uint64(contractEnd - currentRevision.NewWindowEnd)
+		basePrice = s.host.StoragePrice.Mul64(currentRevision.NewFileSize).Mul64(timeExtension)
+		baseCollateral = s.host.Collateral.Mul64(currentRevision.NewFileSize).Mul64(timeExtension)
+	}
+
+	// estimate collateral for new contract
+	var newCollateral types.Currency
+	if costPerByte := s.host.UploadBandwidthPrice.Add(s.host.StoragePrice).Add(s.host.DownloadBandwidthPrice); !costPerByte.IsZero() {
+		bytes := renterPayout.Div(costPerByte)
+		newCollateral = s.host.Collateral.Mul(bytes)
+	}
+
+	// the collateral can't be greater than MaxCollateral, and it can't be zero
+	// either (because due to a siad bug, the host will try to add an output
+	// worth 0, which makes the transaction invalid)
+	totalCollateral := baseCollateral.Add(newCollateral)
+	if totalCollateral.Cmp(s.host.MaxCollateral) > 0 {
+		totalCollateral = s.host.MaxCollateral
+	} else if totalCollateral.IsZero() {
+		totalCollateral = types.NewCurrency64(1)
 	}
 
 	// calculate payouts
-	hostPayout := s.host.ContractPrice.Add(hostCollateral).Add(basePrice)
-	payout := taxAdjustedPayout(renterPayout.Add(hostPayout))
+	hostPayout := s.host.ContractPrice.Add(basePrice).Add(totalCollateral)
+	totalPayout := taxAdjustedPayout(renterPayout.Add(hostPayout))
 
 	// create file contract
 	fc := types.FileContract{
@@ -87,7 +86,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		FileMerkleRoot: currentRevision.NewFileMerkleRoot,
 		WindowStart:    endHeight,
 		WindowEnd:      endHeight + s.host.WindowSize,
-		Payout:         payout,
+		Payout:         totalPayout,
 		UnlockHash:     currentRevision.NewUnlockHash,
 		RevisionNumber: 0,
 		ValidProofOutputs: []types.SiacoinOutput{
@@ -115,7 +114,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		return ContractRevision{}, nil, errors.Wrap(err, "could not estimate transaction fee")
 	}
 	fee := maxFee.Mul64(estTxnSize)
-	totalCost := fc.Payout.Sub(hostCollateral).Add(fee)
+	totalCost := fc.Payout.Sub(totalCollateral).Add(fee)
 
 	// create and fund a transaction containing fc
 	txn := types.Transaction{
