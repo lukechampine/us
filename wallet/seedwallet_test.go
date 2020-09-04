@@ -40,8 +40,8 @@ func (m *mockCS) sendTxn(txn types.Transaction) {
 			Transactions: []types.Transaction{txn},
 		}},
 		SiacoinOutputDiffs: outputs,
+		ID:                 frand.Entropy256(),
 	}
-	frand.Read(cc.ID[:])
 	m.subscriber.ProcessConsensusChange(cc)
 	m.height++
 }
@@ -63,6 +63,7 @@ func (m *mockCS) mineBlock(fees types.Currency, addr types.UnlockHash) {
 			ID:             b.MinerPayoutID(0),
 			MaturityHeight: types.MaturityDelay,
 		}},
+		ID: frand.Entropy256(),
 	}
 	for _, dsco := range m.dscos[m.height] {
 		cc.SiacoinOutputDiffs = append(cc.SiacoinOutputDiffs, modules.SiacoinOutputDiff{
@@ -71,7 +72,6 @@ func (m *mockCS) mineBlock(fees types.Currency, addr types.UnlockHash) {
 			ID:            dsco.ID,
 		})
 	}
-	frand.Read(cc.ID[:])
 	m.subscriber.ProcessConsensusChange(cc)
 	m.height++
 	if m.dscos == nil {
@@ -104,8 +104,8 @@ func (m *mockCS) formContract(payout types.Currency, addr types.UnlockHash) {
 			ID:           b.Transactions[0].FileContractID(0),
 			Direction:    modules.DiffApply,
 		}},
+		ID: frand.Entropy256(),
 	}
-	frand.Read(cc.ID[:])
 	m.subscriber.ProcessConsensusChange(cc)
 	m.height++
 	if m.filecontracts == nil {
@@ -151,8 +151,8 @@ func (m *mockCS) reviseContract(id types.FileContractID) {
 				Direction:    modules.DiffApply,
 			},
 		},
+		ID: frand.Entropy256(),
 	}
-	frand.Read(cc.ID[:])
 	m.subscriber.ProcessConsensusChange(cc)
 	m.height++
 	m.filecontracts[id] = fc

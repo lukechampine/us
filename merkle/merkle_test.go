@@ -124,7 +124,7 @@ func TestMetaRoot(t *testing.T) {
 		t.Error("wrong cached Merkle root for empty stack")
 	}
 	roots := make([]crypto.Hash, 1)
-	frand.Read(roots[0][:])
+	roots[0] = frand.Entropy256()
 	if MetaRoot(roots) != roots[0] {
 		t.Error("wrong cached Merkle root for single root")
 	}
@@ -140,7 +140,7 @@ func TestMetaRoot(t *testing.T) {
 	// test some random roots against a reference implementation
 	for i := 0; i < 5; i++ {
 		for j := range roots {
-			frand.Read(roots[j][:])
+			roots[j] = frand.Entropy256()
 		}
 		if MetaRoot(roots) != recNodeRoot(roots) {
 			t.Error("MetaRoot does not match reference implementation")
@@ -212,7 +212,7 @@ func TestProofStack(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		var s proofStack
 		for j := range roots {
-			frand.Read(roots[j][:])
+			roots[j] = frand.Entropy256()
 			s.insertNode(roots[j], 0)
 		}
 		if s.root() != recNodeRoot(roots) {
@@ -357,7 +357,7 @@ func TestBuildVerifySectorRangeProof(t *testing.T) {
 	// test some known proofs
 	sectorRoots := make([]crypto.Hash, 16)
 	for i := range sectorRoots {
-		frand.Read(sectorRoots[i][:])
+		sectorRoots[i] = frand.Entropy256()
 	}
 	metaRoot := MetaRoot(sectorRoots)
 
@@ -537,7 +537,7 @@ func TestBuildVerifyDiffProof(t *testing.T) {
 	const numSectors = 12
 	sectorRoots := make([]crypto.Hash, numSectors)
 	for i := range sectorRoots {
-		frand.Read(sectorRoots[i][:])
+		sectorRoots[i] = frand.Entropy256()
 	}
 	oldRoot := MetaRoot(sectorRoots)
 
@@ -593,7 +593,7 @@ func TestBuildVerifyDiffProofAppend(t *testing.T) {
 	const numSectors = 15
 	sectorRoots := make([]crypto.Hash, numSectors)
 	for i := range sectorRoots {
-		frand.Read(sectorRoots[i][:])
+		sectorRoots[i] = frand.Entropy256()
 	}
 	oldRoot := MetaRoot(sectorRoots)
 
@@ -648,7 +648,7 @@ func TestBuildVerifyDiffProofTrim(t *testing.T) {
 	const numSectors = 15
 	sectorRoots := make([]crypto.Hash, numSectors)
 	for i := range sectorRoots {
-		frand.Read(sectorRoots[i][:])
+		sectorRoots[i] = frand.Entropy256()
 	}
 	oldRoot := MetaRoot(sectorRoots)
 
@@ -701,7 +701,7 @@ func BenchmarkBuildDiffProof(b *testing.B) {
 	const numSectors = 12
 	sectorRoots := make([]crypto.Hash, numSectors)
 	for i := range sectorRoots {
-		frand.Read(sectorRoots[i][:])
+		sectorRoots[i] = frand.Entropy256()
 	}
 
 	var newSector12, newSector13 [renterhost.SectorSize]byte
@@ -726,7 +726,7 @@ func BenchmarkVerifyDiffProof(b *testing.B) {
 	const numSectors = 12
 	sectorRoots := make([]crypto.Hash, numSectors)
 	for i := range sectorRoots {
-		frand.Read(sectorRoots[i][:])
+		sectorRoots[i] = frand.Entropy256()
 	}
 	var newSector12, newSector13 [renterhost.SectorSize]byte
 	frand.Read(newSector12[:])
@@ -762,7 +762,7 @@ func BenchmarkVerifyPrecomputedDiffProof(b *testing.B) {
 	const numSectors = 12
 	sectorRoots := make([]crypto.Hash, numSectors)
 	for i := range sectorRoots {
-		frand.Read(sectorRoots[i][:])
+		sectorRoots[i] = frand.Entropy256()
 	}
 	var newSector12, newSector13 [renterhost.SectorSize]byte
 	frand.Read(newSector12[:])

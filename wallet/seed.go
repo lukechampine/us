@@ -80,7 +80,5 @@ func SeedFromPhrase(phrase string) (Seed, error) {
 
 // NewSeed returns a random Seed.
 func NewSeed() Seed {
-	var entropy [16]byte
-	frand.Read(entropy[:])
-	return SeedFromEntropy(entropy)
+	return SeedFromEntropy(frand.Entropy128())
 }

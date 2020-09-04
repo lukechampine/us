@@ -67,9 +67,8 @@ type SectorSlice struct {
 }
 
 // RandomNonce returns a random nonce, suitable for encrypting sector data.
-func RandomNonce() (nonce [24]byte) {
-	frand.Read(nonce[:])
-	return
+func RandomNonce() [24]byte {
+	return frand.Entropy192()
 }
 
 // A KeySeed derives subkeys and uses them to encrypt and decrypt messages.
@@ -179,19 +178,18 @@ func NewMetaFile(mode os.FileMode, size int64, hosts []hostdb.HostPublicKey, min
 	if minShards > len(hosts) {
 		panic("minShards cannot be greater than the number of hosts")
 	}
-	m := &MetaFile{
+	return &MetaFile{
 		MetaIndex: MetaIndex{
 			Version:   MetaFileVersion,
 			Filesize:  size,
 			Mode:      mode,
 			ModTime:   time.Now(),
+			MasterKey: frand.Entropy256(),
 			MinShards: minShards,
 			Hosts:     append([]hostdb.HostPublicKey(nil), hosts...),
 		},
 		Shards: make([][]SectorSlice, len(hosts)),
 	}
-	frand.Read(m.MasterKey[:])
-	return m
 }
 
 // WriteMetaFile creates a gzipped tar archive containing m's index and shards,
