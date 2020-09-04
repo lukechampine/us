@@ -76,9 +76,26 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		totalCollateral = types.NewCurrency64(1)
 	}
 
-	// calculate payouts
-	hostPayout := s.host.ContractPrice.Add(basePrice).Add(totalCollateral)
-	totalPayout := taxAdjustedPayout(renterPayout.Add(hostPayout))
+	// Calculate payouts: the host gets their contract fee, plus the cost of the
+	// data already in the contract, plus their collateral. In the event of a
+	// missed payout, the cost and collateral of the data already in the
+	// contract is subtracted from the host, and sent to the void instead.
+	//
+	// However, it is possible for this subtraction to underflow; this can
+	// happen if baseCollateral is large and MaxCollateral is small. We cannot
+	// simply replace the underflow with a zero, because the host performs the
+	// same subtraction and returns an error on underflow. Nor can we increase
+	// the valid payout, because the host calculates its collateral contribution
+	// by subtracting the contract price and base price from this payout, and
+	// we're already at MaxCollateral. Thus the host has conflicting
+	// requirements, and renewing the contract is impossible until they change
+	// their settings.
+	hostValidPayout := s.host.ContractPrice.Add(basePrice).Add(totalCollateral)
+	voidMissedPayout := basePrice.Add(baseCollateral)
+	if hostValidPayout.Cmp(voidMissedPayout) < 0 {
+		return ContractRevision{}, nil, errors.New("host's settings are unsatisfiable")
+	}
+	hostMissedPayout := hostValidPayout.Sub(voidMissedPayout)
 
 	// create file contract
 	fc := types.FileContract{
@@ -86,42 +103,37 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		FileMerkleRoot: currentRevision.NewFileMerkleRoot,
 		WindowStart:    endHeight,
 		WindowEnd:      endHeight + s.host.WindowSize,
-		Payout:         totalPayout,
+		Payout:         taxAdjustedPayout(renterPayout.Add(hostValidPayout)),
 		UnlockHash:     currentRevision.NewUnlockHash,
 		RevisionNumber: 0,
 		ValidProofOutputs: []types.SiacoinOutput{
-			// renter
 			{Value: renterPayout, UnlockHash: refundAddr},
-			// host
-			{Value: hostPayout, UnlockHash: s.host.UnlockHash},
+			{Value: hostValidPayout, UnlockHash: s.host.UnlockHash},
 		},
 		MissedProofOutputs: []types.SiacoinOutput{
-			// renter
 			{Value: renterPayout, UnlockHash: refundAddr},
-			// baseCollateral is not returned to host
-			{Value: hostPayout.Sub(basePrice.Add(baseCollateral)), UnlockHash: s.host.UnlockHash},
-			// void gets the spent storage fees, plus the collateral being risked
-			{Value: basePrice.Add(baseCollateral), UnlockHash: types.UnlockHash{}},
+			{Value: hostMissedPayout, UnlockHash: s.host.UnlockHash},
+			{Value: voidMissedPayout, UnlockHash: types.UnlockHash{}},
 		},
 	}
 
 	// Calculate how much the renter needs to pay. On top of the renterPayout,
-	// the renter is responsible for paying host.ContractPrice, the siafund tax,
-	// and a transaction fee. Or, more simply, the renter has to pay for
-	// everything *except* the host's collateral contribution.
+	// the renter is responsible for paying host.ContractPrice, the base price,
+	// the siafund tax, and a transaction fee. Or, more simply, the renter has
+	// to pay for everything *except* the host's collateral contribution.
 	_, maxFee, err := tpool.FeeEstimate()
 	if err != nil {
 		return ContractRevision{}, nil, errors.Wrap(err, "could not estimate transaction fee")
 	}
 	fee := maxFee.Mul64(estTxnSize)
-	totalCost := fc.Payout.Sub(totalCollateral).Add(fee)
+	renterCost := fc.Payout.Sub(totalCollateral).Add(fee)
 
 	// create and fund a transaction containing fc
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
 		MinerFees:     []types.Currency{fee},
 	}
-	toSign, err := fundSiacoins(&txn, totalCost, changeAddr, w)
+	toSign, err := fundSiacoins(&txn, renterCost, changeAddr, w)
 	if err != nil {
 		return ContractRevision{}, nil, err
 	}
