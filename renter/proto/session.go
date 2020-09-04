@@ -37,6 +37,10 @@ var (
 	// the caller should retry later.
 	ErrContractLocked = errors.New("contract is locked by another party")
 
+	// ErrNoContractLocked is returned by RPCs that require a locked contract
+	// when no contract is locked.
+	ErrNoContractLocked = errors.New("no contract locked")
+
 	// ErrContractFinalized is returned by the Lock RPC when the contract in
 	// question has reached its maximum revision number, meaning the contract
 	// can no longer be revised.
@@ -165,7 +169,14 @@ func (s *Session) call(rpcID renterhost.Specifier, req, resp renterhost.Protocol
 	return wrapResponseErr(err, fmt.Sprintf("couldn't read %v response", rpcID), fmt.Sprintf("host rejected %v request", rpcID))
 }
 
+func (s *Session) isLocked() bool    { return s.rev.IsValid() }
+func (s *Session) isRevisable() bool { return s.rev.Revision.NewRevisionNumber < math.MaxUint64 }
+
 func (s *Session) sufficientFunds(price types.Currency) bool {
+	if !s.rev.IsValid() {
+		// all calls to sufficientFunds should be guarded with isLocked checks
+		panic("sufficientFunds called with invalid revision")
+	}
 	// We need some funds in order to renew a contract; specifically, we need to
 	// pay the host's BaseRPCPrice. Since the host may increase their price,
 	// multiply it by 5 just to be safe.
@@ -262,7 +273,11 @@ func (s *Session) SectorRoots(offset, n int) (_ []crypto.Hash, err error) {
 	defer wrapErr(&err, "SectorRoots")
 	defer s.collectStats(renterhost.RPCSectorRootsID, &err)()
 
-	if offset < 0 || n < 0 || offset+n > s.rev.NumSectors() {
+	if !s.isLocked() {
+		return nil, ErrNoContractLocked
+	} else if !s.isRevisable() {
+		return nil, ErrContractFinalized
+	} else if offset < 0 || n < 0 || offset+n > s.rev.NumSectors() {
 		return nil, errors.New("requested range is out-of-bounds")
 	} else if n == 0 {
 		return nil, nil
@@ -346,7 +361,11 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 	defer wrapErr(&err, "Read")
 	defer s.collectStats(renterhost.RPCReadID, &err)()
 
-	if len(sections) == 0 {
+	if !s.isLocked() {
+		return ErrNoContractLocked
+	} else if !s.isRevisable() {
+		return ErrContractFinalized
+	} else if len(sections) == 0 {
 		return nil
 	}
 
@@ -486,7 +505,11 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 	defer wrapErr(&err, "Write")
 	defer s.collectStats(renterhost.RPCWriteID, &err)()
 
-	if len(actions) == 0 {
+	if !s.isLocked() {
+		return ErrNoContractLocked
+	} else if !s.isRevisable() {
+		return ErrContractFinalized
+	} else if len(actions) == 0 {
 		return nil
 	}
 	rev := s.rev.Revision
@@ -635,8 +658,8 @@ func (s *Session) DeleteSectors(roots []crypto.Hash) error {
 	if len(roots) == 0 {
 		return nil
 	}
-	// download the full set of SectorRoots
 
+	// download the full set of SectorRoots
 	numRoots := s.Revision().NumSectors()
 	rootIndices := make(map[crypto.Hash]int, numRoots)
 	for offset := 0; offset < numRoots; {

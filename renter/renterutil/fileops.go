@@ -240,7 +240,7 @@ func (fs *PseudoFS) fillSectors(f *openMetaFile) error {
 			length: int64(len(shards[0])),
 		}
 		for shardIndex, hostKey := range f.m.Hosts {
-			pc.sliceIndex = fs.sectors[hostKey].Append(shards[shardIndex], f.m.MasterKey)
+			pc.sliceIndex = fs.sectors[hostKey].Append(shards[shardIndex], f.m.MasterKey, renter.RandomNonce())
 			// TODO: may need a separate sliceIndex for each sector...
 		}
 		f.pendingChunks = append(f.pendingChunks, pc)
