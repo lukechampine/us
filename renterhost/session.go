@@ -394,12 +394,12 @@ func NewHostSession(conn io.ReadWriteCloser, priv ed25519.PrivateKey) (_ *Sessio
 	cipherKey := crypto.DeriveSharedSecret(xsk, req.PublicKey)
 	aead, _ := chacha20poly1305.New(cipherKey[:]) // no error possible
 	s := &Session{
-		conn:     conn,
-		aead:     aead,
-		key:      cipherKey[:],
-		isRenter: false,
+		conn:      conn,
+		aead:      aead,
+		key:       cipherKey[:],
+		challenge: frand.Entropy128(),
+		isRenter:  false,
 	}
-	frand.Read(s.challenge[:])
 	// hack: cast challenge to Specifier to make it a ProtocolObject
 	if err := s.writeMessage((*Specifier)(&s.challenge)); err != nil {
 		return nil, err

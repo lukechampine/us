@@ -66,8 +66,7 @@ func TestBIP39Vectors(t *testing.T) {
 func TestDecodeBIP39Phrase(t *testing.T) {
 	// 1000 random phrases
 	for i := 0; i < 512; i++ {
-		var entropy [16]byte
-		frand.Read(entropy[:])
+		entropy := frand.Entropy128()
 		phrase := encodeBIP39Phrase(entropy)
 		dec, err := decodeBIP39Phrase(phrase)
 		if err != nil {
@@ -104,15 +103,13 @@ func TestDecodeBIP39Phrase(t *testing.T) {
 
 func BenchmarkBIP39(b *testing.B) {
 	b.Run("encode", func(b *testing.B) {
-		var entropy [16]byte
-		frand.Read(entropy[:])
+		entropy := frand.Entropy128()
 		for i := 0; i < b.N; i++ {
 			encodeBIP39Phrase(entropy)
 		}
 	})
 	b.Run("decode", func(b *testing.B) {
-		var entropy [16]byte
-		frand.Read(entropy[:])
+		entropy := frand.Entropy128()
 		phrase := encodeBIP39Phrase(entropy)
 		for i := 0; i < b.N; i++ {
 			decodeBIP39Phrase(phrase)

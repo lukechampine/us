@@ -14,9 +14,7 @@ import (
 )
 
 func TestEncryption(t *testing.T) {
-	var m MetaIndex
-	frand.Read(m.MasterKey[:])
-	key := m.MasterKey
+	key := KeySeed(frand.Entropy256())
 	nonce := make([]byte, 24)
 
 	plaintext := []byte(strings.Repeat("test", 64))
@@ -54,8 +52,8 @@ func BenchmarkWriteMetaFile(b *testing.B) {
 			SegmentIndex: uint32(frand.Uint64n(1024)),
 			NumSegments:  uint32(frand.Uint64n(1024)),
 		}
-		frand.Read(s.MerkleRoot[:])
-		frand.Read(s.Nonce[:])
+		s.MerkleRoot = frand.Entropy256()
+		s.Nonce = frand.Entropy192()
 		m.Shards[0][i] = s
 	}
 	path := filepath.Join(os.TempDir(), b.Name()+".usa")

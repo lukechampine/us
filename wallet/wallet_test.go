@@ -8,12 +8,11 @@ import (
 )
 
 func TestStandardAddress(t *testing.T) {
-	pk := types.SiaPublicKey{
-		Key: make([]byte, 32),
-	}
 	for i := 0; i < 100; i++ {
-		frand.Read(pk.Algorithm[:])
-		frand.Read(pk.Key)
+		pk := types.SiaPublicKey{
+			Algorithm: frand.Entropy128(),
+			Key:       frand.Bytes(32),
+		}
 		if StandardAddress(pk) != StandardUnlockConditions(pk).UnlockHash() {
 			t.Error("mismatch:", pk)
 		}
