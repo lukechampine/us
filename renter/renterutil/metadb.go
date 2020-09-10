@@ -10,7 +10,6 @@ import (
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/encoding"
 	"gitlab.com/NebulousLabs/bolt"
-	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 )
@@ -22,29 +21,7 @@ var ErrKeyNotFound = errors.New("key not found")
 type DBBlob struct {
 	Key    []byte
 	Chunks []uint64
-	Seed   [32]byte
-}
-
-// DeriveKey derives an encryption key from a seed and a chunk ID.
-func (b *DBBlob) DeriveKey(chunk uint64) (key renter.KeySeed) {
-	buf := make([]byte, 7+32+8)
-	n := copy(buf, "keyseed")
-	n += copy(buf[n:], b.Seed[:])
-	binary.LittleEndian.PutUint64(buf[n:], chunk)
-	h := blake2b.Sum256(buf)
-	copy(key[:], h[:])
-	return
-}
-
-// DeriveNonce derives a nonce from a seed and shard index.
-func DeriveNonce(seed renter.KeySeed, shard int) (nonce [24]byte) {
-	buf := make([]byte, 5+32+8)
-	n := copy(buf, "nonce")
-	n += copy(buf[n:], seed[:])
-	binary.LittleEndian.PutUint64(buf[n:], uint64(shard))
-	h := blake2b.Sum256(buf)
-	copy(nonce[:], h[:])
-	return
+	Seed   renter.KeySeed
 }
 
 // A DBChunk is a set of erasure-encoded shards.
@@ -60,6 +37,7 @@ type DBShard struct {
 	HostKey    hostdb.HostPublicKey
 	SectorRoot crypto.Hash
 	Offset     uint32
+	Nonce      [24]byte
 	// NOTE: Length is not stored, as it can be derived from the DBChunk.Len
 }
 

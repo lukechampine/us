@@ -166,7 +166,7 @@ func (kv PseudoKV) repairChunk(b DBBlob, c DBChunk, r io.Reader) error {
 		shards[i] = make([]byte, renterhost.SectorSize)
 	}
 	rsc.Encode(buf, shards)
-	if err := kv.Uploader.UploadChunk(kv.DB, c, b.DeriveKey(c.ID), shards); err != nil {
+	if err := kv.Uploader.UploadChunk(kv.DB, c, b.Seed, shards); err != nil {
 		return err
 	}
 	return nil
