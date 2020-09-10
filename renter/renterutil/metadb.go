@@ -241,6 +241,7 @@ func NewEphemeralMetaDB() *EphemeralMetaDB {
 	db := &EphemeralMetaDB{
 		refs:  make(map[uint64]int),
 		blobs: make(map[string]DBBlob),
+		meta:  make(map[string]string),
 	}
 	return db
 }
