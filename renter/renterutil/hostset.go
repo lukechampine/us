@@ -158,11 +158,11 @@ func (set *HostSet) AddHost(c renter.Contract) {
 	// lazy connection function
 	var lastSeen time.Time
 	lh.reconnect = func() error {
-		defer func() { lastSeen = time.Now() }()
-		if lh.s != nil {
+		if lh.s != nil && !lh.s.IsClosed() {
 			// if it hasn't been long since the last reconnect, assume the
 			// connection is still open
 			if time.Since(lastSeen) < 2*time.Minute {
+				lastSeen = time.Now()
 				return nil
 			}
 			// otherwise, the connection *might* still be open; test by sending
@@ -174,12 +174,12 @@ func (set *HostSet) AddHost(c renter.Contract) {
 			// RPC it wants to call; that way, we only do extra work if the host
 			// has actually disconnected. But that feels too burdensome.
 			if _, err := lh.s.Settings(); err == nil {
+				lastSeen = time.Now()
 				return nil
 			}
 			// connection timed out, or some other error occurred; close our
 			// end (just in case) and fallthrough to the reconnection logic
 			lh.s.Close()
-			lh.s = nil
 		}
 		hostIP, err := set.hkr.ResolveHostKey(c.HostKey)
 		if err != nil {
@@ -199,6 +199,7 @@ func (set *HostSet) AddHost(c renter.Contract) {
 			return err
 		}
 		lh.s.SetRPCStatsRecorder(set.stats)
+		lastSeen = time.Now()
 		return nil
 	}
 	set.sessions[c.HostKey] = lh
