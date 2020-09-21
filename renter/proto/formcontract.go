@@ -3,15 +3,11 @@ package proto
 import (
 	"crypto/ed25519"
 	"math/big"
-	"reflect"
-	"sort"
 	"time"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
-	"lukechampine.com/frand"
 	"lukechampine.com/us/ed25519hash"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renterhost"
@@ -42,13 +38,8 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	if endHeight < startHeight {
 		return ContractRevision{}, nil, errors.New("end height must be greater than start height")
 	}
-	// get two renter addresses: one for the renter refund output, one for the
-	// change output
-	refundAddr, err := w.NewWalletAddress()
-	if err != nil {
-		return ContractRevision{}, nil, errors.Wrap(err, "could not get an address to use")
-	}
-	changeAddr, err := w.NewWalletAddress()
+	// get a renter address for the file contract's valid/missed outputs
+	refundAddr, err := w.Address()
 	if err != nil {
 		return ContractRevision{}, nil, errors.Wrap(err, "could not get an address to use")
 	}
@@ -126,13 +117,13 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 		FileContracts: []types.FileContract{fc},
 		MinerFees:     []types.Currency{fee},
 	}
-	toSign, err := fundSiacoins(&txn, totalCost, changeAddr, w)
+	toSign, err := w.FundTransaction(&txn, totalCost)
 	if err != nil {
 		return ContractRevision{}, nil, err
 	}
 
 	// include any unconfirmed parent transactions
-	parents, err := w.UnconfirmedParents(txn)
+	parents, err := tpool.UnconfirmedParents(txn)
 	if err != nil {
 		return ContractRevision{}, nil, err
 	}
@@ -160,13 +151,6 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	// NOTE: it is not necessary to explicitly check that the host supplied
 	// collateral before signing; underpayment will result in an invalid
 	// transaction.
-	for _, id := range toSign {
-		txn.TransactionSignatures = append(txn.TransactionSignatures, types.TransactionSignature{
-			ParentID:       id,
-			PublicKeyIndex: 0,
-			CoveredFields:  types.CoveredFields{WholeTransaction: true},
-		})
-	}
 	err = w.SignTransaction(&txn, toSign)
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
@@ -227,93 +211,6 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 		Revision:   initRevision,
 		Signatures: [2]types.TransactionSignature{renterRevisionSig, hostSigs.RevisionSignature},
 	}, signedTxnSet, nil
-}
-
-func fundSiacoins(txn *types.Transaction, amount types.Currency, changeAddr types.UnlockHash, w Wallet) ([]crypto.Hash, error) {
-	if amount.IsZero() {
-		return nil, nil
-	}
-	// w.UnspentOutputs(true) returns the outputs that exist after Limbo
-	// transactions are applied. This is not ideal, because the host is more
-	// likely to reject transactions that have unconfirmed parents. On the other
-	// hand, w.UnspentOutputs(false) won't return any outputs that were created
-	// in Limbo transactions, but it *will* return outputs that have been
-	// *spent* in Limbo transactions. So what we really want is the intersection
-	// of these sets, keeping only the confirmed outputs that were not spent in
-	// Limbo transactions.
-	limboOutputs, err := w.UnspentOutputs(true)
-	if err != nil {
-		return nil, err
-	}
-	confirmedOutputs, err := w.UnspentOutputs(false)
-	if err != nil {
-		return nil, err
-	}
-	var outputs []modules.UnspentOutput
-	for _, lo := range limboOutputs {
-		for _, co := range confirmedOutputs {
-			if co.ID == lo.ID {
-				outputs = append(outputs, lo)
-				break
-			}
-		}
-	}
-	var balance types.Currency
-	for _, o := range outputs {
-		balance = balance.Add(o.Value)
-	}
-	if balance.Cmp(amount) < 0 {
-		// insufficient funds; proceed with limbo outputs
-		outputs = limboOutputs
-	}
-	// choose outputs randomly
-	frand.Shuffle(len(outputs), reflect.Swapper(outputs))
-
-	// keep adding outputs until we have enough
-	var fundingOutputs []modules.UnspentOutput
-	var outputSum types.Currency
-	for i, o := range outputs {
-		if o.FundType != types.SpecifierSiacoinOutput {
-			continue
-		}
-		if outputSum = outputSum.Add(o.Value); outputSum.Cmp(amount) >= 0 {
-			fundingOutputs = outputs[:i+1]
-			break
-		}
-	}
-	if outputSum.Cmp(amount) < 0 {
-		return nil, ErrInsufficientFunds
-	}
-	// due to the random selection, we may have more outputs than we need; sort
-	// by value and discard as many as possible
-	sort.Slice(fundingOutputs, func(i, j int) bool {
-		return fundingOutputs[i].Value.Cmp(fundingOutputs[j].Value) < 0
-	})
-	for outputSum.Sub(fundingOutputs[0].Value).Cmp(amount) >= 0 {
-		outputSum = outputSum.Sub(fundingOutputs[0].Value)
-		fundingOutputs = fundingOutputs[1:]
-	}
-
-	var toSign []crypto.Hash
-	for _, o := range fundingOutputs {
-		uc, err := w.UnlockConditions(o.UnlockHash)
-		if err != nil {
-			return nil, err
-		}
-		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
-			ParentID:         types.SiacoinOutputID(o.ID),
-			UnlockConditions: uc,
-		})
-		toSign = append(toSign, crypto.Hash(o.ID))
-	}
-	// add change output if needed
-	if change := outputSum.Sub(amount); !change.IsZero() {
-		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
-			UnlockHash: changeAddr,
-			Value:      change,
-		})
-	}
-	return toSign, nil
 }
 
 // NOTE: due to a bug in the transaction validation code, calculating payouts

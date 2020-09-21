@@ -37,13 +37,8 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	if endHeight < startHeight {
 		return ContractRevision{}, nil, errors.New("end height must be greater than start height")
 	}
-	// get two renter addresses: one for the renter refund output, one for the
-	// change output
-	refundAddr, err := w.NewWalletAddress()
-	if err != nil {
-		return ContractRevision{}, nil, errors.Wrap(err, "could not get an address to use")
-	}
-	changeAddr, err := w.NewWalletAddress()
+	// get a renter address for the file contract's valid/missed outputs
+	refundAddr, err := w.Address()
 	if err != nil {
 		return ContractRevision{}, nil, errors.Wrap(err, "could not get an address to use")
 	}
@@ -133,13 +128,13 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		FileContracts: []types.FileContract{fc},
 		MinerFees:     []types.Currency{fee},
 	}
-	toSign, err := fundSiacoins(&txn, renterCost, changeAddr, w)
+	toSign, err := w.FundTransaction(&txn, renterCost)
 	if err != nil {
 		return ContractRevision{}, nil, err
 	}
 
 	// include any unconfirmed parent transactions
-	parents, err := w.UnconfirmedParents(txn)
+	parents, err := tpool.UnconfirmedParents(txn)
 	if err != nil {
 		return ContractRevision{}, nil, err
 	}
@@ -177,13 +172,6 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	txn.SiacoinOutputs = append(txn.SiacoinOutputs, resp.Outputs...)
 
 	// sign the txn
-	for _, id := range toSign {
-		txn.TransactionSignatures = append(txn.TransactionSignatures, types.TransactionSignature{
-			ParentID:       id,
-			PublicKeyIndex: 0,
-			CoveredFields:  types.CoveredFields{WholeTransaction: true},
-		})
-	}
 	err = w.SignTransaction(&txn, toSign)
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
