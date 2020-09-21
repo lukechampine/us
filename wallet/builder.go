@@ -6,6 +6,7 @@ import (
 	"sort"
 	"unsafe"
 
+	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/ed25519hash"
 )
@@ -13,6 +14,10 @@ import (
 // BytesPerInput is the encoded size of a SiacoinInput and corresponding
 // TransactionSignature, assuming standard UnlockConditions.
 const BytesPerInput = 241
+
+// ErrInsufficientFunds is returned when the wallet does not control enough
+// outputs to fund a transaction.
+var ErrInsufficientFunds = errors.New("insufficient funds")
 
 // SumOutputs returns the total value of the supplied outputs.
 func SumOutputs(outputs []UnspentOutput) types.Currency {

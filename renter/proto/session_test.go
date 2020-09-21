@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/encoding"
 	"lukechampine.com/us/internal/ghost"
@@ -20,16 +19,20 @@ func deepEqual(a, b interface{}) bool {
 
 type stubWallet struct{}
 
-func (stubWallet) NewWalletAddress() (uh types.UnlockHash, err error)                       { return }
-func (stubWallet) SignTransaction(*types.Transaction, []crypto.Hash) (err error)            { return }
-func (stubWallet) UnspentOutputs(bool) (us []modules.UnspentOutput, err error)              { return }
-func (stubWallet) UnconfirmedParents(types.Transaction) (ps []types.Transaction, err error) { return }
-func (stubWallet) UnlockConditions(types.UnlockHash) (uc types.UnlockConditions, err error) { return }
+func (stubWallet) Address() (_ types.UnlockHash, _ error) { return }
+func (stubWallet) FundTransaction(*types.Transaction, types.Currency) (_ []crypto.Hash, _ error) {
+	return
+}
+func (stubWallet) SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error {
+	txn.TransactionSignatures = append(txn.TransactionSignatures, make([]types.TransactionSignature, len(toSign))...)
+	return nil
+}
 
 type stubTpool struct{}
 
-func (stubTpool) AcceptTransactionSet([]types.Transaction) (err error) { return }
-func (stubTpool) FeeEstimate() (min, max types.Currency, err error)    { return }
+func (stubTpool) AcceptTransactionSet([]types.Transaction) (_ error)                    { return }
+func (stubTpool) UnconfirmedParents(types.Transaction) (_ []types.Transaction, _ error) { return }
+func (stubTpool) FeeEstimate() (_, _ types.Currency, _ error)                           { return }
 
 // createTestingPair creates a renter and host, initiates a Session between
 // them, and forms and locks a contract.

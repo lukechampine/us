@@ -6,7 +6,6 @@ import (
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renterhost"
@@ -24,17 +23,16 @@ func wrapErrWithReplace(err *error, fnName string) {
 
 // A Wallet provides addresses and outputs, and can sign transactions.
 type Wallet interface {
-	NewWalletAddress() (types.UnlockHash, error)
+	Address() (types.UnlockHash, error)
+	FundTransaction(txn *types.Transaction, amount types.Currency) ([]crypto.Hash, error)
 	SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error
-	UnspentOutputs(limbo bool) ([]modules.UnspentOutput, error)
-	UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
-	UnlockConditions(addr types.UnlockHash) (types.UnlockConditions, error)
 }
 
 // A TransactionPool can broadcast transactions and estimate transaction
 // fees.
 type TransactionPool interface {
-	AcceptTransactionSet([]types.Transaction) error
+	AcceptTransactionSet(txnSet []types.Transaction) error
+	UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 	FeeEstimate() (min types.Currency, max types.Currency, err error)
 }
 
@@ -111,30 +109,25 @@ func (c ContractRevision) IsValid() bool {
 // revision ensures that the host will lose the collateral it committed.
 func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool) (err error) {
 	defer wrapErr(&err, "SubmitContractRevision")
-	// construct a transaction containing the signed revision
-	txn := types.Transaction{
-		FileContractRevisions: []types.FileContractRevision{c.Revision},
-		TransactionSignatures: c.Signatures[:],
-	}
 
-	// add the transaction fee
+	// calculate transaction fee
 	_, maxFee, err := tpool.FeeEstimate()
 	if err != nil {
 		return errors.Wrap(err, "could not estimate transaction fee")
 	}
 	fee := maxFee.Mul64(estTxnSize)
-	txn.MinerFees = append(txn.MinerFees, fee)
 
-	// pay for the fee by adding outputs and signing them
-	changeAddr, err := w.NewWalletAddress()
-	if err != nil {
-		return errors.Wrap(err, "could not get a change address to use")
+	// construct a transaction containing the signed revision
+	txn := types.Transaction{
+		FileContractRevisions: []types.FileContractRevision{c.Revision},
+		MinerFees:             []types.Currency{fee},
+		TransactionSignatures: c.Signatures[:],
 	}
-	toSign, err := fundSiacoins(&txn, fee, changeAddr, w)
-	if err != nil {
+
+	// pay for the fee
+	if toSign, err := w.FundTransaction(&txn, fee); err != nil {
 		return err
-	}
-	if err := w.SignTransaction(&txn, toSign); err != nil {
+	} else if err := w.SignTransaction(&txn, toSign); err != nil {
 		return errors.Wrap(err, "failed to sign transaction")
 	}
 
