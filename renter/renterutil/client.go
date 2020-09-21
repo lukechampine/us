@@ -75,6 +75,14 @@ func (c *SiadClient) FundTransaction(txn *types.Transaction, amount types.Curren
 	if err != nil {
 		return nil, err
 	}
+	// filter out siafund outputs
+	outputs := wug.Outputs[:0]
+	for _, o := range wug.Outputs {
+		if o.FundType == types.SpecifierSiacoinOutput {
+			outputs = append(outputs, o)
+		}
+	}
+	// compute balances
 	var balance, confirmedBalance types.Currency
 	for _, o := range wug.Outputs {
 		balance = balance.Add(o.Value)
@@ -82,16 +90,13 @@ func (c *SiadClient) FundTransaction(txn *types.Transaction, amount types.Curren
 			confirmedBalance = confirmedBalance.Add(o.Value)
 		}
 	}
-	var outputs []modules.UnspentOutput
 	if balance.Cmp(amount) < 0 {
 		return nil, wallet.ErrInsufficientFunds
-	} else if confirmedBalance.Cmp(amount) < 0 {
-		// insufficient confirmed balance; proceed with unconfirmed outputs
-		outputs = wug.Outputs
-	} else {
+	} else if confirmedBalance.Cmp(amount) >= 0 {
 		// sufficient confirmed balance; filter out unconfirmed outputs
+		outputs = outputs[:0]
 		for _, o := range wug.Outputs {
-			if o.ConfirmationHeight != math.MaxUint64 {
+			if o.FundType == types.SpecifierSiacoinOutput && o.ConfirmationHeight != math.MaxUint64 {
 				outputs = append(outputs, o)
 			}
 		}
