@@ -14,6 +14,20 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
+func TestConvertProofOrdering(t *testing.T) {
+	var sector [renterhost.SectorSize]byte
+	frand.Read(sector[:])
+	for i := 0; i < 10; i++ {
+		index := frand.Intn(SegmentsPerSector)
+		proof := ConvertProofOrdering(BuildProof(&sector, index, index+1, nil), index)
+		_, exp := crypto.MerkleProof(sector[:], uint64(index))
+
+		if !reflect.DeepEqual(proof, exp) {
+			t.Fatalf("mismatch: %v\n%v\n%v", index, proof, exp)
+		}
+	}
+}
+
 func TestProofSize(t *testing.T) {
 	tests := []struct {
 		n, start, end int
