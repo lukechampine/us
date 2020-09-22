@@ -121,6 +121,9 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	if err != nil {
 		return ContractRevision{}, nil, err
 	}
+	// the host expects the contract to have no TransactionSignatures
+	addedSignatures := txn.TransactionSignatures
+	txn.TransactionSignatures = nil
 
 	// include any unconfirmed parent transactions
 	parents, err := tpool.UnconfirmedParents(txn)
@@ -148,25 +151,12 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	txn.SiacoinOutputs = append(txn.SiacoinOutputs, resp.Outputs...)
 
 	// sign the txn
-	// NOTE: it is not necessary to explicitly check that the host supplied
-	// collateral before signing; underpayment will result in an invalid
-	// transaction.
+	txn.TransactionSignatures = addedSignatures
 	err = w.SignTransaction(&txn, toSign)
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
 		s.sess.WriteResponse(nil, errors.New("internal error")) // don't want to reveal too much
 		return ContractRevision{}, nil, err
-	}
-
-	// calculate signatures added
-	var addedSignatures []types.TransactionSignature
-	for _, sig := range txn.TransactionSignatures {
-		for _, id := range toSign {
-			if id == sig.ParentID {
-				addedSignatures = append(addedSignatures, sig)
-				break
-			}
-		}
 	}
 
 	// create initial (no-op) revision, transaction, and signature

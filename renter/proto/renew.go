@@ -132,6 +132,9 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	if err != nil {
 		return ContractRevision{}, nil, err
 	}
+	// the host expects the contract to have no TransactionSignatures
+	addedSignatures := txn.TransactionSignatures
+	txn.TransactionSignatures = nil
 
 	// include any unconfirmed parent transactions
 	parents, err := tpool.UnconfirmedParents(txn)
@@ -172,22 +175,12 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	txn.SiacoinOutputs = append(txn.SiacoinOutputs, resp.Outputs...)
 
 	// sign the txn
+	txn.TransactionSignatures = addedSignatures
 	err = w.SignTransaction(&txn, toSign)
 	if err != nil {
 		err = errors.Wrap(err, "failed to sign transaction")
 		s.sess.WriteResponse(nil, err)
 		return ContractRevision{}, nil, err
-	}
-
-	// calculate signatures added
-	var addedSignatures []types.TransactionSignature
-	for _, sig := range txn.TransactionSignatures {
-		for _, id := range toSign {
-			if id == sig.ParentID {
-				addedSignatures = append(addedSignatures, sig)
-				break
-			}
-		}
 	}
 
 	// create initial (no-op) revision, transaction, and signature
