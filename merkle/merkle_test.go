@@ -412,13 +412,15 @@ func TestBuildVerifySectorRangeProof(t *testing.T) {
 		t.Error("VerifySectorRangeProof failed to verify a valid proof for worst-case inputs")
 	}
 
-	// build/verify all possible proofs in a 9-leaf tree
-	metaRoot9 := MetaRoot(sectorRoots[:9])
-	for start := 0; start < 9; start++ {
-		for end := start + 1; end <= 9; end++ {
-			proof := BuildSectorRangeProof(sectorRoots[:9], start, end)
-			if !VerifySectorRangeProof(proof, sectorRoots[start:end], start, end, 9, metaRoot9) {
-				t.Errorf("BuildProof constructed an incorrect proof for range %v-%v", start, end)
+	// build/verify all possible proofs in 7-, 8-, and 9-leaf trees
+	for _, size := range []int{7, 8, 9} {
+		root := MetaRoot(sectorRoots[:size])
+		for start := 0; start < size; start++ {
+			for end := start + 1; end <= size; end++ {
+				proof := BuildSectorRangeProof(sectorRoots[:size], start, end)
+				if !VerifySectorRangeProof(proof, sectorRoots[start:end], start, end, size, root) {
+					t.Errorf("BuildProof constructed an incorrect proof for range %v-%v in tree with %v leaves", start, end, size)
+				}
 			}
 		}
 	}

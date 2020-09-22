@@ -2,6 +2,7 @@ package merkle
 
 import (
 	"io"
+	"math"
 	"math/bits"
 	"sort"
 	"unsafe"
@@ -169,14 +170,17 @@ func BuildSectorRangeProof(sectorRoots []crypto.Hash, start, end int) []crypto.H
 
 	proof := make([]crypto.Hash, 0, ProofSize(len(sectorRoots), start, end))
 	buildRange := func(i, j int) {
-		for i < j {
+		for i < j && i < len(sectorRoots) {
 			subtreeSize := nextSubtreeSize(i, j)
+			if i+subtreeSize > len(sectorRoots) {
+				subtreeSize = len(sectorRoots) - i
+			}
 			proof = append(proof, MetaRoot(sectorRoots[i:][:subtreeSize]))
 			i += subtreeSize
 		}
 	}
 	buildRange(0, start)
-	buildRange(end, len(sectorRoots))
+	buildRange(end, math.MaxInt32)
 	return proof
 }
 
@@ -195,7 +199,7 @@ func VerifySectorRangeProof(proof []crypto.Hash, rangeRoots []crypto.Hash, start
 
 	var s proofStack
 	insertRange := func(i, j int) {
-		for i < j {
+		for i < j && len(proof) > 0 {
 			subtreeSize := nextSubtreeSize(i, j)
 			height := bits.TrailingZeros(uint(subtreeSize)) // log2
 			s.insertNode(proof[0], height)
@@ -208,7 +212,7 @@ func VerifySectorRangeProof(proof []crypto.Hash, rangeRoots []crypto.Hash, start
 	for _, h := range rangeRoots {
 		s.insertNode(h, 0)
 	}
-	insertRange(end, numRoots)
+	insertRange(end, math.MaxInt32)
 	return s.root() == root
 }
 
