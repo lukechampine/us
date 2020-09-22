@@ -432,7 +432,7 @@ func TestHotWallet(t *testing.T) {
 	}
 
 	// get an address
-	addr := w.NextAddress()
+	addr, _ := w.Address()
 
 	// seed index should be incremented to 1
 	seedIndex := w.SeedIndex()
@@ -585,7 +585,7 @@ func TestHotWalletThreadSafety(t *testing.T) {
 	cs := new(mockCS)
 	cs.ConsensusSetSubscribe(w.ConsensusSetSubscriber(store), store.ConsensusChangeID(), nil)
 
-	addr := w.NextAddress()
+	addr, _ := w.Address()
 	txn := types.Transaction{
 		SiacoinOutputs: []types.SiacoinOutput{
 			{UnlockHash: addr, Value: types.SiacoinPrecision.Div64(2)},
@@ -597,7 +597,7 @@ func TestHotWalletThreadSafety(t *testing.T) {
 	funcs := []func(){
 		func() { cs.sendTxn(txn) },
 		func() { _ = w.Balance(true) },
-		func() { _ = w.NextAddress() },
+		func() { _, _ = w.Address() },
 		func() { _ = w.Addresses() },
 		func() { _ = w.TransactionsByAddress(addr, -1) },
 	}
