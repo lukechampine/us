@@ -1,12 +1,14 @@
 package wallet
 
 import (
+	"reflect"
 	"sync"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"lukechampine.com/frand"
 	"lukechampine.com/us/ed25519hash"
 )
 
@@ -241,8 +243,8 @@ type HotWallet struct {
 	mu   sync.Mutex
 }
 
-// NextAddress returns a new (unused) address derived from the wallet's seed.
-func (w *HotWallet) NextAddress() types.UnlockHash {
+// Address returns a new (unused) address derived from the wallet's seed.
+func (w *HotWallet) Address() (types.UnlockHash, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	index := w.SeedIndex()
@@ -251,7 +253,82 @@ func (w *HotWallet) NextAddress() types.UnlockHash {
 		KeyIndex:         index,
 	}
 	w.AddAddress(info)
-	return info.UnlockHash()
+	return info.UnlockHash(), nil
+}
+
+// FundTransaction is a helper function that adds inputs to txn sufficient to
+// cover the specified amount. It may also add a change output to the transaction.
+func (w *HotWallet) FundTransaction(txn *types.Transaction, amount types.Currency) ([]crypto.Hash, error) {
+	if amount.IsZero() {
+		return nil, nil
+	}
+	// UnspentOutputs(true) returns the outputs that exist after Limbo
+	// transactions are applied. This is not ideal, because the transactions
+	// might never be confirmed. On the other hand, UnspentOutputs(false) won't
+	// return any outputs that were created in Limbo transactions, but it *will*
+	// return outputs that have been *spent* in Limbo transactions. So what we
+	// really want is the intersection of these sets, keeping only the confirmed
+	// outputs that were not spent in Limbo transactions.
+	limboOutputs := w.UnspentOutputs(true)
+	confirmedOutputs := w.UnspentOutputs(false)
+	var fundingOutputs []UnspentOutput
+	for _, lo := range limboOutputs {
+		for _, co := range confirmedOutputs {
+			if co.ID == lo.ID {
+				fundingOutputs = append(fundingOutputs, lo)
+				break
+			}
+		}
+	}
+	var balance types.Currency
+	for _, o := range fundingOutputs {
+		balance = balance.Add(o.Value)
+	}
+	var limboBalance types.Currency
+	for _, o := range limboOutputs {
+		limboBalance = limboBalance.Add(o.Value)
+	}
+	if balance.Cmp(amount) < 0 {
+		if limboBalance.Cmp(amount) < 0 {
+			return nil, ErrInsufficientFunds
+		}
+		// confirmed outputs are not sufficient, but limbo outputs are
+		fundingOutputs = limboOutputs
+	}
+	// choose outputs randomly
+	frand.Shuffle(len(fundingOutputs), reflect.Swapper(fundingOutputs))
+
+	// keep adding outputs until we have enough
+	var outputSum types.Currency
+	for i, o := range fundingOutputs {
+		if outputSum = outputSum.Add(o.Value); outputSum.Cmp(amount) >= 0 {
+			fundingOutputs = fundingOutputs[:i+1]
+			break
+		}
+	}
+
+	var toSign []crypto.Hash
+	for _, o := range fundingOutputs {
+		info, ok := w.AddressInfo(o.UnlockHash)
+		if !ok {
+			return nil, errors.New("missing unlock conditions for address")
+		}
+		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
+			ParentID:         o.ID,
+			UnlockConditions: info.UnlockConditions,
+		})
+		txn.TransactionSignatures = append(txn.TransactionSignatures, StandardTransactionSignature(crypto.Hash(o.ID)))
+		toSign = append(toSign, crypto.Hash(o.ID))
+	}
+	// add change output, if needed
+	if change := outputSum.Sub(amount); !change.IsZero() {
+		changeAddr, _ := w.Address()
+		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
+			UnlockHash: changeAddr,
+			Value:      change,
+		})
+	}
+	return toSign, nil
 }
 
 // SignTransaction signs the specified transaction using keys derived from the
@@ -259,7 +336,7 @@ func (w *HotWallet) NextAddress() types.UnlockHash {
 // TransactionSignatures for each input owned by the seed. If toSign is not nil,
 // it a list of indices of TransactionSignatures already present in txn;
 // SignTransaction will fill in the Signature field of each.
-func (w *HotWallet) SignTransaction(txn *types.Transaction, toSign []int) error {
+func (w *HotWallet) SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -309,10 +386,17 @@ func (w *HotWallet) SignTransaction(txn *types.Transaction, toSign []int) error 
 		return nil
 	}
 
-	for _, sigIndex := range toSign {
-		if err := sign(sigIndex); err != nil {
-			return err
+outer:
+	for _, parent := range toSign {
+		for sigIndex, sig := range txn.TransactionSignatures {
+			if sig.ParentID == parent {
+				if err := sign(sigIndex); err != nil {
+					return err
+				}
+				continue outer
+			}
 		}
+		return errors.New("sighash not found in transaction")
 	}
 	return nil
 }
