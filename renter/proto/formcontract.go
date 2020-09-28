@@ -115,7 +115,9 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	// create and fund a transaction containing fc
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
-		MinerFees:     []types.Currency{fee},
+	}
+	if !fee.IsZero() {
+		txn.MinerFees = append(txn.MinerFees, fee)
 	}
 	toSign, err := w.FundTransaction(&txn, totalCost)
 	if err != nil {
