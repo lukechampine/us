@@ -100,6 +100,10 @@ type HostSettings struct {
 	EphemeralAccountExpiry     time.Duration  `json:"ephemeralAccountExpiry"`
 	MaxEphemeralAccountBalance types.Currency `json:"maxEphemeralAccountBalance"`
 	SiaMuxPort                 string         `json:"siaMuxPort"`
+
+	// nonstandard fields
+	Make  string `json:"make"`
+	Model string `json:"model"`
 }
 
 // ScannedHost groups a host's settings with its public key and other scan-
