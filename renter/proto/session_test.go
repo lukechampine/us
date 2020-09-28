@@ -40,7 +40,7 @@ func (stubTpool) FeeEstimate() (_, _ types.Currency, _ error)                   
 func createTestingPair(tb testing.TB) (*Session, *ghost.Host) {
 	tb.Helper()
 
-	host := ghost.New(tb, stubWallet{}, stubTpool{})
+	host := ghost.New(tb, ghost.FreeSettings, stubWallet{}, stubTpool{})
 
 	s, err := NewUnlockedSession(host.Settings.NetAddress, host.PublicKey, 0)
 	if err != nil {
@@ -56,7 +56,7 @@ func createTestingPair(tb testing.TB) (*Session, *ghost.Host) {
 	}
 
 	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
-	rev, _, err := s.FormContract(stubWallet{}, stubTpool{}, key, types.ZeroCurrency, 0, 0)
+	rev, _, err := s.FormContract(stubWallet{}, stubTpool{}, key, types.ZeroCurrency, 0, 10)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestRenew(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newContract, _, err := renter.RenewContract(stubWallet{}, stubTpool{}, types.ZeroCurrency, 0, 0)
+	newContract, _, err := renter.RenewContract(stubWallet{}, stubTpool{}, types.ZeroCurrency, 5, 20)
 	if err != nil {
 		t.Fatal(err)
 	}

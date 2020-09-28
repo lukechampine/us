@@ -1,10 +1,8 @@
 package host
 
 import (
-	"crypto/ed25519"
 	"fmt"
 	"math"
-	"time"
 
 	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
@@ -12,6 +10,7 @@ import (
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/ed25519hash"
 	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
 )
 
@@ -38,30 +37,6 @@ func calculateRevision(currentRevision types.FileContractRevision, newRevisionNu
 	return newRevision, nil
 }
 
-// ContractManager ...
-type ContractManager struct {
-	secretKey ed25519.PrivateKey
-	store     ContractStore
-}
-
-func (cm *ContractManager) publicKey() types.SiaPublicKey {
-	return types.SiaPublicKey{
-		Algorithm: types.SignatureEd25519,
-		Key:       ed25519hash.ExtractPublicKey(cm.secretKey),
-	}
-}
-
-// Acquire ...
-func (cm *ContractManager) Acquire(id types.FileContractID, timeout time.Duration) (Contract, error) {
-	// TODO: actually lock
-	return cm.store.Contract(id)
-}
-
-// Release ...
-func (cm *ContractManager) Release(id types.FileContractID) error {
-	return nil
-}
-
 type contractBuilder struct {
 	// TODO: order these temporally, with comments about when each field becomes valid
 
@@ -69,6 +44,7 @@ type contractBuilder struct {
 	transaction   types.Transaction
 	parents       []types.Transaction
 	renterKey     types.SiaPublicKey
+	hostKey       types.SiaPublicKey
 	settings      hostdb.HostSettings
 	currentHeight types.BlockHeight
 	minFee        types.Currency
@@ -83,8 +59,14 @@ type contractBuilder struct {
 	hostRenewSigs   renterhost.RPCRenewAndClearContractSignatures
 }
 
-// ConsiderFormRequest ...
-func (cm *ContractManager) ConsiderFormRequest(cb *contractBuilder) error {
+func validateFormContract(ctx *SessionContext, cb *contractBuilder, cs ContractStore) error {
+	// parent transactions should be StandaloneValid
+	for _, txn := range cb.parents {
+		if err := txn.StandaloneValid(cb.currentHeight); err != nil {
+			return err
+		}
+	}
+
 	fc := cb.contract
 	switch {
 	case fc.FileSize != 0:
@@ -116,10 +98,12 @@ func (cm *ContractManager) ConsiderFormRequest(cb *contractBuilder) error {
 		return errors.New("wrong value for void payout")
 	case modules.CalculateFee(append(cb.parents, cb.transaction)).Cmp(cb.minFee) < 0:
 		return errors.New("insufficient transaction fees")
+	case cb.renterKey.Algorithm != types.SignatureEd25519:
+		return errors.New("renter must use a ed25519 key")
 	}
 
 	expectedUnlockHash := types.UnlockConditions{
-		PublicKeys:         []types.SiaPublicKey{cb.renterKey, cm.publicKey()},
+		PublicKeys:         []types.SiaPublicKey{cb.renterKey, cb.hostKey},
 		SignaturesRequired: 2,
 	}.UnlockHash()
 	if fc.UnlockHash != expectedUnlockHash {
@@ -138,18 +122,28 @@ func (cm *ContractManager) ConsiderFormRequest(cb *contractBuilder) error {
 		return errors.New("valid/missed output values do not sum to contract payout")
 	}
 
+	// TODO: cs.ApproveContract(ctx)
+
 	return nil
 }
 
-// AcceptContract ...
-func (cm *ContractManager) AcceptContract(cb *contractBuilder) error {
-	// TODO: validate contract txn
+func finalizeContract(cb *contractBuilder, w Wallet, cs ContractStore) (err error) {
+	// add transaction signatures
+	cb.transaction.TransactionSignatures = append(cb.transaction.TransactionSignatures, cb.renterSigs.ContractSignatures...)
+	cb.hostSigs.ContractSignatures, err = signTransaction(&cb.transaction, cb.hostAdditions.Inputs, w)
+	if err != nil {
+		return err
+	}
+	// transaction should now be StandaloneValid
+	if err := cb.transaction.StandaloneValid(cb.currentHeight); err != nil {
+		return err
+	}
 
-	// create initial (no-op revision)
+	// create the initial (no-op) revision
 	initRevision := types.FileContractRevision{
 		ParentID: cb.transaction.FileContractID(0),
 		UnlockConditions: types.UnlockConditions{
-			PublicKeys:         []types.SiaPublicKey{cb.renterKey, cm.publicKey()},
+			PublicKeys:         []types.SiaPublicKey{cb.renterKey, cb.hostKey},
 			SignaturesRequired: 2,
 		},
 		NewRevisionNumber: 1,
@@ -162,13 +156,21 @@ func (cm *ContractManager) AcceptContract(cb *contractBuilder) error {
 		NewMissedProofOutputs: cb.contract.MissedProofOutputs,
 		NewUnlockHash:         cb.contract.UnlockHash,
 	}
+	initRevisionHash := renterhost.HashRevision(initRevision)
+	// verify the renter's signature
+	if !ed25519hash.Verify(cb.renterKey.Key, initRevisionHash, cb.renterSigs.RevisionSignature.Signature) {
+		return errors.New("renter's initial revision signature is invalid")
+	}
+	// add our signature
 	cb.hostSigs.RevisionSignature = types.TransactionSignature{
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 1,
-		Signature:      ed25519hash.Sign(cm.secretKey, renterhost.HashRevision(initRevision)),
+		Signature:      ed25519hash.Sign(cs.SigningKey(), initRevisionHash),
 	}
-	err := cm.store.AddContract(Contract{
+
+	// store contract
+	c := Contract{
 		Revision: initRevision,
 		Signatures: [2]types.TransactionSignature{
 			cb.renterSigs.RevisionSignature,
@@ -177,16 +179,22 @@ func (cm *ContractManager) AcceptContract(cb *contractBuilder) error {
 		FormationSet:       append(cb.parents, cb.transaction),
 		FinalizationHeight: cb.contract.WindowStart - cb.settings.WindowSize,
 		ProofHeight:        cb.contract.WindowStart - 1,
-	})
-	if err != nil {
+	}
+	if err := cs.AddContract(c); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// ConsiderRenewRequest ...
-func (cm *ContractManager) ConsiderRenewRequest(cb *contractBuilder, old types.FileContractRevision) error {
+func validateRenewContract(cb *contractBuilder, ctx *SessionContext, old types.FileContractRevision, cs ContractStore) error {
+	// parent transactions should be StandaloneValid
+	for _, txn := range cb.parents {
+		if err := txn.StandaloneValid(cb.currentHeight); err != nil {
+			return err
+		}
+	}
+
 	fc := cb.contract
 	switch {
 	case fc.FileSize != old.NewFileSize:
@@ -209,9 +217,11 @@ func (cm *ContractManager) ConsiderRenewRequest(cb *contractBuilder, old types.F
 		return errors.New("wrong address for void payout")
 	case modules.CalculateFee(append(cb.parents, cb.transaction)).Cmp(cb.minFee) < 0:
 		return errors.New("insufficient transaction fees")
+	case cb.renterKey.Algorithm != types.SignatureEd25519:
+		return errors.New("renter must use a ed25519 key")
 	}
 	expectedUnlockHash := types.UnlockConditions{
-		PublicKeys:         []types.SiaPublicKey{cb.renterKey, cm.publicKey()},
+		PublicKeys:         []types.SiaPublicKey{cb.renterKey, cb.hostKey},
 		SignaturesRequired: 2,
 	}.UnlockHash()
 	if fc.UnlockHash != expectedUnlockHash {
@@ -248,18 +258,37 @@ func (cm *ContractManager) ConsiderRenewRequest(cb *contractBuilder, old types.F
 		return errors.New("insufficient missed host payout")
 	}
 
+	// TODO: cs.ApproveRenewal(ctx)
+
 	return nil
 }
 
-// AcceptRenewal ...
-func (cm *ContractManager) AcceptRenewal(cb *contractBuilder) error {
-	// TODO: validate contract txn
+func finalizeRenewal(cb *contractBuilder, w Wallet, cs ContractStore, ss SectorStore) (err error) {
+	// add transaction signatures
+	cb.transaction.TransactionSignatures = append(cb.transaction.TransactionSignatures, cb.renterRenewSigs.ContractSignatures...)
+	cb.hostRenewSigs.ContractSignatures, err = signTransaction(&cb.transaction, cb.hostAdditions.Inputs, w)
+	if err != nil {
+		return err
+	}
+	// transaction should now be StandaloneValid
+	if err := cb.transaction.StandaloneValid(cb.currentHeight); err != nil {
+		return err
+	}
 
-	// create initial (no-op revision)
+	// verify the renter's final revision signature
+	finalRevisionHash := renterhost.HashRevision(cb.finalRevision)
+	renterKey := cb.finalRevision.UnlockConditions.PublicKeys[0].Key
+	if !ed25519hash.Verify(renterKey, finalRevisionHash, cb.renterRenewSigs.FinalRevisionSignature) {
+		return errors.New("renter's final revision signature is invalid")
+	}
+	// add our final revision signature
+	cb.hostRenewSigs.FinalRevisionSignature = ed25519hash.Sign(cs.SigningKey(), finalRevisionHash)
+
+	// create the initial (no-op) revision
 	initRevision := types.FileContractRevision{
 		ParentID: cb.transaction.FileContractID(0),
 		UnlockConditions: types.UnlockConditions{
-			PublicKeys:         []types.SiaPublicKey{cb.renterKey, cm.publicKey()},
+			PublicKeys:         []types.SiaPublicKey{cb.renterKey, cb.hostKey},
 			SignaturesRequired: 2,
 		},
 		NewRevisionNumber: 1,
@@ -272,15 +301,23 @@ func (cm *ContractManager) AcceptRenewal(cb *contractBuilder) error {
 		NewMissedProofOutputs: cb.contract.MissedProofOutputs,
 		NewUnlockHash:         cb.contract.UnlockHash,
 	}
+	initRevisionHash := renterhost.HashRevision(initRevision)
+	// verify the renter's signature
+	if !ed25519hash.Verify(cb.renterKey.Key, initRevisionHash, cb.renterRenewSigs.RevisionSignature.Signature) {
+		return errors.New("renter's initial revision signature is invalid")
+	}
+	// add our signature
 	cb.hostRenewSigs.RevisionSignature = types.TransactionSignature{
 		ParentID:       crypto.Hash(initRevision.ParentID),
 		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
 		PublicKeyIndex: 1,
-		Signature:      ed25519hash.Sign(cm.secretKey, renterhost.HashRevision(initRevision)),
+		Signature:      ed25519hash.Sign(cs.SigningKey(), initRevisionHash),
 	}
-	cb.hostRenewSigs.FinalRevisionSignature = ed25519hash.Sign(cm.secretKey, renterhost.HashRevision(cb.finalRevision))
 
-	err := cm.store.AddContract(Contract{
+	// store new contract, update the old contract, and move the sector roots
+	//
+	// TODO: this needs to be atomic
+	c := Contract{
 		Revision: initRevision,
 		Signatures: [2]types.TransactionSignature{
 			cb.renterRenewSigs.RevisionSignature,
@@ -289,20 +326,23 @@ func (cm *ContractManager) AcceptRenewal(cb *contractBuilder) error {
 		FormationSet:       append(cb.parents, cb.transaction),
 		FinalizationHeight: cb.contract.WindowStart - cb.settings.WindowSize,
 		ProofHeight:        cb.contract.WindowStart - 1,
-	})
-	if err != nil {
+	}
+	if err := cs.AddContract(c); err != nil {
 		return err
 	}
-	oldContract, err := cm.store.Contract(cb.finalRevision.ID())
+	oldContract, err := cs.Contract(cb.finalRevision.ID())
 	if err != nil {
 		return err
 	}
 	oldContract.Revision = cb.finalRevision
 	oldContract.Signatures[0].Signature = cb.renterRenewSigs.FinalRevisionSignature
 	oldContract.Signatures[1].Signature = cb.hostRenewSigs.FinalRevisionSignature
-	if err := cm.store.AddContract(oldContract); err != nil {
+	if err := cs.AddContract(oldContract); err != nil {
+		return err
+	} else if err := moveContractRoots(cb.finalRevision.ParentID, initRevision.ParentID, ss); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -312,8 +352,7 @@ type revisionCharges struct {
 	SectorAccesses uint64
 }
 
-// ConsiderRevision ...
-func (cm *ContractManager) ConsiderRevision(old, rev types.FileContractRevision, charges revisionCharges, settings hostdb.HostSettings, currentHeight types.BlockHeight) error {
+func validateRevision(old, rev types.FileContractRevision, charges revisionCharges, settings hostdb.HostSettings, currentHeight types.BlockHeight) error {
 	switch {
 	case rev.ParentID != old.ParentID:
 		return errors.New("parent ID must not change")
@@ -397,8 +436,7 @@ func (cm *ContractManager) ConsiderRevision(old, rev types.FileContractRevision,
 	return nil
 }
 
-// ConsiderFinalRevision ...
-func (cm *ContractManager) ConsiderFinalRevision(cb *contractBuilder, old types.FileContractRevision, newValid, newMissed []types.Currency) error {
+func validateFinalRevision(cb *contractBuilder, old types.FileContractRevision, newValid, newMissed []types.Currency) error {
 	if len(newValid) != len(old.NewValidProofOutputs) {
 		return errors.New("wrong number of valid proof values")
 	} else if len(newValid) != len(newMissed) {
@@ -444,29 +482,66 @@ func (cm *ContractManager) ConsiderFinalRevision(cb *contractBuilder, old types.
 		cb.finalRevision.NewValidProofOutputs[i].Value = value
 	}
 	cb.finalRevision.NewMissedProofOutputs = cb.finalRevision.NewValidProofOutputs
+
 	return nil
 }
 
-// AcceptRevision ...
-func (cm *ContractManager) AcceptRevision(rev types.FileContractRevision, renterSig []byte) ([]byte, error) {
-	contract, err := cm.store.Contract(rev.ID())
+func finalizeRevision(rev types.FileContractRevision, renterSig []byte, cs ContractStore) ([]byte, error) {
+	contract, err := cs.Contract(rev.ID())
 	if err != nil {
 		return nil, err
 	}
-	hostSig := ed25519hash.Sign(cm.secretKey, renterhost.HashRevision(rev))
+	// verify the renter's signature
+	renterKey := rev.UnlockConditions.PublicKeys[0].Key
+	revisionHash := renterhost.HashRevision(rev)
+	if !ed25519hash.Verify(renterKey, revisionHash, renterSig) {
+		return nil, errors.New("renter's final revision signature is invalid")
+	}
+	// add our signature and save the signed revision
+	hostSig := ed25519hash.Sign(cs.SigningKey(), revisionHash)
 	contract.Revision = rev
 	contract.Signatures[0].Signature = renterSig
 	contract.Signatures[1].Signature = hostSig
-	if err := cm.store.AddContract(contract); err != nil {
+	if err := cs.AddContract(contract); err != nil {
 		return nil, err
 	}
 	return hostSig, nil
 }
 
-// NewContractManager returns an initialized contract manager.
-func NewContractManager(key ed25519.PrivateKey, store ContractStore) *ContractManager {
-	return &ContractManager{
-		secretKey: key,
-		store:     store,
+func validateWriteActions(actions []renterhost.RPCWriteAction, proofRequested bool, numSectors uint64) error {
+	for _, action := range actions {
+		switch action.Type {
+		case renterhost.RPCWriteActionAppend:
+			if uint64(len(action.Data)) != renterhost.SectorSize {
+				return errors.New("length of appended data must be exactly SectorSize")
+			}
+			numSectors++
+
+		case renterhost.RPCWriteActionTrim:
+			if action.A > numSectors {
+				return errors.New("trim size exceeds number of sectors")
+			}
+			numSectors -= action.A
+
+		case renterhost.RPCWriteActionSwap:
+			i, j := action.A, action.B
+			if i >= numSectors || j >= numSectors {
+				return errors.New("swap index is out-of-bounds")
+			}
+
+		case renterhost.RPCWriteActionUpdate:
+			sectorIndex, offset := action.A, action.B
+			if sectorIndex >= numSectors {
+				return errors.New("updated sector index is out-of-bounds")
+			} else if offset+uint64(len(action.Data)) > renterhost.SectorSize {
+				return errors.New("updated section is out-of-bounds")
+			} else if proofRequested && (offset%merkle.SegmentSize != 0 || len(action.Data)%merkle.SegmentSize != 0) {
+				return errors.New("updated section must align to SegmentSize boundaries when requesting a Merkle proof")
+			}
+
+		default:
+			return errors.New("unknown action type " + action.Type.String())
+		}
 	}
+	return nil
 }

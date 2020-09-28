@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -12,17 +13,33 @@ import (
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/frand"
-	"lukechampine.com/us/hostdb"
+	"lukechampine.com/us/ed25519hash"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"
 )
 
+type statsConn struct {
+	net.Conn
+	r, w uint64
+}
+
+func (sc *statsConn) Read(p []byte) (int, error) {
+	n, err := sc.Conn.Read(p)
+	sc.r += uint64(n)
+	return n, err
+}
+
+func (sc *statsConn) Write(p []byte) (int, error) {
+	n, err := sc.Conn.Write(p)
+	sc.w += uint64(n)
+	return n, err
+}
+
 type session struct {
-	sess     *renterhost.Session
-	ctx      SessionContext
-	conn     net.Conn
-	contract types.FileContractRevision
-	metrics  MetricsRecorder
+	sess    *renterhost.Session
+	ctx     SessionContext
+	conn    statsConn
+	metrics MetricsRecorder
 }
 
 func (s *session) extendDeadline(d time.Duration) { _ = s.conn.SetDeadline(time.Now().Add(d)) }
@@ -79,7 +96,7 @@ func (s *session) writeResponse(resp renterhost.ProtocolObject) error {
 	case *renterhost.RPCWriteResponse:
 		deadline = 10 * time.Second
 	default:
-		panic("unhandled protocol object")
+		panic("unhandled ProtocolObject")
 	}
 	s.extendDeadline(deadline)
 	defer s.clearDeadline()
@@ -94,56 +111,93 @@ func (s *session) writeError(err error) error {
 }
 
 func (s *session) haveContract(revisable bool) error {
-	if s.contract.ParentID == (types.FileContractID{}) {
+	if s.ctx.Contract.ParentID == (types.FileContractID{}) {
 		return errors.New("no contract locked")
-	} else if revisable && s.contract.NewRevisionNumber == math.MaxUint64 {
+	} else if revisable && s.ctx.Contract.NewRevisionNumber == math.MaxUint64 {
 		return errors.New("contract cannot be revised")
 	}
 	return nil
 }
 
 func (s *session) recordMetric(m Metric) {
-	if s.metrics == nil {
-		return
-	}
 	s.ctx.Elapsed = time.Since(s.ctx.Timestamp)
+	s.ctx.UpBytes = s.conn.w
+	s.ctx.DownBytes = s.conn.r
 	s.metrics.RecordSessionMetric(&s.ctx, m)
 }
 
 func (s *session) recordMetricRPC(id renterhost.Specifier) (recordEnd func(error)) {
-	if s.metrics == nil {
-		return func(error) {}
-	}
 	start := time.Now()
 	s.recordMetric(MetricRPCStart{
 		ID:        id,
 		Timestamp: start,
-		Contract:  s.contract,
 	})
+	oldUp, oldDown := s.conn.w, s.conn.r
 	return func(err error) {
 		s.recordMetric(MetricRPCEnd{
-			ID:       id,
-			Elapsed:  time.Since(start),
-			Contract: s.contract,
-			Err:      err,
+			ID:        id,
+			Elapsed:   time.Since(start),
+			UpBytes:   s.conn.w - oldUp,
+			DownBytes: s.conn.r - oldDown,
+			Err:       err,
 		})
 	}
 }
 
-// SessionManager ...
-type SessionManager struct {
+// SessionHandler ...
+type SessionHandler struct {
 	secretKey ed25519.PrivateKey
-	settings  SettingsManager
-	contracts *ContractManager
-	storage   *StorageManager
-	wallet    *WalletManager
-	chain     *ChainManager
+	settings  SettingsReporter
+	contracts ContractStore
+	sectors   SectorStore
+	wallet    Wallet
+	tpool     TransactionPool
 	metrics   MetricsRecorder
 	rpcs      map[renterhost.Specifier]func(*session) error
+
+	// instead of a separate TryMutex for each contract, use a single Cond
+	//
+	// NOTE: this probably performs worse than than per-contract TryMutexes
+	// under heavy load; haven't benchmarked it
+	lockCond sync.Cond
+	locks    map[types.FileContractID]struct{}
+}
+
+func (sh *SessionHandler) lockContract(id types.FileContractID, timeout time.Duration) bool {
+	// wake up the cond when the timeout expires
+	timedOut := false
+	timer := time.AfterFunc(timeout, func() {
+		sh.lockCond.L.Lock()
+		timedOut = true
+		sh.lockCond.L.Unlock()
+		sh.lockCond.Broadcast()
+	})
+	defer timer.Stop()
+
+	sh.lockCond.L.Lock()
+	defer sh.lockCond.L.Unlock()
+	for {
+		if _, ok := sh.locks[id]; !ok {
+			// acquire the lock
+			sh.locks[id] = struct{}{}
+			return true
+		} else if timedOut {
+			return false
+		}
+		// another session is holding the lock, but we haven't timed out yet
+		sh.lockCond.Wait()
+	}
+}
+
+func (sh *SessionHandler) unlockContract(id types.FileContractID) {
+	sh.lockCond.L.Lock()
+	delete(sh.locks, id)
+	sh.lockCond.L.Unlock()
+	sh.lockCond.Broadcast()
 }
 
 // Listen ...
-func (sm *SessionManager) Listen(l net.Listener) error {
+func (sh *SessionHandler) Listen(l net.Listener) error {
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -151,7 +205,7 @@ func (sm *SessionManager) Listen(l net.Listener) error {
 		}
 		go func() {
 			defer conn.Close()
-			err := sm.handleConn(conn)
+			err := sh.handleConn(conn)
 			if err != nil {
 				println("rpc error:", err.Error()) // TODO
 			}
@@ -159,23 +213,25 @@ func (sm *SessionManager) Listen(l net.Listener) error {
 	}
 }
 
-func (sm *SessionManager) handleConn(conn net.Conn) (err error) {
+func (sh *SessionHandler) handleConn(conn net.Conn) (err error) {
 	s := &session{
 		ctx: SessionContext{
 			UID:       frand.Entropy128(),
 			RenterIP:  conn.RemoteAddr().String(),
 			Timestamp: time.Now(),
+			Settings:  sh.settings.Settings(),
 		},
-		conn:    conn,
-		metrics: sm.metrics,
+		conn:    statsConn{Conn: conn},
+		metrics: sh.metrics,
 	}
 	s.extendDeadline(60 * time.Second)
-	s.sess, err = renterhost.NewHostSession(conn, sm.secretKey)
+	s.sess, err = renterhost.NewHostSession(&s.conn, sh.secretKey)
 	s.recordMetric(MetricHandshake{Err: err})
 	if err != nil {
 		return err
 	}
 	defer func() { s.recordMetric(MetricSessionEnd{Err: err}) }()
+	defer func() { sh.unlockContract(s.ctx.Contract.ID()) }()
 	for {
 		s.extendDeadline(time.Hour)
 		id, err := s.sess.ReadID()
@@ -183,7 +239,7 @@ func (sm *SessionManager) handleConn(conn net.Conn) (err error) {
 			return nil
 		} else if err != nil {
 			return errors.Wrap(err, "could not read RPC ID")
-		} else if rpcFn, ok := sm.rpcs[id]; !ok {
+		} else if rpcFn, ok := sh.rpcs[id]; !ok {
 			return s.writeError(errors.Errorf("invalid or unknown RPC %q", id.String()))
 		} else {
 			recordEnd := s.recordMetricRPC(id)
@@ -196,43 +252,46 @@ func (sm *SessionManager) handleConn(conn net.Conn) (err error) {
 	}
 }
 
-func (sm *SessionManager) rpcSettings(s *session) (err error) {
-	js, _ := json.Marshal(sm.settings.Settings())
+func (sh *SessionHandler) rpcSettings(s *session) (err error) {
+	js, _ := json.Marshal(s.ctx.Settings)
 	return s.writeResponse(&renterhost.RPCSettingsResponse{
 		Settings: js,
 	})
 }
 
-func (sm *SessionManager) rpcFormContract(s *session) error {
+func (sh *SessionHandler) rpcFormContract(s *session) error {
 	var req renterhost.RPCFormContractRequest
 	if err := s.readRequest(&req); err != nil {
 		return err
 	}
+	// initialize builder
 	if len(req.Transactions) == 0 || len(req.Transactions[len(req.Transactions)-1].FileContracts) == 0 {
 		return s.writeError(errors.New("transaction set does not contain a file contract"))
 	}
-	cb := &contractBuilder{
-		contract:      req.Transactions[len(req.Transactions)-1].FileContracts[0],
-		transaction:   req.Transactions[len(req.Transactions)-1],
-		parents:       req.Transactions[:len(req.Transactions)-1],
-		renterKey:     req.RenterKey,
-		settings:      sm.settings.Settings(),
-		currentHeight: sm.chain.CurrentHeight(),
-		minFee:        sm.chain.MinFee(),
+	cb := contractBuilder{
+		contract:    req.Transactions[len(req.Transactions)-1].FileContracts[0],
+		transaction: req.Transactions[len(req.Transactions)-1],
+		parents:     req.Transactions[:len(req.Transactions)-1],
+		renterKey:   req.RenterKey,
+		hostKey: types.SiaPublicKey{
+			Algorithm: types.SignatureEd25519,
+			Key:       ed25519hash.ExtractPublicKey(sh.contracts.SigningKey()),
+		},
+		settings:      s.ctx.Settings,
+		currentHeight: sh.contracts.Height(),
+		minFee:        minFee(sh.tpool),
 	}
-	if err := sm.contracts.ConsiderFormRequest(cb); err != nil {
+	if err := validateFormContract(&s.ctx, &cb, sh.contracts); err != nil {
 		return s.writeError(err)
-	} else if err := sm.wallet.FundContract(cb); err != nil {
+	} else if err := fundContractTransaction(&cb, sh.wallet); err != nil {
 		return s.writeError(err)
 	} else if err := s.writeResponse(&cb.hostAdditions); err != nil {
 		return err
 	} else if err := s.readResponse(&cb.renterSigs); err != nil {
 		return err
-	} else if err := sm.wallet.SignContract(cb); err != nil {
+	} else if err := finalizeContract(&cb, sh.wallet, sh.contracts); err != nil {
 		return s.writeError(err)
-	} else if err := sm.chain.BroadcastTransactionSet(append(cb.parents, cb.transaction)); err != nil {
-		return s.writeError(err)
-	} else if err := sm.contracts.AcceptContract(cb); err != nil {
+	} else if err := sh.tpool.AcceptTransactionSet(append(cb.parents, cb.transaction)); err != nil {
 		return s.writeError(err)
 	} else if err := s.writeResponse(&cb.hostSigs); err != nil {
 		return err
@@ -240,7 +299,7 @@ func (sm *SessionManager) rpcFormContract(s *session) error {
 	return nil
 }
 
-func (sm *SessionManager) rpcRenewAndClearContract(s *session) error {
+func (sh *SessionHandler) rpcRenewAndClearContract(s *session) error {
 	var req renterhost.RPCRenewAndClearContractRequest
 	if err := s.readRequest(&req); err != nil {
 		return err
@@ -253,41 +312,41 @@ func (sm *SessionManager) rpcRenewAndClearContract(s *session) error {
 	if len(req.Transactions) == 0 || len(req.Transactions[len(req.Transactions)-1].FileContracts) == 0 {
 		return s.writeError(errors.New("transaction set does not contain a file contract"))
 	}
-	cb := &contractBuilder{
-		contract:      req.Transactions[len(req.Transactions)-1].FileContracts[0],
-		transaction:   req.Transactions[len(req.Transactions)-1],
-		parents:       req.Transactions[:len(req.Transactions)-1],
-		renterKey:     req.RenterKey,
-		settings:      sm.settings.Settings(),
-		currentHeight: sm.chain.CurrentHeight(),
-		minFee:        sm.chain.MinFee(),
+	cb := contractBuilder{
+		contract:    req.Transactions[len(req.Transactions)-1].FileContracts[0],
+		transaction: req.Transactions[len(req.Transactions)-1],
+		parents:     req.Transactions[:len(req.Transactions)-1],
+		renterKey:   req.RenterKey,
+		hostKey: types.SiaPublicKey{
+			Algorithm: types.SignatureEd25519,
+			Key:       ed25519hash.ExtractPublicKey(sh.contracts.SigningKey()),
+		},
+		settings:      s.ctx.Settings,
+		currentHeight: sh.contracts.Height(),
+		minFee:        minFee(sh.tpool),
 	}
-	if err := sm.contracts.ConsiderFinalRevision(cb, s.contract, req.FinalValidProofValues, req.FinalMissedProofValues); err != nil {
+	if err := validateFinalRevision(&cb, s.ctx.Contract, req.FinalValidProofValues, req.FinalMissedProofValues); err != nil {
 		return s.writeError(err)
-	} else if err := sm.contracts.ConsiderRenewRequest(cb, s.contract); err != nil {
+	} else if err := validateRenewContract(&cb, &s.ctx, s.ctx.Contract, sh.contracts); err != nil {
 		return s.writeError(err)
-	} else if err := sm.wallet.FundRenewal(cb); err != nil {
+	} else if err := fundRenewalTransaction(&cb, sh.wallet); err != nil {
 		return s.writeError(err)
 	} else if err := s.writeResponse(&cb.hostAdditions); err != nil {
 		return err
 	} else if err := s.readResponse(&cb.renterRenewSigs); err != nil {
 		return err
-	} else if err := sm.wallet.SignRenewal(cb); err != nil {
+	} else if err := finalizeRenewal(&cb, sh.wallet, sh.contracts, sh.sectors); err != nil {
 		return s.writeError(err)
-	} else if err := sm.chain.BroadcastTransactionSet(append(cb.parents, cb.transaction)); err != nil {
-		return s.writeError(err)
-	} else if err := sm.contracts.AcceptRenewal(cb); err != nil {
-		return s.writeError(err)
-	} else if err := sm.storage.MoveContractRoots(s.contract.ParentID, cb.transaction.FileContractID(0)); err != nil {
+	} else if err := sh.tpool.AcceptTransactionSet(append(cb.parents, cb.transaction)); err != nil {
 		return s.writeError(err)
 	} else if err := s.writeResponse(&cb.hostRenewSigs); err != nil {
 		return err
 	}
-	s.contract = cb.finalRevision
+	s.ctx.Contract = cb.finalRevision
 	return nil
 }
 
-func (sm *SessionManager) rpcLock(s *session) error {
+func (sh *SessionHandler) rpcLock(s *session) error {
 	var req renterhost.RPCLockRequest
 	if err := s.readRequest(&req); err != nil {
 		return err
@@ -297,13 +356,18 @@ func (sm *SessionManager) rpcLock(s *session) error {
 		return s.writeError(err)
 	}
 
-	contract, err := sm.contracts.Acquire(req.ContractID, time.Duration(req.Timeout)*time.Millisecond)
-	if err != nil || !s.sess.VerifyChallenge(req.Signature, hostdb.HostKeyFromSiaPublicKey(contract.RenterKey()).Ed25519()) {
+	contract, err := sh.contracts.Contract(req.ContractID)
+	if err != nil || !s.sess.VerifyChallenge(req.Signature, contract.RenterKey().Key) {
 		return s.writeError(errors.New("bad signature or no such contract"))
-	} else if !sm.chain.SuspendRevisionSubmission(req.ContractID) {
-		return s.writeError(errors.New("no longer accepting revisions for that contract"))
+	} else if !sh.lockContract(req.ContractID, time.Duration(req.Timeout)*time.Millisecond) {
+		return s.writeError(errors.New("timed out waiting to lock contract"))
 	}
-	s.contract = contract.Revision
+
+	// TODO
+	// if !sh.tpool.SuspendRevisionSubmission(req.ContractID) {
+	// 	return s.writeError(errors.New("no longer accepting revisions for that contract"))
+	// }
+	s.ctx.Contract = contract.Revision
 
 	var newChallenge [16]byte
 	frand.Read(newChallenge[:])
@@ -316,17 +380,17 @@ func (sm *SessionManager) rpcLock(s *session) error {
 	})
 }
 
-func (sm *SessionManager) rpcUnlock(s *session) error {
+func (sh *SessionHandler) rpcUnlock(s *session) error {
 	if err := s.haveContract(false); err != nil {
 		return err // no contract to unlock
 	}
-	err := sm.contracts.Release(s.contract.ID())
-	sm.chain.ResumeRevisionSubmission(s.contract.ID())
-	s.contract = types.FileContractRevision{}
-	return err
+	sh.unlockContract(s.ctx.Contract.ID())
+	// TODO: sh.tpool.ResumeRevisionSubmission(s.ctx.Contract.ID())
+	s.ctx.Contract = types.FileContractRevision{}
+	return nil
 }
 
-func (sm *SessionManager) rpcWrite(s *session) error {
+func (sh *SessionHandler) rpcWrite(s *session) error {
 	var req renterhost.RPCWriteRequest
 	if err := s.readRequest(&req); err != nil {
 		return err
@@ -345,92 +409,18 @@ func (sm *SessionManager) rpcWrite(s *session) error {
 	}
 
 	// validate actions
-	oldSectors := s.contract.NewFileSize / renterhost.SectorSize
-	newSectors := oldSectors
-	err := func() error {
-		for _, action := range req.Actions {
-			switch action.Type {
-			case renterhost.RPCWriteActionAppend:
-				if uint64(len(action.Data)) != renterhost.SectorSize {
-					return errors.New("length of appended data must be exactly SectorSize")
-				}
-				newSectors++
-
-			case renterhost.RPCWriteActionTrim:
-				if action.A > newSectors {
-					return errors.New("trim size exceeds number of sectors")
-				}
-				newSectors -= action.A
-
-			case renterhost.RPCWriteActionSwap:
-				i, j := action.A, action.B
-				if i >= newSectors || j >= newSectors {
-					return errors.New("swap index is out-of-bounds")
-				}
-
-			case renterhost.RPCWriteActionUpdate:
-				sectorIndex, offset := action.A, action.B
-				if sectorIndex >= newSectors {
-					return errors.New("updated sector index is out-of-bounds")
-				} else if offset+uint64(len(action.Data)) > renterhost.SectorSize {
-					return errors.New("updated section is out-of-bounds")
-				} else if req.MerkleProof && (offset%merkle.SegmentSize != 0 || len(action.Data)%merkle.SegmentSize != 0) {
-					return errors.New("updated section must align to SegmentSize boundaries when requesting a Merkle proof")
-				}
-
-			default:
-				return errors.New("unknown action type " + action.Type.String())
-			}
-		}
-		return nil
-	}()
-	if err != nil {
+	oldSectors := s.ctx.Contract.NewFileSize / renterhost.SectorSize
+	if err := validateWriteActions(req.Actions, req.MerkleProof, oldSectors); err != nil {
 		return s.writeError(err)
 	}
 
 	// compute new Merkle root (and proof, if requested)
-	merkleResp, err := sm.storage.ConsiderModifications(s.contract.ID(), req.Actions, req.MerkleProof)
+	merkleResp, err := considerModifications(s.ctx.Contract.ID(), req.Actions, req.MerkleProof, sh.sectors)
 	if err != nil {
 		return s.writeError(err)
 	}
 
-	// construct the new revision
-	currentRevision := s.contract
-	newRevision, err := calculateRevision(currentRevision, req.NewRevisionNumber, req.NewValidProofValues, req.NewMissedProofValues)
-	if err != nil {
-		return s.writeError(err)
-	}
-	for _, action := range req.Actions {
-		if action.Type == renterhost.RPCWriteActionAppend {
-			newRevision.NewFileSize += renterhost.SectorSize
-		} else if action.Type == renterhost.RPCWriteActionTrim {
-			newRevision.NewFileSize -= renterhost.SectorSize * action.A
-		}
-	}
-	newRevision.NewFileMerkleRoot = merkleResp.NewMerkleRoot
-
-	// verify revision
-	var rc revisionCharges
-	if newSectors > oldSectors {
-		rc.Storage = renterhost.SectorSize * uint64(newSectors-oldSectors)
-	}
-	for _, action := range req.Actions {
-		switch action.Type {
-		case renterhost.RPCWriteActionAppend:
-			rc.Up += renterhost.SectorSize
-		case renterhost.RPCWriteActionUpdate:
-			rc.Up += uint64(len(action.Data))
-			// TODO: this should count as a sector access, but existing renters don't treat it as such
-		}
-	}
-	if req.MerkleProof {
-		rc.Down += crypto.HashSize * uint64(len(merkleResp.OldSubtreeHashes)+len(merkleResp.OldLeafHashes)+1)
-	}
-	if err := sm.contracts.ConsiderRevision(currentRevision, newRevision, rc, sm.settings.Settings(), sm.chain.CurrentHeight()); err != nil {
-		return s.writeError(err)
-	}
-
-	// If a Merkle proof was requested, send it and wait for the renter's signature.
+	// if a Merkle proof was requested, send it and wait for the renter's signature
 	if req.MerkleProof {
 		if err := s.writeResponse(merkleResp); err != nil {
 			return err
@@ -439,20 +429,53 @@ func (sm *SessionManager) rpcWrite(s *session) error {
 		}
 	}
 
+	// construct and validate the new revision
+	currentRevision := s.ctx.Contract
+	newRevision, err := calculateRevision(currentRevision, req.NewRevisionNumber, req.NewValidProofValues, req.NewMissedProofValues)
+	if err != nil {
+		return s.writeError(err)
+	}
+	newRevision.NewFileMerkleRoot = merkleResp.NewMerkleRoot
+	var rc revisionCharges
+	newSectors := oldSectors
+	for _, action := range req.Actions {
+		switch action.Type {
+		case renterhost.RPCWriteActionAppend:
+			newRevision.NewFileSize += renterhost.SectorSize
+			rc.Up += renterhost.SectorSize
+			newSectors++
+		case renterhost.RPCWriteActionTrim:
+			newRevision.NewFileSize -= renterhost.SectorSize * action.A
+			newSectors -= action.A
+		case renterhost.RPCWriteActionUpdate:
+			rc.Up += uint64(len(action.Data))
+			// TODO: this should count as a sector access, but existing renters don't treat it as such
+		}
+	}
+	if newSectors > oldSectors {
+		rc.Storage = renterhost.SectorSize * (newSectors - oldSectors)
+	}
+	if req.MerkleProof {
+		rc.Down += crypto.HashSize * uint64(len(merkleResp.OldSubtreeHashes)+len(merkleResp.OldLeafHashes)+1)
+	}
+	if err := validateRevision(currentRevision, newRevision, rc, s.ctx.Settings, sh.contracts.Height()); err != nil {
+		return s.writeError(err)
+	}
+
 	// Apply the modifications and sign the revision.
 	var resp renterhost.RPCWriteResponse
-	if err := sm.storage.ApplyModifications(s.contract.ID(), req.Actions); err != nil {
+	if err := applyModifications(s.ctx.Contract.ID(), req.Actions, sh.sectors); err != nil {
 		return s.writeError(err)
-	} else if resp.Signature, err = sm.contracts.AcceptRevision(newRevision, sigResponse.Signature); err != nil {
+	} else if resp.Signature, err = finalizeRevision(newRevision, sigResponse.Signature, sh.contracts); err != nil {
 		return s.writeError(err)
 	} else if err := s.writeResponse(&resp); err != nil {
 		return err
 	}
-	s.contract = newRevision
+	s.ctx.Contract = newRevision
 	return nil
 }
 
-func (sm *SessionManager) rpcSectorRoots(s *session) error {
+func (sh *SessionHandler) rpcSectorRoots(s *session) error {
 	var req renterhost.RPCSectorRootsRequest
 	if err := s.readRequest(&req); err != nil {
 		return err
@@ -462,7 +485,7 @@ func (sm *SessionManager) rpcSectorRoots(s *session) error {
 	}
 
 	// construct the new revision
-	currentRevision := s.contract
+	currentRevision := s.ctx.Contract
 	newRevision, err := calculateRevision(currentRevision, req.NewRevisionNumber, req.NewValidProofValues, req.NewMissedProofValues)
 	if err != nil {
 		return s.writeError(err)
@@ -471,27 +494,27 @@ func (sm *SessionManager) rpcSectorRoots(s *session) error {
 	rc := revisionCharges{
 		Down: (req.NumRoots + uint64(proofSize)) * crypto.HashSize,
 	}
-	if err := sm.contracts.ConsiderRevision(currentRevision, newRevision, rc, sm.settings.Settings(), sm.chain.CurrentHeight()); err != nil {
+	if err := validateRevision(currentRevision, newRevision, rc, s.ctx.Settings, sh.contracts.Height()); err != nil {
 		return s.writeError(err)
 	}
 
-	resp, err := sm.storage.ReadSectors(s.contract.ID(), req.RootOffset, req.NumRoots)
+	resp, err := readSectors(s.ctx.Contract.ID(), req.RootOffset, req.NumRoots, sh.sectors)
 	if err != nil {
 		return s.writeError(err)
 	}
 
 	// commit the new revision
-	resp.Signature, err = sm.contracts.AcceptRevision(newRevision, req.Signature)
+	resp.Signature, err = finalizeRevision(newRevision, req.Signature, sh.contracts)
 	if err != nil {
 		return s.writeError(err)
 	} else if err := s.writeResponse(resp); err != nil {
 		return err
 	}
-	s.contract = newRevision
+	s.ctx.Contract = newRevision
 	return nil
 }
 
-func (sm *SessionManager) rpcRead(s *session) error {
+func (sh *SessionHandler) rpcRead(s *session) error {
 	var req renterhost.RPCReadRequest
 	if err := s.readRequest(&req); err != nil {
 		return err
@@ -519,7 +542,7 @@ func (sm *SessionManager) rpcRead(s *session) error {
 		return err
 	}
 
-	currentRevision := s.contract
+	currentRevision := s.ctx.Contract
 	for _, sec := range req.Sections {
 		switch {
 		case uint64(sec.Offset)+uint64(sec.Length) > renterhost.SectorSize:
@@ -547,20 +570,20 @@ func (sm *SessionManager) rpcRead(s *session) error {
 			rc.Down += uint64(proofSize * crypto.HashSize)
 		}
 	}
-	if err := sm.contracts.ConsiderRevision(currentRevision, newRevision, rc, sm.settings.Settings(), sm.chain.CurrentHeight()); err != nil {
+	if err := validateRevision(currentRevision, newRevision, rc, s.ctx.Settings, sh.contracts.Height()); err != nil {
 		return s.writeError(err)
 	}
 
 	// commit the new revision
-	hostSig, err := sm.contracts.AcceptRevision(newRevision, req.Signature)
+	hostSig, err := finalizeRevision(newRevision, req.Signature, sh.contracts)
 	if err != nil {
 		return s.writeError(err)
 	}
-	s.contract = newRevision
+	s.ctx.Contract = newRevision
 
 	// enter response loop
 	for i, sec := range req.Sections {
-		resp, err := sm.storage.ReadSection(sec, req.MerkleProof)
+		resp, err := readSection(sec, req.MerkleProof, sh.sectors)
 		if err != nil {
 			return s.writeError(err)
 		}
@@ -587,25 +610,28 @@ func (sm *SessionManager) rpcRead(s *session) error {
 	return <-stopSignal
 }
 
-// NewSessionManager returns an initialized session manager.
-func NewSessionManager(secretKey ed25519.PrivateKey, settings SettingsManager, contracts *ContractManager, storage *StorageManager, wallet *WalletManager, chain *ChainManager) *SessionManager {
-	sm := &SessionManager{
+// NewSessionHandler returns an initialized session manager.
+func NewSessionHandler(secretKey ed25519.PrivateKey, sr SettingsReporter, cs ContractStore, ss SectorStore, w Wallet, tp TransactionPool, mr MetricsRecorder) *SessionHandler {
+	sh := &SessionHandler{
 		secretKey: secretKey,
-		settings:  settings,
-		contracts: contracts,
-		storage:   storage,
-		wallet:    wallet,
-		chain:     chain,
+		settings:  sr,
+		contracts: cs,
+		sectors:   ss,
+		wallet:    w,
+		tpool:     tp,
+		metrics:   mr,
+		lockCond:  sync.Cond{L: new(sync.Mutex)},
+		locks:     make(map[types.FileContractID]struct{}),
 	}
-	sm.rpcs = map[renterhost.Specifier]func(*session) error{
-		renterhost.RPCFormContractID:       sm.rpcFormContract,
-		renterhost.RPCLockID:               sm.rpcLock,
-		renterhost.RPCReadID:               sm.rpcRead,
-		renterhost.RPCRenewClearContractID: sm.rpcRenewAndClearContract,
-		renterhost.RPCSectorRootsID:        sm.rpcSectorRoots,
-		renterhost.RPCSettingsID:           sm.rpcSettings,
-		renterhost.RPCUnlockID:             sm.rpcUnlock,
-		renterhost.RPCWriteID:              sm.rpcWrite,
+	sh.rpcs = map[renterhost.Specifier]func(*session) error{
+		renterhost.RPCFormContractID:       sh.rpcFormContract,
+		renterhost.RPCLockID:               sh.rpcLock,
+		renterhost.RPCReadID:               sh.rpcRead,
+		renterhost.RPCRenewClearContractID: sh.rpcRenewAndClearContract,
+		renterhost.RPCSectorRootsID:        sh.rpcSectorRoots,
+		renterhost.RPCSettingsID:           sh.rpcSettings,
+		renterhost.RPCUnlockID:             sh.rpcUnlock,
+		renterhost.RPCWriteID:              sh.rpcWrite,
 	}
-	return sm
+	return sh
 }

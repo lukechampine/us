@@ -33,7 +33,7 @@ func (ctp *chanTpool) recvTxns() []types.Transaction {
 
 func TestChain(t *testing.T) {
 	ctp := &chanTpool{ch: make(chan []types.Transaction, 1)}
-	host := ghost.New(t, stubWallet{}, ctp)
+	host := ghost.New(t, ghost.FreeSettings, stubWallet{}, ctp)
 
 	// "mine" genesis block
 	host.ProcessConsensusChange(modules.ConsensusChange{
@@ -44,6 +44,8 @@ func TestChain(t *testing.T) {
 	// form a contract ending at height 10
 	renter, err := proto.NewUnlockedSession(host.Settings.NetAddress, host.PublicKey, 0)
 	if err != nil {
+		t.Fatal(err)
+	} else if _, err := renter.Settings(); err != nil {
 		t.Fatal(err)
 	}
 	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))

@@ -8,14 +8,8 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
-// StorageManager ...
-type StorageManager struct {
-	store SectorStore
-}
-
-// ReadSection ...
-func (sm *StorageManager) ReadSection(sec renterhost.RPCReadRequestSection, proof bool) (*renterhost.RPCReadResponse, error) {
-	sector, err := sm.store.Sector(sec.MerkleRoot)
+func readSection(sec renterhost.RPCReadRequestSection, proof bool, ss SectorStore) (*renterhost.RPCReadResponse, error) {
+	sector, err := ss.Sector(sec.MerkleRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -30,9 +24,8 @@ func (sm *StorageManager) ReadSection(sec renterhost.RPCReadRequestSection, proo
 	return resp, nil
 }
 
-// ReadSectors ...
-func (sm *StorageManager) ReadSectors(id types.FileContractID, offset, length uint64) (*renterhost.RPCSectorRootsResponse, error) {
-	roots, err := sm.store.ContractRoots(id)
+func readSectors(id types.FileContractID, offset, length uint64, ss SectorStore) (*renterhost.RPCSectorRootsResponse, error) {
+	roots, err := ss.ContractRoots(id)
 	if err != nil {
 		return nil, err
 	}
@@ -45,9 +38,8 @@ func (sm *StorageManager) ReadSectors(id types.FileContractID, offset, length ui
 	}, nil
 }
 
-// ConsiderModifications ...
-func (sm *StorageManager) ConsiderModifications(id types.FileContractID, actions []renterhost.RPCWriteAction, proof bool) (*renterhost.RPCWriteMerkleProof, error) {
-	sectorRoots, err := sm.store.ContractRoots(id)
+func considerModifications(id types.FileContractID, actions []renterhost.RPCWriteAction, proof bool, ss SectorStore) (*renterhost.RPCWriteMerkleProof, error) {
+	sectorRoots, err := ss.ContractRoots(id)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +66,7 @@ func (sm *StorageManager) ConsiderModifications(id types.FileContractID, actions
 
 		case renterhost.RPCWriteActionUpdate:
 			sectorIndex, offset := action.A, action.B
-			sector, err := sm.store.Sector(newRoots[sectorIndex])
+			sector, err := ss.Sector(newRoots[sectorIndex])
 			if err != nil {
 				return nil, err
 			}
@@ -94,9 +86,8 @@ func (sm *StorageManager) ConsiderModifications(id types.FileContractID, actions
 	return merkleResp, nil
 }
 
-// ApplyModifications ...
-func (sm *StorageManager) ApplyModifications(id types.FileContractID, actions []renterhost.RPCWriteAction) error {
-	sectorRoots, err := sm.store.ContractRoots(id)
+func applyModifications(id types.FileContractID, actions []renterhost.RPCWriteAction, ss SectorStore) error {
+	sectorRoots, err := ss.ContractRoots(id)
 	if err != nil {
 		return err
 	}
@@ -123,7 +114,7 @@ func (sm *StorageManager) ApplyModifications(id types.FileContractID, actions []
 
 		case renterhost.RPCWriteActionUpdate:
 			sectorIndex, offset := action.A, action.B
-			sector, err := sm.store.Sector(newRoots[sectorIndex])
+			sector, err := ss.Sector(newRoots[sectorIndex])
 			if err != nil {
 				return err
 			}
@@ -135,47 +126,45 @@ func (sm *StorageManager) ApplyModifications(id types.FileContractID, actions []
 		}
 	}
 
-	if err := sm.store.SetContractRoots(id, newRoots); err != nil {
+	if err := ss.SetContractRoots(id, newRoots); err != nil {
 		return err
 	}
 	for _, root := range sectorsRemoved {
-		if err := sm.store.DeleteSector(root); err != nil {
+		if err := ss.DeleteSector(root); err != nil {
 			return err
 		}
 		delete(gainedSectorData, root)
 	}
 	for root, sector := range gainedSectorData {
-		if err := sm.store.AddSector(root, sector); err != nil {
+		if err := ss.AddSector(root, sector); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// MoveContractRoots ...
-func (sm *StorageManager) MoveContractRoots(from, to types.FileContractID) error {
-	roots, err := sm.store.ContractRoots(from)
+func moveContractRoots(from, to types.FileContractID, ss SectorStore) error {
+	roots, err := ss.ContractRoots(from)
 	if err != nil {
 		return err
-	} else if err := sm.store.SetContractRoots(to, roots); err != nil {
+	} else if err := ss.SetContractRoots(to, roots); err != nil {
 		return err
-	} else if err := sm.store.SetContractRoots(from, nil); err != nil {
+	} else if err := ss.SetContractRoots(from, nil); err != nil {
 		return err
 	}
 	return nil
 }
 
-// BuildStorageProof ...
-func (sm *StorageManager) BuildStorageProof(id types.FileContractID, index uint64) (types.StorageProof, error) {
+func buildStorageProof(id types.FileContractID, index uint64, ss SectorStore) (types.StorageProof, error) {
 	sectorIndex := int(index / merkle.SegmentsPerSector)
 	segmentIndex := int(index % merkle.SegmentsPerSector)
 
-	roots, err := sm.store.ContractRoots(id)
+	roots, err := ss.ContractRoots(id)
 	if err != nil {
 		return types.StorageProof{}, err
 	}
 	root := roots[sectorIndex]
-	sector, err := sm.store.Sector(root)
+	sector, err := ss.Sector(root)
 	if err != nil {
 		return types.StorageProof{}, err
 	}
@@ -187,11 +176,4 @@ func (sm *StorageManager) BuildStorageProof(id types.FileContractID, index uint6
 	}
 	copy(sp.Segment[:], sector[segmentIndex*merkle.SegmentSize:])
 	return sp, nil
-}
-
-// NewStorageManager returns an initialized storage manager.
-func NewStorageManager(store SectorStore) *StorageManager {
-	return &StorageManager{
-		store: store,
-	}
 }

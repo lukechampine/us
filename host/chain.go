@@ -23,19 +23,27 @@ var (
 // ready and have not been confirmed on chain.
 func ContractIsActionable(c Contract, currentHeight types.BlockHeight) bool {
 	return c.FatalError == nil && (!c.FormationConfirmed ||
-		(!c.FinalizationConfirmed && currentHeight >= c.FinalizationHeight) ||
-		(!c.ProofConfirmed && currentHeight >= c.ProofHeight))
+		(!c.FinalizationConfirmed && currentHeight >= c.FinalizationHeight && c.Revision.NewRevisionNumber > 1) ||
+		(!c.ProofConfirmed && currentHeight >= c.ProofHeight && c.Revision.NewFileSize > 0))
 }
 
-// ChainManager ...
-type ChainManager struct {
-	store ContractStore
-	tpool TransactionPool
-	wmgr  *WalletManager
-	cmgr  *ContractManager
-	smgr  *StorageManager
+func minFee(tp TransactionPool) types.Currency {
+	_, max, err := tp.FeeEstimate()
+	if err != nil {
+		max = types.SiacoinPrecision.Div64(1e3) // TODO: reasonable?
+	}
+	return max
+}
+
+// ChainWatcher ...
+type ChainWatcher struct {
+	tpool     TransactionPool
+	wallet    Wallet
+	contracts ContractStore
+	sectors   SectorStore
 
 	watchChan chan struct{}
+	stopChan  chan struct{}
 }
 
 // ProcessedConsensusChange ...
@@ -46,22 +54,8 @@ type ProcessedConsensusChange struct {
 	BlockIDs  []types.BlockID
 }
 
-// CurrentHeight ...
-func (cm *ChainManager) CurrentHeight() types.BlockHeight {
-	return cm.store.Height()
-}
-
-// MinFee ...
-func (cm *ChainManager) MinFee() types.Currency {
-	_, max, err := cm.tpool.FeeEstimate()
-	if err != nil {
-		max = types.SiacoinPrecision.Div64(1e3) // TODO: reasonable?
-	}
-	return max
-}
-
 // ProcessConsensusChange ...
-func (cm *ChainManager) ProcessConsensusChange(cc modules.ConsensusChange) {
+func (cw *ChainWatcher) ProcessConsensusChange(cc modules.ConsensusChange) {
 	process := func(blocks []types.Block) (pcc ProcessedConsensusChange) {
 		for _, block := range blocks {
 			for _, txn := range block.Transactions {
@@ -81,12 +75,12 @@ func (cm *ChainManager) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 	reverted := process(cc.RevertedBlocks)
 	applied := process(cc.AppliedBlocks)
-	if err := cm.store.ApplyConsensusChange(reverted, applied, cc.ID); err != nil {
+	if err := cw.contracts.ApplyConsensusChange(reverted, applied, cc.ID); err != nil {
 		panic(err) // TODO
 	}
 
 	select {
-	case cm.watchChan <- struct{}{}:
+	case cw.watchChan <- struct{}{}:
 	default:
 	}
 }
@@ -110,24 +104,19 @@ func StorageProofSegment(bid types.BlockID, fcid types.FileContractID, filesize 
 	return r
 }
 
-// SuspendRevisionSubmission prevents the ChainManager from submitting the final
+// SuspendRevisionSubmission prevents the ChainWatcher from submitting the final
 // revision transaction for the specified contract until
 // ResumeRevisionSubmission is called.
-func (cm *ChainManager) SuspendRevisionSubmission(id types.FileContractID) bool {
+func (cw *ChainWatcher) SuspendRevisionSubmission(id types.FileContractID) bool {
 	return true
 }
 
-// ResumeRevisionSubmission lifts the suspension preventing the ChainManager
+// ResumeRevisionSubmission lifts the suspension preventing the ChainWatcher
 // from submitting the final revision transaction for the specified contract.
-func (cm *ChainManager) ResumeRevisionSubmission(id types.FileContractID) {}
+func (cw *ChainWatcher) ResumeRevisionSubmission(id types.FileContractID) {}
 
-// BroadcastTransactionSet ...
-func (cm *ChainManager) BroadcastTransactionSet(txns []types.Transaction) error {
-	return cm.tpool.AcceptTransactionSet(txns)
-}
-
-func (cm *ChainManager) submitContractTxn(txns []types.Transaction) error {
-	err := cm.tpool.AcceptTransactionSet(txns)
+func (cw *ChainWatcher) submitTransaction(txns []types.Transaction) error {
+	err := cw.tpool.AcceptTransactionSet(txns)
 	if err == nil || err == modules.ErrDuplicateTransactionSet {
 		return nil
 	} else if strings.Contains(err.Error(), "transaction spends a nonexisting siacoin output") {
@@ -136,33 +125,30 @@ func (cm *ChainManager) submitContractTxn(txns []types.Transaction) error {
 	return err
 }
 
-func (cm *ChainManager) finalizeContract(c Contract) ([]types.Transaction, error) {
-	_, feePerByte, err := cm.tpool.FeeEstimate()
+func (cw *ChainWatcher) finalizeContract(c Contract) ([]types.Transaction, error) {
+	_, feePerByte, err := cw.tpool.FeeEstimate()
 	if err != nil {
 		return nil, err
 	}
-	if _, err = cm.cmgr.Acquire(c.ID(), 0); err != nil {
-		return nil, err
-	}
-	return cm.wmgr.FinalRevisionTransaction(c, feePerByte)
+	return finalRevisionTransaction(c, feePerByte, cw.wallet)
 }
 
-func (cm *ChainManager) proveContract(c Contract) ([]types.Transaction, error) {
-	_, feePerByte, err := cm.tpool.FeeEstimate()
+func (cw *ChainWatcher) proveContract(c Contract) ([]types.Transaction, error) {
+	_, feePerByte, err := cw.tpool.FeeEstimate()
 	if err != nil {
 		return nil, err
 	}
-	sp, err := cm.smgr.BuildStorageProof(c.ID(), c.ProofSegment)
+	sp, err := buildStorageProof(c.ID(), c.ProofSegment, cw.sectors)
 	if err != nil {
 		return nil, err
 	}
-	return cm.wmgr.StorageProofTransaction(sp, feePerByte)
+	return storageProofTransaction(sp, feePerByte, cw.wallet)
 }
 
 // Watch ...
-func (cm *ChainManager) Watch() {
-	for range cm.watchChan {
-		contracts, err := cm.store.ActionableContracts()
+func (cw *ChainWatcher) Watch() {
+	for range cw.watchChan {
+		contracts, err := cw.contracts.ActionableContracts()
 		if err != nil {
 			panic(err) // TODO
 		}
@@ -170,67 +156,75 @@ func (cm *ChainManager) Watch() {
 		for _, c := range contracts {
 			switch {
 			case !c.FormationConfirmed:
-				if err := cm.submitContractTxn(c.FormationSet); err != nil {
+				if err := cw.submitTransaction(c.FormationSet); err != nil {
 					// all errors that occur when submitting the formation set
 					// are fatal, since we can't change the renter's signatures
 					c.FatalError = err
-					if err := cm.store.AddContract(c); err != nil {
+					if err := cw.contracts.AddContract(c); err != nil {
 						panic(err) // TODO
 					}
 				}
 
 			case !c.FinalizationConfirmed:
 				if len(c.FinalizationSet) == 0 {
-					c.FinalizationSet, err = cm.finalizeContract(c)
+					c.FinalizationSet, err = cw.finalizeContract(c)
 					if err != nil {
 						// TODO: this error might be recoverable, e.g. if more
 						// funds are added to the wallet
 						c.FatalError = err
 					}
-					if err := cm.store.AddContract(c); err != nil {
+					if err := cw.contracts.AddContract(c); err != nil {
 						panic(err) // TODO
 					}
 				}
-				if err := cm.submitContractTxn(c.FinalizationSet); err != nil {
+				if err := cw.submitTransaction(c.FinalizationSet); err != nil {
 					// TODO: ErrMissingSiacoinOutput is not fatal
 					c.FatalError = err
-					if err := cm.store.AddContract(c); err != nil {
+					if err := cw.contracts.AddContract(c); err != nil {
 						panic(err) // TODO
 					}
 				}
 
 			case !c.ProofConfirmed:
 				if len(c.ProofSet) == 0 {
-					c.ProofSet, err = cm.proveContract(c)
+					c.ProofSet, err = cw.proveContract(c)
 					if err != nil {
 						// TODO: this error might be recoverable, e.g. if more
 						// funds are added to the wallet
 						c.FatalError = err
 					}
-					if err := cm.store.AddContract(c); err != nil {
+					if err := cw.contracts.AddContract(c); err != nil {
 						panic(err) // TODO
 					}
 				}
-				if err := cm.submitContractTxn(c.ProofSet); err != nil {
+				if err := cw.submitTransaction(c.ProofSet); err != nil {
 					// TODO: ErrMissingSiacoinOutput is not fatal
 					c.FatalError = err
-					if err := cm.store.AddContract(c); err != nil {
+					if err := cw.contracts.AddContract(c); err != nil {
 						panic(err) // TODO
 					}
 				}
 			}
 		}
 	}
+	close(cw.stopChan)
 }
 
-// NewChainManager returns an initialized chain manager.
-func NewChainManager(store ContractStore, tpool TransactionPool, wmgr *WalletManager, cmgr *ContractManager, smgr *StorageManager) *ChainManager {
-	return &ChainManager{
-		store:     store,
-		tpool:     tpool,
-		wmgr:      wmgr,
-		cmgr:      cmgr,
-		smgr:      smgr,
+// Close shuts down the ChainWatcher.
+func (cw *ChainWatcher) Close() error {
+	close(cw.watchChan)
+	<-cw.stopChan
+	return nil
+}
+
+// NewChainWatcher returns an initialized ChainWatcher.
+func NewChainWatcher(tp TransactionPool, w Wallet, cs ContractStore, ss SectorStore) *ChainWatcher {
+	return &ChainWatcher{
+		tpool:     tp,
+		wallet:    w,
+		contracts: cs,
+		sectors:   ss,
 		watchChan: make(chan struct{}, 1),
+		stopChan:  make(chan struct{}),
 	}
 }

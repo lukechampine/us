@@ -32,17 +32,17 @@ func (stubTpool) FeeEstimate() (_, _ types.Currency, _ error)                   
 // createTestingPair creates a renter and host, initiates a Session between
 // them, and forms and locks a contract.
 func createTestingPair(tb testing.TB) (*proto.Session, *ghost.Host) {
-	tb.Helper()
-
-	host := ghost.New(tb, stubWallet{}, stubTpool{})
+	host := ghost.New(tb, ghost.FreeSettings, stubWallet{}, stubTpool{})
 
 	s, err := proto.NewUnlockedSession(host.Settings.NetAddress, host.PublicKey, 0)
 	if err != nil {
 		tb.Fatal(err)
+	} else if _, err := s.Settings(); err != nil {
+		tb.Fatal(err)
 	}
 
 	key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
-	rev, _, err := s.FormContract(stubWallet{}, stubTpool{}, key, types.ZeroCurrency, 0, 0)
+	rev, _, err := s.FormContract(stubWallet{}, stubTpool{}, key, types.ZeroCurrency, 0, 100)
 	if err != nil {
 		tb.Fatal(err)
 	}

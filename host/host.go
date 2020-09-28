@@ -2,6 +2,7 @@
 package host
 
 import (
+	"crypto/ed25519"
 	"time"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
@@ -13,9 +14,9 @@ import (
 
 // ContractStore ...
 type ContractStore interface {
+	SigningKey() ed25519.PrivateKey
 	Contract(id types.FileContractID) (Contract, error)
 	AddContract(c Contract) error
-
 	ActionableContracts() ([]Contract, error)
 	ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) error
 	ConsensusChangeID() modules.ConsensusChangeID
@@ -31,16 +32,16 @@ type SectorStore interface {
 	SetContractRoots(id types.FileContractID, roots []crypto.Hash) error
 }
 
-// SettingsManager ...
-type SettingsManager interface {
-	Settings() hostdb.HostSettings
-}
-
 // A Wallet provides addresses and outputs, and can sign transactions.
 type Wallet interface {
 	Address() (types.UnlockHash, error)
 	FundTransaction(txn *types.Transaction, cost types.Currency) ([]crypto.Hash, error)
 	SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error
+}
+
+// SettingsReporter ...
+type SettingsReporter interface {
+	Settings() hostdb.HostSettings
 }
 
 // TransactionPool ...
@@ -55,7 +56,7 @@ type Contract struct {
 	Signatures [2]types.TransactionSignature
 
 	FormationSet    []types.Transaction
-	FinalizationSet []types.Transaction // TODO: don't need to finalize contract if it was never revised
+	FinalizationSet []types.Transaction
 	ProofSet        []types.Transaction
 
 	FormationConfirmed    bool
@@ -84,7 +85,6 @@ func (c *Contract) RenterKey() types.SiaPublicKey {
 // MetricsRecorder ...
 type MetricsRecorder interface {
 	RecordSessionMetric(ctx *SessionContext, m Metric)
-	RecordChainMetric(m Metric)
 }
 
 // SessionContext ...
@@ -93,8 +93,11 @@ type SessionContext struct {
 	RenterIP  string
 	Timestamp time.Time
 	Elapsed   time.Duration
-	Contract  types.FileContractID
-	// TODO: bandwidth stats
+	UpBytes   uint64
+	DownBytes uint64
+
+	Contract types.FileContractRevision
+	Settings hostdb.HostSettings
 }
 
 // Metric ...
@@ -121,13 +124,13 @@ type MetricSessionEnd struct {
 type MetricRPCStart struct {
 	ID        renterhost.Specifier
 	Timestamp time.Time
-	Contract  types.FileContractRevision
 }
 
 // MetricRPCEnd ...
 type MetricRPCEnd struct {
-	ID       renterhost.Specifier
-	Elapsed  time.Duration
-	Contract types.FileContractRevision
-	Err      error
+	ID        renterhost.Specifier
+	Elapsed   time.Duration
+	UpBytes   uint64
+	DownBytes uint64
+	Err       error
 }

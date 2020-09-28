@@ -6,17 +6,12 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
-// WalletManager ...
-type WalletManager struct {
-	wallet Wallet
-}
-
-func (wm *WalletManager) fundTransaction(txn *types.Transaction, cost types.Currency) (renterhost.RPCFormContractAdditions, error) {
+func fundTransaction(txn *types.Transaction, cost types.Currency, w Wallet) (renterhost.RPCFormContractAdditions, error) {
 	if cost.IsZero() {
 		return renterhost.RPCFormContractAdditions{}, nil
 	}
 	oldInputs, oldOutputs := len(txn.SiacoinInputs), len(txn.SiacoinOutputs)
-	if _, err := wm.wallet.FundTransaction(txn, cost); err != nil {
+	if _, err := w.FundTransaction(txn, cost); err != nil {
 		return renterhost.RPCFormContractAdditions{}, err
 	}
 	return renterhost.RPCFormContractAdditions{
@@ -25,26 +20,24 @@ func (wm *WalletManager) fundTransaction(txn *types.Transaction, cost types.Curr
 	}, nil
 }
 
-// FundContract ...
-func (wm *WalletManager) FundContract(cb *contractBuilder) (err error) {
-	cost := cb.contract.ValidHostPayout().Sub(cb.settings.ContractPrice) // NOTE: ConsiderFormRequest prevents underflow here
-	cb.hostAdditions, err = wm.fundTransaction(&cb.transaction, cost)
+func fundContractTransaction(cb *contractBuilder, w Wallet) (err error) {
+	cost := cb.contract.ValidHostPayout().Sub(cb.settings.ContractPrice) // NOTE: validateFormContract prevents underflow here
+	cb.hostAdditions, err = fundTransaction(&cb.transaction, cost, w)
 	return
 }
 
-// FundRenewal ...
-func (wm *WalletManager) FundRenewal(cb *contractBuilder) (err error) {
+func fundRenewalTransaction(cb *contractBuilder, w Wallet) (err error) {
 	var basePrice types.Currency
 	if cb.contract.WindowEnd > cb.finalRevision.NewWindowEnd {
 		timeExtension := uint64(cb.contract.WindowEnd - cb.finalRevision.NewWindowEnd)
 		basePrice = cb.settings.StoragePrice.Mul64(cb.contract.FileSize).Mul64(timeExtension)
 	}
-	cost := cb.contract.ValidHostPayout().Sub(cb.settings.ContractPrice).Sub(basePrice) // NOTE: ConsiderRenewRequest prevents underflow here
-	cb.hostAdditions, err = wm.fundTransaction(&cb.transaction, cost)
+	cost := cb.contract.ValidHostPayout().Sub(cb.settings.ContractPrice).Sub(basePrice) // NOTE: validateRenewContract prevents underflow here
+	cb.hostAdditions, err = fundTransaction(&cb.transaction, cost, w)
 	return
 }
 
-func (wm *WalletManager) signTransaction(txn *types.Transaction, inputs []types.SiacoinInput) ([]types.TransactionSignature, error) {
+func signTransaction(txn *types.Transaction, inputs []types.SiacoinInput, w Wallet) ([]types.TransactionSignature, error) {
 	// NOTE: it is important that we do not blindly sign all inputs we control;
 	// if a malicious renter knows which inputs we control, they could trick us
 	// into paying for our own contract!
@@ -52,54 +45,37 @@ func (wm *WalletManager) signTransaction(txn *types.Transaction, inputs []types.
 	for i, in := range inputs {
 		toSign[i] = crypto.Hash(in.ParentID)
 	}
-	err := wm.wallet.SignTransaction(txn, toSign)
+	err := w.SignTransaction(txn, toSign)
 	return txn.TransactionSignatures[len(txn.TransactionSignatures)-len(toSign):], err
 }
 
-// SignContract ...
-func (wm *WalletManager) SignContract(cb *contractBuilder) (err error) {
-	cb.transaction.TransactionSignatures = append(cb.transaction.TransactionSignatures, cb.renterSigs.ContractSignatures...)
-	cb.hostSigs.ContractSignatures, err = wm.signTransaction(&cb.transaction, cb.hostAdditions.Inputs)
-	return
-}
-
-// SignRenewal ...
-func (wm *WalletManager) SignRenewal(cb *contractBuilder) (err error) {
-	cb.transaction.TransactionSignatures = append(cb.transaction.TransactionSignatures, cb.renterRenewSigs.ContractSignatures...)
-	cb.hostRenewSigs.ContractSignatures, err = wm.signTransaction(&cb.transaction, cb.hostAdditions.Inputs)
-	return
-}
-
-func (wm *WalletManager) finalizeSimpleTxn(txn types.Transaction) ([]types.Transaction, error) {
-	if toSign, err := wm.wallet.FundTransaction(&txn, txn.SiacoinOutputSum()); err != nil {
+func finalizeSimpleTxn(txn types.Transaction, w Wallet) ([]types.Transaction, error) {
+	if toSign, err := w.FundTransaction(&txn, txn.SiacoinOutputSum()); err != nil {
 		return nil, err
-	} else if err := wm.wallet.SignTransaction(&txn, toSign); err != nil {
+	} else if err := w.SignTransaction(&txn, toSign); err != nil {
 		return nil, err
 	}
 	return []types.Transaction{txn}, nil
 }
 
-// AnnouncementTransaction ...
-func (wm *WalletManager) AnnouncementTransaction(announcement []byte, feePerByte types.Currency) ([]types.Transaction, error) {
+func announcementTransaction(announcement []byte, feePerByte types.Currency, w Wallet) ([]types.Transaction, error) {
 	const estTxnSize = 2048
-	return wm.finalizeSimpleTxn(types.Transaction{
+	return finalizeSimpleTxn(types.Transaction{
 		ArbitraryData: [][]byte{announcement},
 		MinerFees:     []types.Currency{feePerByte.Mul64(estTxnSize)},
-	})
+	}, w)
 }
 
-// FinalRevisionTransaction ...
-func (wm *WalletManager) FinalRevisionTransaction(c Contract, feePerByte types.Currency) ([]types.Transaction, error) {
+func finalRevisionTransaction(c Contract, feePerByte types.Currency, w Wallet) ([]types.Transaction, error) {
 	const estTxnSize = 2048
-	return wm.finalizeSimpleTxn(types.Transaction{
+	return finalizeSimpleTxn(types.Transaction{
 		FileContractRevisions: []types.FileContractRevision{c.Revision},
 		TransactionSignatures: c.Signatures[:],
 		MinerFees:             []types.Currency{feePerByte.Mul64(estTxnSize)},
-	})
+	}, w)
 }
 
-// StorageProofTransaction ...
-func (wm *WalletManager) StorageProofTransaction(sp types.StorageProof, feePerByte types.Currency) ([]types.Transaction, error) {
+func storageProofTransaction(sp types.StorageProof, feePerByte types.Currency, w Wallet) ([]types.Transaction, error) {
 	// TODO: A transaction containing a storage proof is not allowed to contain
 	// any other type of output, which means we can't include a typical change
 	// output; instead, we must construct a parent transaction that creates an
@@ -108,11 +84,4 @@ func (wm *WalletManager) StorageProofTransaction(sp types.StorageProof, feePerBy
 	return []types.Transaction{{
 		StorageProofs: []types.StorageProof{sp},
 	}}, nil
-}
-
-// NewWalletManager returns an initialized wallet manager.
-func NewWalletManager(wallet Wallet) *WalletManager {
-	return &WalletManager{
-		wallet: wallet,
-	}
 }
