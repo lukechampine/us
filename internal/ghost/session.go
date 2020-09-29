@@ -200,7 +200,7 @@ func (h *Host) rpcRenewAndClearContract(s *session) error {
 	for i, v := range req.FinalValidProofValues {
 		finalRev.NewValidProofOutputs[i].Value = v
 	}
-	finalRev.NewMissedProofOutputs = append([]types.SiacoinOutput(nil), s.contract.rev.NewMissedProofOutputs...)
+	finalRev.NewMissedProofOutputs = append([]types.SiacoinOutput(nil), s.contract.rev.NewMissedProofOutputs[:2]...)
 	for i, v := range req.FinalMissedProofValues {
 		finalRev.NewMissedProofOutputs[i].Value = v
 	}
@@ -239,6 +239,17 @@ func (h *Host) rpcRenewAndClearContract(s *session) error {
 	if err := s.sess.ReadResponse(&renterSigs, 4096); err != nil {
 		return err
 	}
+	hostSigs := &renterhost.RPCRenewAndClearContractSignatures{
+		ContractSignatures:     nil,
+		RevisionSignature:      hostRevisionSig,
+		FinalRevisionSignature: ed25519hash.Sign(h.secretKey, renterhost.HashRevision(finalRev)),
+	}
+	if err := s.sess.WriteResponse(hostSigs, nil); err != nil {
+		return err
+	}
+	s.contract.rev = finalRev
+	s.contract.sigs[0].Signature = renterSigs.FinalRevisionSignature
+	s.contract.sigs[1].Signature = hostSigs.FinalRevisionSignature
 
 	h.contracts[initRevision.ParentID] = &hostContract{
 		rev: initRevision,
@@ -250,17 +261,7 @@ func (h *Host) rpcRenewAndClearContract(s *session) error {
 		sectorData:  h.contracts[s.contract.rev.ParentID].sectorData,
 		sectorRoots: h.contracts[s.contract.rev.ParentID].sectorRoots,
 	}
-	delete(h.contracts, s.contract.rev.ParentID)
-	s.contract.rev = finalRev
 
-	hostSigs := &renterhost.RPCRenewAndClearContractSignatures{
-		ContractSignatures:     nil,
-		RevisionSignature:      hostRevisionSig,
-		FinalRevisionSignature: ed25519hash.Sign(h.secretKey, renterhost.HashRevision(finalRev)),
-	}
-	if err := s.sess.WriteResponse(hostSigs, nil); err != nil {
-		return err
-	}
 	return nil
 }
 
