@@ -239,7 +239,7 @@ var (
 // AddShard implements MetaDB.
 func (db *BoltMetaDB) AddShard(s DBShard) (id uint64, err error) {
 	err = db.bdb.Update(func(tx *bolt.Tx) error {
-		id, err = tx.Bucket(bucketChunks).NextSequence()
+		id, err = tx.Bucket(bucketShards).NextSequence()
 		if err != nil {
 			return err
 		}
