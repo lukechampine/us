@@ -204,6 +204,16 @@ func (set *HostSet) AddHost(c renter.Contract) {
 	set.sessions[c.HostKey] = lh
 }
 
+// RemoveHost removes a host from the set, closing its Session if active.
+func (set *HostSet) RemoveHost(host hostdb.HostPublicKey) {
+	lh, ok := set.sessions[host]
+	if !ok {
+		return
+	}
+	lh.s.Close()
+	delete(set.sessions, host)
+}
+
 // NewHostSet creates an empty HostSet using the provided resolver and current
 // height.
 func NewHostSet(hkr renter.HostKeyResolver, currentHeight types.BlockHeight) *HostSet {
