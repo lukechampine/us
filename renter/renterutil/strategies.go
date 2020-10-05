@@ -2,6 +2,7 @@ package renterutil
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,12 +13,62 @@ import (
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renter"
+	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renterhost"
 )
 
+func uploadCtx(ctx context.Context, sess *proto.Session, shard *[renterhost.SectorSize]byte) (root crypto.Hash, err error) {
+	if ctx.Err() != nil {
+		return crypto.Hash{}, ctx.Err()
+	}
+	done := make(chan struct{})
+	go func() {
+		root, err = sess.Append(shard)
+		close(done)
+	}()
+	select {
+	case <-ctx.Done():
+		sess.Interrupt()
+		<-done // wait for goroutine to exit
+		err = context.Canceled
+	case <-done:
+	}
+	return
+}
+
+func downloadCtx(ctx context.Context, sess *proto.Session, key renter.KeySeed, shard DBShard, offset, length int64) (section []byte, err error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	done := make(chan struct{})
+	go func() {
+		var buf bytes.Buffer
+		err = (&renter.ShardDownloader{
+			Downloader: sess,
+			Key:        key,
+			Slices: []renter.SectorSlice{{
+				MerkleRoot:   shard.SectorRoot,
+				SegmentIndex: shard.Offset,
+				NumSegments:  merkle.SegmentsPerSector - shard.Offset, // inconsequential
+				Nonce:        shard.Nonce,
+			}},
+		}).CopySection(&buf, offset, length)
+		section = buf.Bytes()
+		close(done)
+	}()
+	select {
+	case <-ctx.Done():
+		sess.Interrupt()
+		<-done // wait for goroutine to exit
+		err = context.Canceled
+	case <-done:
+	}
+	return
+}
+
 // A ChunkUploader uploads shards, associating them with a given chunk.
 type ChunkUploader interface {
-	UploadChunk(db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error
+	UploadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error
 }
 
 // SerialChunkUploader uploads chunks to hosts one shard at a time.
@@ -26,7 +77,7 @@ type SerialChunkUploader struct {
 }
 
 // UploadChunk implements ChunkUploader.
-func (scu SerialChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
+func (scu SerialChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
 	// choose hosts, preserving any that at already present
 	newHosts := make(map[hostdb.HostPublicKey]struct{})
 	for h := range scu.Hosts.sessions {
@@ -73,7 +124,7 @@ func (scu SerialChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.KeyS
 		if err != nil {
 			return &HostError{hostKey, err}
 		}
-		root, err := h.Append(sector)
+		root, err := uploadCtx(ctx, h, sector)
 		scu.Hosts.release(hostKey)
 		if err != nil {
 			return &HostError{hostKey, err}
@@ -95,7 +146,7 @@ type ParallelChunkUploader struct {
 }
 
 // UploadChunk implements ChunkUploader.
-func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
+func (pcu ParallelChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
 	if len(shards) > len(pcu.Hosts.sessions) {
 		return errors.New("more shards than hosts")
 	}
@@ -162,7 +213,7 @@ func (pcu ParallelChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Ke
 					continue
 				}
 
-				root, err := sess.Append(req.shard)
+				root, err := uploadCtx(ctx, sess, req.shard)
 				pcu.Hosts.release(req.hostKey)
 				if err != nil {
 					respChan <- resp{req, 0, err}
@@ -264,7 +315,7 @@ type MinimumChunkUploader struct {
 }
 
 // UploadChunk implements ChunkUploader.
-func (mcu MinimumChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
+func (mcu MinimumChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
 	// choose hosts, preserving any that at already present
 	newHosts := make(map[hostdb.HostPublicKey]struct{})
 	for h := range mcu.Hosts.sessions {
@@ -312,7 +363,7 @@ func (mcu MinimumChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Key
 		if err != nil {
 			return &HostError{hostKey, err}
 		}
-		root, err := h.Append(sector)
+		root, err := uploadCtx(ctx, h, sector)
 		mcu.Hosts.release(hostKey)
 		if err != nil {
 			return &HostError{hostKey, err}
@@ -333,7 +384,7 @@ func (mcu MinimumChunkUploader) UploadChunk(db MetaDB, c DBChunk, key renter.Key
 
 // A ChunkDownloader downloads the shards of a chunk.
 type ChunkDownloader interface {
-	DownloadChunk(db MetaDB, c DBChunk, key renter.KeySeed, off, n int64) ([][]byte, error)
+	DownloadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, off, n int64) ([][]byte, error)
 }
 
 // SerialChunkDownloader downloads the shards of a chunk one at a time.
@@ -342,7 +393,7 @@ type SerialChunkDownloader struct {
 }
 
 // DownloadChunk implements ChunkDownloader.
-func (scd SerialChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, key renter.KeySeed, off, n int64) ([][]byte, error) {
+func (scd SerialChunkDownloader) DownloadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, off, n int64) ([][]byte, error) {
 	minChunkSize := merkle.SegmentSize * int64(c.MinShards)
 	shards := make([][]byte, len(c.Shards))
 	for i := range shards {
@@ -368,24 +419,13 @@ func (scd SerialChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, key renter.
 			errs = append(errs, &HostError{shard.HostKey, err})
 			continue
 		}
-
-		buf := bytes.NewBuffer(shards[i])
-		err = (&renter.ShardDownloader{
-			Downloader: sess,
-			Key:        key,
-			Slices: []renter.SectorSlice{{
-				MerkleRoot:   shard.SectorRoot,
-				SegmentIndex: shard.Offset,
-				NumSegments:  merkle.SegmentsPerSector - shard.Offset, // inconsequential
-				Nonce:        shard.Nonce,
-			}},
-		}).CopySection(buf, offset, length)
+		section, err := downloadCtx(ctx, sess, key, shard, offset, length)
 		scd.Hosts.release(shard.HostKey)
 		if err != nil {
 			errs = append(errs, &HostError{shard.HostKey, err})
 			continue
 		}
-		shards[i] = buf.Bytes()
+		shards[i] = section
 		if need--; need == 0 {
 			break
 		}
@@ -402,7 +442,7 @@ type ParallelChunkDownloader struct {
 }
 
 // DownloadChunk implements ChunkDownloader.
-func (pcd ParallelChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, key renter.KeySeed, off, n int64) ([][]byte, error) {
+func (pcd ParallelChunkDownloader) DownloadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, off, n int64) ([][]byte, error) {
 	minChunkSize := merkle.SegmentSize * int64(c.MinShards)
 	start := (off / minChunkSize) * merkle.SegmentSize
 	end := ((off + n) / minChunkSize) * merkle.SegmentSize
@@ -453,23 +493,13 @@ func (pcd ParallelChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, key rente
 					respChan <- resp{req.shardIndex, &HostError{shard.HostKey, err}}
 					continue
 				}
-				buf := bytes.NewBuffer(shards[req.shardIndex])
-				err = (&renter.ShardDownloader{
-					Downloader: sess,
-					Key:        key,
-					Slices: []renter.SectorSlice{{
-						MerkleRoot:   shard.SectorRoot,
-						SegmentIndex: shard.Offset,
-						NumSegments:  merkle.SegmentsPerSector - shard.Offset, // inconsequential
-						Nonce:        shard.Nonce,
-					}},
-				}).CopySection(buf, offset, length)
+				section, err := downloadCtx(ctx, sess, key, shard, offset, length)
 				pcd.Hosts.release(shard.HostKey)
 				if err != nil {
 					respChan <- resp{req.shardIndex, &HostError{shard.HostKey, err}}
 					continue
 				}
-				shards[req.shardIndex] = buf.Bytes()
+				shards[req.shardIndex] = section
 				respChan <- resp{req.shardIndex, nil}
 			}
 		}()
@@ -512,7 +542,7 @@ func (pcd ParallelChunkDownloader) DownloadChunk(db MetaDB, c DBChunk, key rente
 // A ChunkUpdater updates or replaces an existing chunk, returning the ID of the
 // new chunk.
 type ChunkUpdater interface {
-	UpdateChunk(db MetaDB, b DBBlob, c DBChunk) (uint64, error)
+	UpdateChunk(ctx context.Context, db MetaDB, b DBBlob, c DBChunk) (uint64, error)
 }
 
 // GenericChunkUpdater updates chunks by downloading them with D and reuploading
@@ -531,7 +561,7 @@ type GenericChunkUpdater struct {
 }
 
 // UpdateChunk implements ChunkUpdater.
-func (gcu GenericChunkUpdater) UpdateChunk(db MetaDB, b DBBlob, c DBChunk) (uint64, error) {
+func (gcu GenericChunkUpdater) UpdateChunk(ctx context.Context, db MetaDB, b DBBlob, c DBChunk) (uint64, error) {
 	if gcu.ShouldUpdate != nil {
 		shouldUpdate, err := gcu.ShouldUpdate(db, c)
 		if err != nil {
@@ -542,7 +572,7 @@ func (gcu GenericChunkUpdater) UpdateChunk(db MetaDB, b DBBlob, c DBChunk) (uint
 	}
 
 	// download
-	shards, err := gcu.D.DownloadChunk(db, c, b.Seed, 0, int64(c.Len))
+	shards, err := gcu.D.DownloadChunk(ctx, db, c, b.Seed, 0, int64(c.Len))
 	if err != nil {
 		return 0, err
 	}
@@ -575,7 +605,7 @@ func (gcu GenericChunkUpdater) UpdateChunk(db MetaDB, b DBBlob, c DBChunk) (uint
 			return 0, err
 		}
 	}
-	if err := gcu.U.UploadChunk(db, c, b.Seed, shards); err != nil {
+	if err := gcu.U.UploadChunk(ctx, db, c, b.Seed, shards); err != nil {
 		return 0, err
 	}
 	return c.ID, nil
@@ -623,7 +653,7 @@ func NewMigrationBlacklist(blacklist []hostdb.HostPublicKey) func(MetaDB, DBChun
 
 // A BlobUploader uploads a DBBlob.
 type BlobUploader interface {
-	UploadBlob(db MetaDB, b DBBlob, r io.Reader) error
+	UploadBlob(ctx context.Context, db MetaDB, b DBBlob, r io.Reader) error
 }
 
 // SerialBlobUploader uploads the chunks of a blob one at a time.
@@ -633,7 +663,7 @@ type SerialBlobUploader struct {
 }
 
 // UploadBlob implements BlobUploader.
-func (sbu SerialBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) error {
+func (sbu SerialBlobUploader) UploadBlob(ctx context.Context, db MetaDB, b DBBlob, r io.Reader) error {
 	rsc := renter.NewRSCode(sbu.M, sbu.N)
 	shards := make([][]byte, sbu.N)
 	for i := range shards {
@@ -656,7 +686,7 @@ func (sbu SerialBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) error
 		if err := db.AddBlob(b); err != nil {
 			return err
 		}
-		if err := sbu.U.UploadChunk(db, c, b.Seed, shards); err != nil {
+		if err := sbu.U.UploadChunk(ctx, db, c, b.Seed, shards); err != nil {
 			return err
 		}
 	}
@@ -671,7 +701,7 @@ type ParallelBlobUploader struct {
 }
 
 // UploadBlob implements BlobUploader.
-func (pbu ParallelBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) error {
+func (pbu ParallelBlobUploader) UploadBlob(ctx context.Context, db MetaDB, b DBBlob, r io.Reader) error {
 	// spawn p workers
 	type req struct {
 		c      DBChunk
@@ -686,7 +716,7 @@ func (pbu ParallelBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) err
 		go func() {
 			defer wg.Done()
 			for req := range reqChan {
-				respChan <- pbu.U.UploadChunk(db, req.c, b.Seed, req.shards)
+				respChan <- pbu.U.UploadChunk(ctx, db, req.c, b.Seed, req.shards)
 			}
 		}()
 	}
@@ -747,7 +777,7 @@ func (pbu ParallelBlobUploader) UploadBlob(db MetaDB, b DBBlob, r io.Reader) err
 
 // A BlobDownloader downloads blob data, writing it to w.
 type BlobDownloader interface {
-	DownloadBlob(db MetaDB, b DBBlob, w io.Writer, off, n int64) error
+	DownloadBlob(ctx context.Context, db MetaDB, b DBBlob, w io.Writer, off, n int64) error
 }
 
 // SerialBlobDownloader downloads the chunks of a blob one at a time.
@@ -756,7 +786,7 @@ type SerialBlobDownloader struct {
 }
 
 // DownloadBlob implements BlobDownloader.
-func (sbd SerialBlobDownloader) DownloadBlob(db MetaDB, b DBBlob, w io.Writer, off, n int64) error {
+func (sbd SerialBlobDownloader) DownloadBlob(ctx context.Context, db MetaDB, b DBBlob, w io.Writer, off, n int64) error {
 	for _, cid := range b.Chunks {
 		c, err := db.Chunk(cid)
 		if err != nil {
@@ -771,7 +801,7 @@ func (sbd SerialBlobDownloader) DownloadBlob(db MetaDB, b DBBlob, w io.Writer, o
 		if reqLen < 0 || reqLen > int64(c.Len) {
 			reqLen = int64(c.Len)
 		}
-		shards, err := sbd.D.DownloadChunk(db, c, b.Seed, off, reqLen)
+		shards, err := sbd.D.DownloadChunk(ctx, db, c, b.Seed, off, reqLen)
 		if err != nil {
 			return err
 		}
@@ -797,7 +827,7 @@ type ParallelBlobDownloader struct {
 }
 
 // DownloadBlob implements BlobDownloader.
-func (pbd ParallelBlobDownloader) DownloadBlob(db MetaDB, b DBBlob, w io.Writer, off, n int64) error {
+func (pbd ParallelBlobDownloader) DownloadBlob(ctx context.Context, db MetaDB, b DBBlob, w io.Writer, off, n int64) error {
 	// spawn workers
 	type req struct {
 		c      DBChunk
@@ -818,7 +848,7 @@ func (pbd ParallelBlobDownloader) DownloadBlob(db MetaDB, b DBBlob, w io.Writer,
 		go func() {
 			defer wg.Done()
 			for req := range reqChan {
-				shards, err := pbd.D.DownloadChunk(db, req.c, b.Seed, req.off, req.n)
+				shards, err := pbd.D.DownloadChunk(ctx, db, req.c, b.Seed, req.off, req.n)
 				if err != nil {
 					respChan <- resp{req.index, nil, err}
 					continue
@@ -915,7 +945,7 @@ func (pbd ParallelBlobDownloader) DownloadBlob(db MetaDB, b DBBlob, w io.Writer,
 
 // A BlobUpdater updates the contents of a blob.
 type BlobUpdater interface {
-	UpdateBlob(db MetaDB, b DBBlob) error
+	UpdateBlob(ctx context.Context, db MetaDB, b DBBlob) error
 }
 
 // SerialBlobUpdater uploads the chunks of a blob one at a time.
@@ -924,13 +954,13 @@ type SerialBlobUpdater struct {
 }
 
 // UpdateBlob implements BlobUpdater.
-func (sbu SerialBlobUpdater) UpdateBlob(db MetaDB, b DBBlob) error {
+func (sbu SerialBlobUpdater) UpdateBlob(ctx context.Context, db MetaDB, b DBBlob) error {
 	for i, cid := range b.Chunks {
 		c, err := db.Chunk(cid)
 		if err != nil {
 			return err
 		}
-		id, err := sbu.U.UpdateChunk(db, b, c)
+		id, err := sbu.U.UpdateChunk(ctx, db, b, c)
 		if err != nil {
 			return err
 		}
@@ -946,7 +976,7 @@ func (sbu SerialBlobUpdater) UpdateBlob(db MetaDB, b DBBlob) error {
 
 // A SectorDeleter deletes sectors from hosts.
 type SectorDeleter interface {
-	DeleteSectors(db MetaDB, sectors map[hostdb.HostPublicKey][]crypto.Hash) error
+	DeleteSectors(ctx context.Context, db MetaDB, sectors map[hostdb.HostPublicKey][]crypto.Hash) error
 }
 
 // SerialSectorDeleter deletes sectors from hosts, one host at a time.
@@ -955,13 +985,15 @@ type SerialSectorDeleter struct {
 }
 
 // DeleteSectors implements SectorDeleter.
-func (ssd SerialSectorDeleter) DeleteSectors(db MetaDB, sectors map[hostdb.HostPublicKey][]crypto.Hash) error {
+func (ssd SerialSectorDeleter) DeleteSectors(ctx context.Context, db MetaDB, sectors map[hostdb.HostPublicKey][]crypto.Hash) error {
 	for hostKey, roots := range sectors {
 		h, err := ssd.Hosts.acquire(hostKey)
 		if err != nil {
 			return err
 		}
-		err = h.DeleteSectors(roots) // TODO: no-op if roots already deleted
+		// TODO: no-op if roots already deleted
+		// TODO: respect ctx
+		err = h.DeleteSectors(roots)
 		ssd.Hosts.release(hostKey)
 		if err != nil {
 			return err
