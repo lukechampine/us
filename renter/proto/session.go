@@ -11,6 +11,7 @@ import (
 	"math/bits"
 	"net"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -80,6 +81,7 @@ type Session struct {
 	sess        *renterhost.Session
 	conn        *statsConn
 	appendRoots []crypto.Hash
+	interrupted int32
 
 	latency       time.Duration
 	readDeadline  time.Duration
@@ -99,7 +101,9 @@ func (s *Session) HostKey() hostdb.HostPublicKey { return s.host.PublicKey }
 func (s *Session) Revision() ContractRevision { return s.rev }
 
 // IsClosed returns whether the Session is closed.
-func (s *Session) IsClosed() bool { return s.sess.IsClosed() }
+func (s *Session) IsClosed() bool {
+	return atomic.LoadInt32(&s.interrupted) == 1 || s.sess.IsClosed()
+}
 
 // SetLatency sets the latency deadline for RPCs.
 func (s *Session) SetLatency(d time.Duration) { s.latency = d }
@@ -182,6 +186,14 @@ func (s *Session) sufficientFunds(price types.Currency) bool {
 	// multiply it by 5 just to be safe.
 	renewPrice := s.host.BaseRPCPrice.Mul64(5)
 	return s.rev.RenterFunds().Cmp(price.Add(renewPrice)) >= 0
+}
+
+// Interrupt immediately closes the Session. It may be called concurrently with
+// an active RPC; in this case, the RPC will return ErrInterrupted if it was
+// blocked on i/o.
+func (s *Session) Interrupt() {
+	atomic.SwapInt32(&s.interrupted, 1)
+	s.conn.Close()
 }
 
 // Lock calls the Lock RPC, locking the supplied contract and synchronizing its
@@ -745,6 +757,9 @@ func (s *Session) DeleteSectors(roots []crypto.Hash) error {
 // Close gracefully terminates the session and closes the underlying connection.
 func (s *Session) Close() (err error) {
 	defer wrapErr(&err, "Close")
+	if atomic.LoadInt32(&s.interrupted) == 1 {
+		return nil
+	}
 	return s.sess.Close()
 }
 
