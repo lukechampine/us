@@ -9,7 +9,7 @@ import (
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/encoding"
-	"gitlab.com/NebulousLabs/bolt"
+	bolt "go.etcd.io/bbolt"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 )
