@@ -189,6 +189,19 @@ func (ecm *ephemeralContractStore) AddContract(c host.Contract) error {
 	return nil
 }
 
+func (ecm *ephemeralContractStore) ReviseContract(rev types.FileContractRevision, renterSig, hostSig []byte) error {
+	ecm.mu.Lock()
+	defer ecm.mu.Unlock()
+	c, ok := ecm.contracts[rev.ID()]
+	if !ok {
+		return errors.New("no record of that contract")
+	}
+	c.Revision = rev
+	c.Signatures[0].Signature = renterSig
+	c.Signatures[1].Signature = hostSig
+	return nil
+}
+
 func (ecm *ephemeralContractStore) ApplyConsensusChange(reverted, applied host.ProcessedConsensusChange, ccid modules.ConsensusChangeID) error {
 	ecm.mu.Lock()
 	defer ecm.mu.Unlock()

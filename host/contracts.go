@@ -329,15 +329,7 @@ func finalizeRenewal(cb *contractBuilder, w Wallet, cs ContractStore, ss SectorS
 	}
 	if err := cs.AddContract(c); err != nil {
 		return err
-	}
-	oldContract, err := cs.Contract(cb.finalRevision.ID())
-	if err != nil {
-		return err
-	}
-	oldContract.Revision = cb.finalRevision
-	oldContract.Signatures[0].Signature = cb.renterRenewSigs.FinalRevisionSignature
-	oldContract.Signatures[1].Signature = cb.hostRenewSigs.FinalRevisionSignature
-	if err := cs.AddContract(oldContract); err != nil {
+	} else if err := cs.ReviseContract(cb.finalRevision, cb.renterRenewSigs.FinalRevisionSignature, cb.hostRenewSigs.FinalRevisionSignature); err != nil {
 		return err
 	} else if err := moveContractRoots(cb.finalRevision.ParentID, initRevision.ParentID, ss); err != nil {
 		return err
@@ -487,10 +479,6 @@ func validateFinalRevision(cb *contractBuilder, old types.FileContractRevision, 
 }
 
 func finalizeRevision(rev types.FileContractRevision, renterSig []byte, cs ContractStore) ([]byte, error) {
-	contract, err := cs.Contract(rev.ID())
-	if err != nil {
-		return nil, err
-	}
 	// verify the renter's signature
 	renterKey := rev.UnlockConditions.PublicKeys[0].Key
 	revisionHash := renterhost.HashRevision(rev)
@@ -499,10 +487,7 @@ func finalizeRevision(rev types.FileContractRevision, renterSig []byte, cs Contr
 	}
 	// add our signature and save the signed revision
 	hostSig := ed25519hash.Sign(cs.SigningKey(), revisionHash)
-	contract.Revision = rev
-	contract.Signatures[0].Signature = renterSig
-	contract.Signatures[1].Signature = hostSig
-	if err := cs.AddContract(contract); err != nil {
+	if err := cs.ReviseContract(rev, renterSig, hostSig); err != nil {
 		return nil, err
 	}
 	return hostSig, nil

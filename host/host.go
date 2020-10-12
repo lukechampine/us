@@ -17,6 +17,7 @@ type ContractStore interface {
 	SigningKey() ed25519.PrivateKey
 	Contract(id types.FileContractID) (Contract, error)
 	AddContract(c Contract) error
+	ReviseContract(rev types.FileContractRevision, renterSig, hostSig []byte) error
 	ActionableContracts() ([]Contract, error)
 	ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) error
 	ConsensusChangeID() modules.ConsensusChangeID
@@ -73,7 +74,7 @@ type Contract struct {
 }
 
 // ID is a helper method that returns the contract's ID.
-func (c Contract) ID() types.FileContractID {
+func (c *Contract) ID() types.FileContractID {
 	return c.Revision.ParentID
 }
 
