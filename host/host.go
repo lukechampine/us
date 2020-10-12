@@ -64,6 +64,7 @@ type Contract struct {
 	FinalizationConfirmed bool
 	ProofConfirmed        bool
 
+	FormationHeight    types.BlockHeight
 	FinalizationHeight types.BlockHeight
 	ProofHeight        types.BlockHeight
 	ProofSegment       uint64

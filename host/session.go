@@ -110,11 +110,18 @@ func (s *session) writeError(err error) error {
 	return err
 }
 
-func (s *session) haveContract(revisable bool) error {
-	if s.ctx.Contract.ParentID == (types.FileContractID{}) {
+func (s *session) haveContract() bool {
+	return s.ctx.Contract.ParentID != (types.FileContractID{})
+}
+
+func (s *session) haveRevisableContract(currentHeight types.BlockHeight) error {
+	switch {
+	case !s.haveContract():
 		return errors.New("no contract locked")
-	} else if revisable && s.ctx.Contract.NewRevisionNumber == math.MaxUint64 {
-		return errors.New("contract cannot be revised")
+	case s.ctx.Contract.NewRevisionNumber == math.MaxUint64:
+		return errors.New("contract has reached maximum revision number")
+	case currentHeight+s.ctx.Settings.WindowSize >= s.ctx.Contract.NewWindowEnd:
+		return errors.New("refusing further revisions because contract proof window is imminent")
 	}
 	return nil
 }
@@ -253,6 +260,10 @@ func (sh *SessionHandler) handleConn(conn net.Conn) (err error) {
 }
 
 func (sh *SessionHandler) rpcSettings(s *session) (err error) {
+	// NOTE: we "refresh" the settings here; each time the renter calls this
+	// RPC, we can potentially report new settings. The important thing is that
+	// we never use settings that differ from what the renter has seen.
+	s.ctx.Settings = sh.settings.Settings()
 	js, _ := json.Marshal(s.ctx.Settings)
 	return s.writeResponse(&renterhost.RPCSettingsResponse{
 		Settings: js,
@@ -304,7 +315,7 @@ func (sh *SessionHandler) rpcRenewAndClearContract(s *session) error {
 	if err := s.readRequest(&req); err != nil {
 		return err
 	}
-	if err := s.haveContract(true); err != nil {
+	if err := s.haveRevisableContract(sh.contracts.Height()); err != nil {
 		return s.writeError(err)
 	}
 
@@ -351,7 +362,7 @@ func (sh *SessionHandler) rpcLock(s *session) error {
 	if err := s.readRequest(&req); err != nil {
 		return err
 	}
-	if s.haveContract(false) == nil {
+	if s.haveContract() {
 		err := errors.New("another contract is already locked")
 		return s.writeError(err)
 	}
@@ -359,14 +370,11 @@ func (sh *SessionHandler) rpcLock(s *session) error {
 	contract, err := sh.contracts.Contract(req.ContractID)
 	if err != nil || !s.sess.VerifyChallenge(req.Signature, contract.RenterKey().Key) {
 		return s.writeError(errors.New("bad signature or no such contract"))
+	} else if contract.FatalError != nil {
+		return s.writeError(contract.FatalError) // TODO: hide this error from renter?
 	} else if !sh.lockContract(req.ContractID, time.Duration(req.Timeout)*time.Millisecond) {
 		return s.writeError(errors.New("timed out waiting to lock contract"))
 	}
-
-	// TODO
-	// if !sh.tpool.SuspendRevisionSubmission(req.ContractID) {
-	// 	return s.writeError(errors.New("no longer accepting revisions for that contract"))
-	// }
 	s.ctx.Contract = contract.Revision
 
 	var newChallenge [16]byte
@@ -381,11 +389,10 @@ func (sh *SessionHandler) rpcLock(s *session) error {
 }
 
 func (sh *SessionHandler) rpcUnlock(s *session) error {
-	if err := s.haveContract(false); err != nil {
-		return err // no contract to unlock
+	if !s.haveContract() {
+		return nil // no contract to unlock
 	}
 	sh.unlockContract(s.ctx.Contract.ID())
-	// TODO: sh.tpool.ResumeRevisionSubmission(s.ctx.Contract.ID())
 	s.ctx.Contract = types.FileContractRevision{}
 	return nil
 }
@@ -404,7 +411,7 @@ func (sh *SessionHandler) rpcWrite(s *session) error {
 		}
 	}
 
-	if err := s.haveContract(true); err != nil {
+	if err := s.haveRevisableContract(sh.contracts.Height()); err != nil {
 		return s.writeError(err)
 	}
 
@@ -466,7 +473,7 @@ func (sh *SessionHandler) rpcWrite(s *session) error {
 	var resp renterhost.RPCWriteResponse
 	if err := applyModifications(s.ctx.Contract.ID(), req.Actions, sh.sectors); err != nil {
 		return s.writeError(err)
-	} else if resp.Signature, err = finalizeRevision(newRevision, sigResponse.Signature, sh.contracts); err != nil {
+	} else if resp.Signature, err = signRevision(newRevision, sigResponse.Signature, sh.contracts); err != nil {
 		return s.writeError(err)
 	} else if err := s.writeResponse(&resp); err != nil {
 		return err
@@ -480,7 +487,7 @@ func (sh *SessionHandler) rpcSectorRoots(s *session) error {
 	if err := s.readRequest(&req); err != nil {
 		return err
 	}
-	if err := s.haveContract(true); err != nil {
+	if err := s.haveRevisableContract(sh.contracts.Height()); err != nil {
 		return s.writeError(err)
 	}
 
@@ -504,7 +511,7 @@ func (sh *SessionHandler) rpcSectorRoots(s *session) error {
 	}
 
 	// commit the new revision
-	resp.Signature, err = finalizeRevision(newRevision, req.Signature, sh.contracts)
+	resp.Signature, err = signRevision(newRevision, req.Signature, sh.contracts)
 	if err != nil {
 		return s.writeError(err)
 	} else if err := s.writeResponse(resp); err != nil {
@@ -536,7 +543,7 @@ func (sh *SessionHandler) rpcRead(s *session) error {
 		}
 	}()
 
-	if err := s.haveContract(true); err != nil {
+	if err := s.haveRevisableContract(sh.contracts.Height()); err != nil {
 		s.writeError(err)
 		<-stopSignal
 		return err
@@ -575,7 +582,7 @@ func (sh *SessionHandler) rpcRead(s *session) error {
 	}
 
 	// commit the new revision
-	hostSig, err := finalizeRevision(newRevision, req.Signature, sh.contracts)
+	hostSig, err := signRevision(newRevision, req.Signature, sh.contracts)
 	if err != nil {
 		return s.writeError(err)
 	}

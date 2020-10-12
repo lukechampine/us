@@ -177,6 +177,7 @@ func finalizeContract(cb *contractBuilder, w Wallet, cs ContractStore) (err erro
 			cb.hostSigs.RevisionSignature,
 		},
 		FormationSet:       append(cb.parents, cb.transaction),
+		FormationHeight:    cb.currentHeight,
 		FinalizationHeight: cb.contract.WindowStart - cb.settings.WindowSize,
 		ProofHeight:        cb.contract.WindowStart - 1,
 	}
@@ -324,6 +325,7 @@ func finalizeRenewal(cb *contractBuilder, w Wallet, cs ContractStore, ss SectorS
 			cb.hostRenewSigs.RevisionSignature,
 		},
 		FormationSet:       append(cb.parents, cb.transaction),
+		FormationHeight:    cb.currentHeight,
 		FinalizationHeight: cb.contract.WindowStart - cb.settings.WindowSize,
 		ProofHeight:        cb.contract.WindowStart - 1,
 	}
@@ -478,12 +480,12 @@ func validateFinalRevision(cb *contractBuilder, old types.FileContractRevision, 
 	return nil
 }
 
-func finalizeRevision(rev types.FileContractRevision, renterSig []byte, cs ContractStore) ([]byte, error) {
+func signRevision(rev types.FileContractRevision, renterSig []byte, cs ContractStore) ([]byte, error) {
 	// verify the renter's signature
 	renterKey := rev.UnlockConditions.PublicKeys[0].Key
 	revisionHash := renterhost.HashRevision(rev)
 	if !ed25519hash.Verify(renterKey, revisionHash, renterSig) {
-		return nil, errors.New("renter's final revision signature is invalid")
+		return nil, errors.New("renter's revision signature is invalid")
 	}
 	// add our signature and save the signed revision
 	hostSig := ed25519hash.Sign(cs.SigningKey(), revisionHash)

@@ -253,6 +253,14 @@ func (ecm *ephemeralContractStore) ApplyConsensusChange(reverted, applied host.P
 		}
 	}
 
+	// mark contracts as failed if their formation transaction is not confirmed
+	// within 6 blocks
+	for _, c := range ecm.contracts {
+		if c.FatalError == nil && !c.FormationConfirmed && ecm.height > c.FormationHeight+6 {
+			c.FatalError = errors.New("contract formation transaction was not confirmed on blockchain")
+		}
+	}
+
 	ecm.ccid = ccid
 	return nil
 }
