@@ -467,7 +467,7 @@ type (
 type Specifier [16]byte
 
 func (s Specifier) String() string {
-	return string(bytes.Trim(s[:], string(0)))
+	return string(bytes.Trim(s[:], "\x00"))
 }
 
 func newSpecifier(str string) Specifier {
