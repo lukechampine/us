@@ -38,10 +38,10 @@ func readSectors(id types.FileContractID, offset, length uint64, ss SectorStore)
 	}, nil
 }
 
-func considerModifications(id types.FileContractID, actions []renterhost.RPCWriteAction, proof bool, ss SectorStore) (*renterhost.RPCWriteMerkleProof, error) {
+func considerModifications(id types.FileContractID, actions []renterhost.RPCWriteAction, proof bool, ss SectorStore) (*renterhost.RPCWriteMerkleProof, func() error, error) {
 	sectorRoots, err := ss.ContractRoots(id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	newRoots := append([]crypto.Hash(nil), sectorRoots...)
 	var sectorsRemoved []crypto.Hash
@@ -68,7 +68,7 @@ func considerModifications(id types.FileContractID, actions []renterhost.RPCWrit
 			sectorIndex, offset := action.A, action.B
 			sector, err := ss.Sector(newRoots[sectorIndex])
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			copy(sector[offset:], action.Data)
 			newRoot := merkle.SectorRoot(sector)
@@ -83,64 +83,26 @@ func considerModifications(id types.FileContractID, actions []renterhost.RPCWrit
 	if proof {
 		merkleResp.OldSubtreeHashes, merkleResp.OldLeafHashes = merkle.BuildDiffProof(actions, sectorRoots)
 	}
-	return merkleResp, nil
-}
 
-func applyModifications(id types.FileContractID, actions []renterhost.RPCWriteAction, ss SectorStore) error {
-	sectorRoots, err := ss.ContractRoots(id)
-	if err != nil {
-		return err
-	}
-	newRoots := append([]crypto.Hash(nil), sectorRoots...)
-	var sectorsRemoved []crypto.Hash
-	gainedSectorData := make(map[crypto.Hash]*[renterhost.SectorSize]byte)
-	for _, action := range actions {
-		switch action.Type {
-		case renterhost.RPCWriteActionAppend:
-			var sector [renterhost.SectorSize]byte
-			copy(sector[:], action.Data)
-			newRoot := merkle.SectorRoot(&sector)
-			newRoots = append(newRoots, newRoot)
-			gainedSectorData[newRoot] = &sector
-
-		case renterhost.RPCWriteActionTrim:
-			numSectors := action.A
-			sectorsRemoved = append(sectorsRemoved, newRoots[uint64(len(newRoots))-numSectors:]...)
-			newRoots = newRoots[:uint64(len(newRoots))-numSectors]
-
-		case renterhost.RPCWriteActionSwap:
-			i, j := action.A, action.B
-			newRoots[i], newRoots[j] = newRoots[j], newRoots[i]
-
-		case renterhost.RPCWriteActionUpdate:
-			sectorIndex, offset := action.A, action.B
-			sector, err := ss.Sector(newRoots[sectorIndex])
-			if err != nil {
+	apply := func() error {
+		if err := ss.SetContractRoots(id, newRoots); err != nil {
+			return err
+		}
+		for _, root := range sectorsRemoved {
+			if err := ss.DeleteSector(root); err != nil {
 				return err
 			}
-			copy(sector[offset:], action.Data)
-			newRoot := merkle.SectorRoot(sector)
-			sectorsRemoved = append(sectorsRemoved, newRoots[sectorIndex])
-			gainedSectorData[newRoot] = sector
-			newRoots[sectorIndex] = newRoot
+			delete(gainedSectorData, root)
 		}
+		for root, sector := range gainedSectorData {
+			if err := ss.AddSector(root, sector); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
-	if err := ss.SetContractRoots(id, newRoots); err != nil {
-		return err
-	}
-	for _, root := range sectorsRemoved {
-		if err := ss.DeleteSector(root); err != nil {
-			return err
-		}
-		delete(gainedSectorData, root)
-	}
-	for root, sector := range gainedSectorData {
-		if err := ss.AddSector(root, sector); err != nil {
-			return err
-		}
-	}
-	return nil
+	return merkleResp, apply, nil
 }
 
 func moveContractRoots(from, to types.FileContractID, ss SectorStore) error {

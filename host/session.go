@@ -422,7 +422,7 @@ func (sh *SessionHandler) rpcWrite(s *session) error {
 	}
 
 	// compute new Merkle root (and proof, if requested)
-	merkleResp, err := considerModifications(s.ctx.Contract.ID(), req.Actions, req.MerkleProof, sh.sectors)
+	merkleResp, applyModifications, err := considerModifications(s.ctx.Contract.ID(), req.Actions, req.MerkleProof, sh.sectors)
 	if err != nil {
 		return s.writeError(err)
 	}
@@ -471,7 +471,7 @@ func (sh *SessionHandler) rpcWrite(s *session) error {
 
 	// Apply the modifications and sign the revision.
 	var resp renterhost.RPCWriteResponse
-	if err := applyModifications(s.ctx.Contract.ID(), req.Actions, sh.sectors); err != nil {
+	if err := applyModifications(); err != nil {
 		return s.writeError(err)
 	} else if resp.Signature, err = signRevision(newRevision, sigResponse.Signature, sh.contracts); err != nil {
 		return s.writeError(err)
