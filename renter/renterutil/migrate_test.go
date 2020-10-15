@@ -88,11 +88,16 @@ func TestMigrate(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// close all hs1 sessions
+	if err := hs1.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	// create fs2 with hs2
 	fs2 := NewFileSystem(os.TempDir(), hs2)
 	defer fs2.Close()
 
-	// close one of the non-hs2 hosts; this ensures that we'll download from the new host
+	// remove one of the non-hs2 hosts; this ensures that we'll download from the new host
 	for hostKey, lh := range fs1.hosts.sessions {
 		if fs2.hosts.HasHost(hostKey) {
 			lh.s.Close()
