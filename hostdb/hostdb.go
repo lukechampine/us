@@ -95,6 +95,11 @@ type HostSettings struct {
 	UploadBandwidthPrice   types.Currency     `json:"uploadBandwidthPrice"`
 	RevisionNumber         uint64             `json:"revisionNumber"`
 	Version                string             `json:"version"`
+
+	// RHP3 specific fields
+	EphemeralAccountExpiry     time.Duration  `json:"ephemeralAccountExpiry"`
+	MaxEphemeralAccountBalance types.Currency `json:"maxEphemeralAccountBalance"`
+	SiaMuxPort                 string         `json:"siaMuxPort"`
 }
 
 // ScannedHost groups a host's settings with its public key and other scan-
