@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"log"
 	"net"
+	"sync"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
@@ -23,6 +24,7 @@ type hostContract struct {
 	renterKey     types.SiaPublicKey
 	sectorRoots   []crypto.Hash
 	sectorData    map[crypto.Hash][renterhost.SectorSize]byte
+	mu            sync.Mutex
 }
 
 type Host struct {

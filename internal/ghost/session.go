@@ -40,6 +40,12 @@ func (h *Host) handleConn(conn net.Conn) error {
 		sess: hs,
 		conn: conn,
 	}
+	defer func() {
+		if s.contract != nil {
+			s.contract.mu.Unlock()
+			s.contract = nil
+		}
+	}()
 
 	rpcs := map[renterhost.Specifier]func(*session) error{
 		renterhost.RPCFormContractID:       h.rpcFormContract,
@@ -278,6 +284,7 @@ func (h *Host) rpcLock(s *session) error {
 		s.sess.WriteResponse(nil, err)
 		return err
 	}
+	contract.mu.Lock()
 	s.contract = contract
 
 	var newChallenge [16]byte
@@ -293,6 +300,9 @@ func (h *Host) rpcLock(s *session) error {
 }
 
 func (h *Host) rpcUnlock(s *session) error {
+	if s.contract != nil {
+		s.contract.mu.Unlock()
+	}
 	s.contract = nil
 	return nil
 }
@@ -565,31 +575,20 @@ func (h *Host) rpcRead(s *session) error {
 		return err
 	}
 
-	// As soon as we finish reading the request, we must begin listening for
-	// RPCLoopReadStop, which may arrive at any time, and must arrive before the
-	// RPC is considered complete.
-	stopSignal := make(chan error, 1)
-	go func() {
-		var id renterhost.Specifier
-		err := s.sess.ReadResponse(&id, 4096)
-		if err != nil {
-			stopSignal <- err
-		} else if id != renterhost.RPCReadStop {
-			stopSignal <- errors.New("expected 'stop' from renter, got " + id.String())
-		} else {
-			stopSignal <- nil
-		}
-	}()
+	// Make sure we read RPCLoopReadStop before returning.
+	//
+	// NOTE: technically, we should be listening for RPCLoopReadStop
+	// asynchronously, but currently this is not possible because
+	// renterhost.Session is not thread-safe.
+	defer s.sess.ReadResponse(new(renterhost.Specifier), 4096)
 
 	if s.contract == nil {
 		err := errors.New("no contract locked")
 		s.sess.WriteResponse(nil, err)
-		<-stopSignal
 		return err
 	} else if s.contract.rev.NewRevisionNumber == math.MaxUint64 {
 		err := errors.New("contract cannot be revised")
 		s.sess.WriteResponse(nil, err)
-		<-stopSignal
 		return err
 	}
 
@@ -682,15 +681,6 @@ func (h *Host) rpcRead(s *session) error {
 			Data:        data,
 			MerkleProof: proof,
 		}
-		select {
-		case err := <-stopSignal:
-			if err != nil {
-				return err
-			}
-			resp.Signature = hostSig
-			return s.sess.WriteResponse(resp, nil)
-		default:
-		}
 		if i == len(req.Sections)-1 {
 			resp.Signature = hostSig
 		}
@@ -698,6 +688,5 @@ func (h *Host) rpcRead(s *session) error {
 			return err
 		}
 	}
-	// The stop signal must arrive before RPC is complete.
-	return <-stopSignal
+	return nil
 }
