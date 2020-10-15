@@ -36,11 +36,14 @@ var DefaultSettings = hostdb.HostSettings{
 }
 
 // FreeSettings are the cheapest possible ghost settings.
+//
+// NOTE: it is not possible for contracts to be completely free, because
+// consensus rules disallow FileContracts whose Payout field is 0.
 var FreeSettings = hostdb.HostSettings{
 	AcceptingContracts:     true,
 	MaxDuration:            144,
-	MaxCollateral:          types.NewCurrency64(1),
-	ContractPrice:          types.ZeroCurrency,
+	MaxCollateral:          types.ZeroCurrency,
+	ContractPrice:          types.NewCurrency64(1),
 	StoragePrice:           types.ZeroCurrency,
 	UploadBandwidthPrice:   types.ZeroCurrency,
 	DownloadBandwidthPrice: types.ZeroCurrency,

@@ -122,8 +122,6 @@ func validateFormContract(ctx *SessionContext, cb *contractBuilder, cs ContractS
 		return errors.New("valid/missed output values do not sum to contract payout")
 	}
 
-	// TODO: cs.ApproveContract(ctx)
-
 	return nil
 }
 
