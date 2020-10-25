@@ -58,14 +58,6 @@ func finalizeSimpleTxn(txn types.Transaction, w Wallet) ([]types.Transaction, er
 	return []types.Transaction{txn}, nil
 }
 
-func announcementTransaction(announcement []byte, feePerByte types.Currency, w Wallet) ([]types.Transaction, error) {
-	const estTxnSize = 2048
-	return finalizeSimpleTxn(types.Transaction{
-		ArbitraryData: [][]byte{announcement},
-		MinerFees:     []types.Currency{feePerByte.Mul64(estTxnSize)},
-	}, w)
-}
-
 func finalRevisionTransaction(c Contract, feePerByte types.Currency, w Wallet) ([]types.Transaction, error) {
 	const estTxnSize = 2048
 	return finalizeSimpleTxn(types.Transaction{

@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 	"testing"
@@ -99,11 +100,35 @@ func New(tb testing.TB, settings hostdb.HostSettings, wm host.Wallet, tpool host
 	}
 	cs := newEphemeralContractStore(key)
 	ss := newEphemeralSectorStore()
-	sm := host.NewSessionHandler(key, (*constantHostSettings)(&h.Settings), cs, ss, wm, tpool, nopMetricsRecorder{})
-	go sm.Listen(l)
+	sh := host.NewSessionHandler(key, (*constantHostSettings)(&h.Settings), cs, ss, wm, tpool, nopMetricsRecorder{})
+	go listen(sh, l)
 	h.cw = host.NewChainWatcher(tpool, wm, cs, ss)
-	go h.cw.Watch()
 	return h
+}
+
+const debug = false
+
+func debugLn(args ...interface{}) {
+	if debug {
+		log.Println(args...)
+	}
+}
+
+func listen(sh *host.SessionHandler, l net.Listener) {
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			debugLn("accept error:", err)
+			return
+		}
+		go func() {
+			defer conn.Close()
+			err := sh.Serve(conn)
+			if err != nil {
+				debugLn("rpc error:", err)
+			}
+		}()
+	}
 }
 
 type constantHostSettings hostdb.HostSettings

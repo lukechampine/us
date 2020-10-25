@@ -59,7 +59,7 @@ type contractBuilder struct {
 	hostRenewSigs   renterhost.RPCRenewAndClearContractSignatures
 }
 
-func validateFormContract(ctx *SessionContext, cb *contractBuilder, cs ContractStore) error {
+func validateFormContract(cb *contractBuilder) error {
 	// parent transactions should be StandaloneValid
 	for _, txn := range cb.parents {
 		if err := txn.StandaloneValid(cb.currentHeight); err != nil {
@@ -186,7 +186,7 @@ func finalizeContract(cb *contractBuilder, w Wallet, cs ContractStore) (err erro
 	return nil
 }
 
-func validateRenewContract(cb *contractBuilder, ctx *SessionContext, old types.FileContractRevision, cs ContractStore) error {
+func validateRenewContract(cb *contractBuilder, old types.FileContractRevision) error {
 	// parent transactions should be StandaloneValid
 	for _, txn := range cb.parents {
 		if err := txn.StandaloneValid(cb.currentHeight); err != nil {
@@ -256,8 +256,6 @@ func validateRenewContract(cb *contractBuilder, ctx *SessionContext, old types.F
 	} else if expectedHostMissedOutput := fc.ValidHostPayout().Sub(expectedVoidOutput); fc.MissedHostOutput().Value.Cmp(expectedHostMissedOutput) < 0 {
 		return errors.New("insufficient missed host payout")
 	}
-
-	// TODO: cs.ApproveRenewal(ctx)
 
 	return nil
 }

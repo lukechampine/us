@@ -151,7 +151,7 @@ func (s *session) recordMetricRPC(id renterhost.Specifier) (recordEnd func(error
 	}
 }
 
-// SessionHandler ...
+// A SessionHandler serves renter-host protocol sessions.
 type SessionHandler struct {
 	secretKey ed25519.PrivateKey
 	settings  SettingsReporter
@@ -172,13 +172,8 @@ type SessionHandler struct {
 
 func (sh *SessionHandler) lockContract(id types.FileContractID, timeout time.Duration) bool {
 	// wake up the cond when the timeout expires
-	timedOut := false
-	timer := time.AfterFunc(timeout, func() {
-		sh.lockCond.L.Lock()
-		timedOut = true
-		sh.lockCond.L.Unlock()
-		sh.lockCond.Broadcast()
-	})
+	start := time.Now()
+	timer := time.AfterFunc(timeout, sh.lockCond.Broadcast)
 	defer timer.Stop()
 
 	sh.lockCond.L.Lock()
@@ -188,7 +183,7 @@ func (sh *SessionHandler) lockContract(id types.FileContractID, timeout time.Dur
 			// acquire the lock
 			sh.locks[id] = struct{}{}
 			return true
-		} else if timedOut {
+		} else if time.Since(start) >= timeout {
 			return false
 		}
 		// another session is holding the lock, but we haven't timed out yet
@@ -199,34 +194,19 @@ func (sh *SessionHandler) lockContract(id types.FileContractID, timeout time.Dur
 func (sh *SessionHandler) unlockContract(id types.FileContractID) {
 	sh.lockCond.L.Lock()
 	delete(sh.locks, id)
-	sh.lockCond.L.Unlock()
 	sh.lockCond.Broadcast()
+	sh.lockCond.L.Unlock()
 }
 
-// Listen ...
-func (sh *SessionHandler) Listen(l net.Listener) error {
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			return err
-		}
-		go func() {
-			defer conn.Close()
-			err := sh.handleConn(conn)
-			if err != nil {
-				println("rpc error:", err.Error()) // TODO
-			}
-		}()
-	}
-}
-
-func (sh *SessionHandler) handleConn(conn net.Conn) (err error) {
+// Serve serves a renter-host protocol session on the provided connection.
+func (sh *SessionHandler) Serve(conn net.Conn) (err error) {
 	s := &session{
 		ctx: SessionContext{
-			UID:       frand.Entropy128(),
-			RenterIP:  conn.RemoteAddr().String(),
-			Timestamp: time.Now(),
-			Settings:  sh.settings.Settings(),
+			UID:         frand.Entropy128(),
+			RenterIP:    conn.RemoteAddr().String(),
+			Timestamp:   time.Now(),
+			BlockHeight: sh.contracts.Height(),
+			Settings:    sh.settings.Settings(),
 		},
 		conn:    statsConn{Conn: conn},
 		metrics: sh.metrics,
@@ -241,8 +221,7 @@ func (sh *SessionHandler) handleConn(conn net.Conn) (err error) {
 	defer func() { sh.unlockContract(s.ctx.Contract.ID()) }()
 	for {
 		s.extendDeadline(time.Hour)
-		id, err := s.sess.ReadID()
-		if errors.Cause(err) == renterhost.ErrRenterClosed {
+		if id, err := s.sess.ReadID(); errors.Cause(err) == renterhost.ErrRenterClosed {
 			return nil
 		} else if err != nil {
 			return errors.Wrap(err, "could not read RPC ID")
@@ -260,9 +239,9 @@ func (sh *SessionHandler) handleConn(conn net.Conn) (err error) {
 }
 
 func (sh *SessionHandler) rpcSettings(s *session) (err error) {
-	// NOTE: we "refresh" the settings here; each time the renter calls this
-	// RPC, we can potentially report new settings. The important thing is that
-	// we never use settings that differ from what the renter has seen.
+	// NOTE: each time the renter calls this RPC, we can potentially report new
+	// settings. That's fine; the important thing is that we never use settings
+	// that differ from what the renter has seen.
 	s.ctx.Settings = sh.settings.Settings()
 	js, _ := json.Marshal(s.ctx.Settings)
 	return s.writeResponse(&renterhost.RPCSettingsResponse{
@@ -289,10 +268,10 @@ func (sh *SessionHandler) rpcFormContract(s *session) error {
 			Key:       ed25519hash.ExtractPublicKey(sh.contracts.SigningKey()),
 		},
 		settings:      s.ctx.Settings,
-		currentHeight: sh.contracts.Height(),
+		currentHeight: s.ctx.BlockHeight,
 		minFee:        minFee(sh.tpool),
 	}
-	if err := validateFormContract(&s.ctx, &cb, sh.contracts); err != nil {
+	if err := validateFormContract(&cb); err != nil {
 		return s.writeError(err)
 	} else if err := fundContractTransaction(&cb, sh.wallet); err != nil {
 		return s.writeError(err)
@@ -338,7 +317,7 @@ func (sh *SessionHandler) rpcRenewAndClearContract(s *session) error {
 	}
 	if err := validateFinalRevision(&cb, s.ctx.Contract, req.FinalValidProofValues, req.FinalMissedProofValues); err != nil {
 		return s.writeError(err)
-	} else if err := validateRenewContract(&cb, &s.ctx, s.ctx.Contract, sh.contracts); err != nil {
+	} else if err := validateRenewContract(&cb, s.ctx.Contract); err != nil {
 		return s.writeError(err)
 	} else if err := fundRenewalTransaction(&cb, sh.wallet); err != nil {
 		return s.writeError(err)

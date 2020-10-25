@@ -35,7 +35,8 @@ func minFee(tp TransactionPool) types.Currency {
 	return max
 }
 
-// ChainWatcher ...
+// A ChainWatcher watches the blockchain and submits necessary contract
+// transactions, including formations, renewals, revisions, and storage proofs.
 type ChainWatcher struct {
 	tpool     TransactionPool
 	wallet    Wallet
@@ -46,7 +47,8 @@ type ChainWatcher struct {
 	stopChan  chan struct{}
 }
 
-// ProcessedConsensusChange ...
+// ProcessedConsensusChange is a filtered version of modules.ConsensusChange,
+// containing only the information relevant to contract transactions.
 type ProcessedConsensusChange struct {
 	Contracts []types.FileContractID
 	Revisions []types.FileContractID
@@ -54,7 +56,7 @@ type ProcessedConsensusChange struct {
 	BlockIDs  []types.BlockID
 }
 
-// ProcessConsensusChange ...
+// ProcessConsensusChange implements modules.ConsensusSetSubscriber.
 func (cw *ChainWatcher) ProcessConsensusChange(cc modules.ConsensusChange) {
 	process := func(blocks []types.Block) (pcc ProcessedConsensusChange) {
 		for _, block := range blocks {
@@ -85,9 +87,7 @@ func (cw *ChainWatcher) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 }
 
-// StorageProofSegment ...
-//
-// TODO: fuzz this
+// StorageProofSegment returns the
 func StorageProofSegment(bid types.BlockID, fcid types.FileContractID, filesize uint64) uint64 {
 	if filesize == 0 {
 		return 0
@@ -103,17 +103,6 @@ func StorageProofSegment(bid types.BlockID, fcid types.FileContractID, filesize 
 	}
 	return r
 }
-
-// SuspendRevisionSubmission prevents the ChainWatcher from submitting the final
-// revision transaction for the specified contract until
-// ResumeRevisionSubmission is called.
-func (cw *ChainWatcher) SuspendRevisionSubmission(id types.FileContractID) bool {
-	return true
-}
-
-// ResumeRevisionSubmission lifts the suspension preventing the ChainWatcher
-// from submitting the final revision transaction for the specified contract.
-func (cw *ChainWatcher) ResumeRevisionSubmission(id types.FileContractID) {}
 
 func (cw *ChainWatcher) submitTransaction(txns []types.Transaction) error {
 	err := cw.tpool.AcceptTransactionSet(txns)
@@ -145,8 +134,8 @@ func (cw *ChainWatcher) proveContract(c Contract) ([]types.Transaction, error) {
 	return storageProofTransaction(sp, feePerByte, cw.wallet)
 }
 
-// Watch ...
-func (cw *ChainWatcher) Watch() {
+func (cw *ChainWatcher) watchLoop() {
+	defer close(cw.stopChan)
 	for range cw.watchChan {
 		contracts, err := cw.contracts.ActionableContracts()
 		if err != nil {
@@ -207,7 +196,6 @@ func (cw *ChainWatcher) Watch() {
 			}
 		}
 	}
-	close(cw.stopChan)
 }
 
 // Close shuts down the ChainWatcher.
@@ -219,7 +207,7 @@ func (cw *ChainWatcher) Close() error {
 
 // NewChainWatcher returns an initialized ChainWatcher.
 func NewChainWatcher(tp TransactionPool, w Wallet, cs ContractStore, ss SectorStore) *ChainWatcher {
-	return &ChainWatcher{
+	cw := &ChainWatcher{
 		tpool:     tp,
 		wallet:    w,
 		contracts: cs,
@@ -227,4 +215,6 @@ func NewChainWatcher(tp TransactionPool, w Wallet, cs ContractStore, ss SectorSt
 		watchChan: make(chan struct{}, 1),
 		stopChan:  make(chan struct{}),
 	}
+	go cw.watchLoop()
+	return cw
 }
