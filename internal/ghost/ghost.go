@@ -188,7 +188,7 @@ func (ecm *ephemeralContractStore) SigningKey() ed25519.PrivateKey {
 	return ecm.key
 }
 
-func (ecm *ephemeralContractStore) ActionableContracts() ([]host.Contract, error) {
+func (ecm *ephemeralContractStore) ActionableContracts() []host.Contract {
 	ecm.mu.Lock()
 	defer ecm.mu.Unlock()
 	var contracts []host.Contract
@@ -197,7 +197,7 @@ func (ecm *ephemeralContractStore) ActionableContracts() ([]host.Contract, error
 			contracts = append(contracts, *c)
 		}
 	}
-	return contracts, nil
+	return contracts
 }
 
 func (ecm *ephemeralContractStore) Contract(id types.FileContractID) (host.Contract, error) {
@@ -228,6 +228,16 @@ func (ecm *ephemeralContractStore) ReviseContract(rev types.FileContractRevision
 	c.Signatures[0].Signature = renterSig
 	c.Signatures[1].Signature = hostSig
 	return nil
+}
+
+func (ecm *ephemeralContractStore) UpdateContractTransactions(id types.FileContractID, final, proof []types.Transaction, err error) {
+	ecm.mu.Lock()
+	defer ecm.mu.Unlock()
+	if c, ok := ecm.contracts[id]; ok {
+		c.FinalizationSet = final
+		c.ProofSet = proof
+		c.FatalError = err
+	}
 }
 
 func (ecm *ephemeralContractStore) ApplyConsensusChange(reverted, applied host.ProcessedConsensusChange, ccid modules.ConsensusChangeID) error {

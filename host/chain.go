@@ -137,63 +137,22 @@ func (cw *ChainWatcher) proveContract(c Contract) ([]types.Transaction, error) {
 func (cw *ChainWatcher) watchLoop() {
 	defer close(cw.stopChan)
 	for range cw.watchChan {
-		contracts, err := cw.contracts.ActionableContracts()
-		if err != nil {
-			panic(err) // TODO
-		}
-
-		for _, c := range contracts {
+		for _, c := range cw.contracts.ActionableContracts() {
 			switch {
 			case !c.FormationConfirmed:
-				if err := cw.submitTransaction(c.FormationSet); err != nil {
-					// all errors that occur when submitting the formation set
-					// are fatal, since we can't change the renter's signatures
-					c.FatalError = err
-					if err := cw.contracts.AddContract(c); err != nil {
-						panic(err) // TODO
-					}
-				}
-
+				c.FatalError = cw.submitTransaction(c.FormationSet)
 			case !c.FinalizationConfirmed:
 				if len(c.FinalizationSet) == 0 {
-					c.FinalizationSet, err = cw.finalizeContract(c)
-					if err != nil {
-						// TODO: this error might be recoverable, e.g. if more
-						// funds are added to the wallet
-						c.FatalError = err
-					}
-					if err := cw.contracts.AddContract(c); err != nil {
-						panic(err) // TODO
-					}
+					c.FinalizationSet, c.FatalError = cw.finalizeContract(c)
 				}
-				if err := cw.submitTransaction(c.FinalizationSet); err != nil {
-					// TODO: ErrMissingSiacoinOutput is not fatal
-					c.FatalError = err
-					if err := cw.contracts.AddContract(c); err != nil {
-						panic(err) // TODO
-					}
-				}
-
+				c.FatalError = cw.submitTransaction(c.FinalizationSet)
 			case !c.ProofConfirmed:
 				if len(c.ProofSet) == 0 {
-					c.ProofSet, err = cw.proveContract(c)
-					if err != nil {
-						// TODO: this error might be recoverable, e.g. if more
-						// funds are added to the wallet
-						c.FatalError = err
-					}
-					if err := cw.contracts.AddContract(c); err != nil {
-						panic(err) // TODO
-					}
+					c.ProofSet, c.FatalError = cw.proveContract(c)
 				}
-				if err := cw.submitTransaction(c.ProofSet); err != nil {
-					// TODO: ErrMissingSiacoinOutput is not fatal
-					c.FatalError = err
-					if err := cw.contracts.AddContract(c); err != nil {
-						panic(err) // TODO
-					}
-				}
+				c.FatalError = cw.submitTransaction(c.ProofSet)
 			}
+			cw.contracts.UpdateContractTransactions(c.ID(), c.FinalizationSet, c.ProofSet, c.FatalError)
 		}
 	}
 }

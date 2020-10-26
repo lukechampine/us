@@ -23,9 +23,17 @@ type ContractStore interface {
 	AddContract(c Contract) error
 	// ReviseContract updates the current revision associated with a contract.
 	ReviseContract(rev types.FileContractRevision, renterSig, hostSig []byte) error
+	// UpdateContractTransactions updates the contract's various transactions.
+	//
+	// This method does not return an error. If a contract cannot be saved to
+	// the store, the method should panic or exit with an error.
+	UpdateContractTransactions(id types.FileContractID, finalization, proof []types.Transaction, err error)
 	// ActionableContracts returns all of the store's contracts for which
 	// ContractIsActionable returns true (as of the current block height).
-	ActionableContracts() ([]Contract, error)
+	//
+	// This method does not return an error. If contracts cannot be loaded from
+	// the store, the method should panic or exit with an error.
+	ActionableContracts() []Contract
 	// ApplyConsensusChange integrates a ProcessedConsensusChange into the
 	// store.
 	ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) error
