@@ -36,7 +36,7 @@ type ContractStore interface {
 	ActionableContracts() []Contract
 	// ApplyConsensusChange integrates a ProcessedConsensusChange into the
 	// store.
-	ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID) error
+	ApplyConsensusChange(reverted, applied ProcessedConsensusChange, ccid modules.ConsensusChangeID)
 	// ConsensusChangeID returns the ID of the last ProcessedConsensusChange
 	// that was integrated by the store.
 	ConsensusChangeID() modules.ConsensusChangeID

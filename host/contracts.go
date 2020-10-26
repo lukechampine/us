@@ -312,8 +312,6 @@ func finalizeRenewal(cb *contractBuilder, w Wallet, cs ContractStore, ss SectorS
 	}
 
 	// store new contract, update the old contract, and move the sector roots
-	//
-	// TODO: this needs to be atomic
 	c := Contract{
 		Revision: initRevision,
 		Signatures: [2]types.TransactionSignature{
@@ -325,6 +323,8 @@ func finalizeRenewal(cb *contractBuilder, w Wallet, cs ContractStore, ss SectorS
 		FinalizationHeight: cb.contract.WindowStart - cb.settings.WindowSize,
 		ProofHeight:        cb.contract.WindowStart - 1,
 	}
+	// TODO: this all needs to happen atomically; if any operation fails,
+	// previous operations need to be rolled back.
 	if err := cs.AddContract(c); err != nil {
 		return err
 	} else if err := cs.ReviseContract(cb.finalRevision, cb.renterRenewSigs.FinalRevisionSignature, cb.hostRenewSigs.FinalRevisionSignature); err != nil {

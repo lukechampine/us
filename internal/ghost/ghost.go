@@ -240,7 +240,7 @@ func (ecm *ephemeralContractStore) UpdateContractTransactions(id types.FileContr
 	}
 }
 
-func (ecm *ephemeralContractStore) ApplyConsensusChange(reverted, applied host.ProcessedConsensusChange, ccid modules.ConsensusChangeID) error {
+func (ecm *ephemeralContractStore) ApplyConsensusChange(reverted, applied host.ProcessedConsensusChange, ccid modules.ConsensusChangeID) {
 	ecm.mu.Lock()
 	defer ecm.mu.Unlock()
 
@@ -300,7 +300,6 @@ func (ecm *ephemeralContractStore) ApplyConsensusChange(reverted, applied host.P
 	}
 
 	ecm.ccid = ccid
-	return nil
 }
 
 func (ecm *ephemeralContractStore) ConsensusChangeID() modules.ConsensusChangeID {

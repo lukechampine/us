@@ -1,8 +1,14 @@
 package host
 
 import (
+	"crypto/ed25519"
+
 	"gitlab.com/NebulousLabs/Sia/crypto"
+	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
+	"gitlab.com/NebulousLabs/encoding"
+	"golang.org/x/crypto/blake2b"
+	"lukechampine.com/us/ed25519hash"
 	"lukechampine.com/us/renterhost"
 )
 
@@ -76,4 +82,16 @@ func storageProofTransaction(sp types.StorageProof, feePerByte types.Currency, w
 	return []types.Transaction{{
 		StorageProofs: []types.StorageProof{sp},
 	}}, nil
+}
+
+func announcementTransaction(addr modules.NetAddress, key ed25519.PrivateKey, feePerByte types.Currency, w Wallet) ([]types.Transaction, error) {
+	const estTxnSize = 2048
+	ann := encoding.MarshalAll(modules.PrefixHostAnnouncement, addr, types.SiaPublicKey{
+		Algorithm: types.SignatureEd25519,
+		Key:       ed25519hash.ExtractPublicKey(key),
+	})
+	return finalizeSimpleTxn(types.Transaction{
+		ArbitraryData: [][]byte{append(ann, ed25519hash.Sign(key, blake2b.Sum256(ann))...)},
+		MinerFees:     []types.Currency{feePerByte.Mul64(estTxnSize)},
+	}, w)
 }

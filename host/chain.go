@@ -1,6 +1,7 @@
 package host
 
 import (
+	"crypto/ed25519"
 	"encoding/binary"
 	"math/bits"
 	"strings"
@@ -77,9 +78,7 @@ func (cw *ChainWatcher) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 	reverted := process(cc.RevertedBlocks)
 	applied := process(cc.AppliedBlocks)
-	if err := cw.contracts.ApplyConsensusChange(reverted, applied, cc.ID); err != nil {
-		panic(err) // TODO
-	}
+	cw.contracts.ApplyConsensusChange(reverted, applied, cc.ID)
 
 	select {
 	case cw.watchChan <- struct{}{}:
@@ -87,7 +86,22 @@ func (cw *ChainWatcher) ProcessConsensusChange(cc modules.ConsensusChange) {
 	}
 }
 
-// StorageProofSegment returns the
+// Announce creates, signs, and submits a host announcement transaction.
+func (cw *ChainWatcher) Announce(addr modules.NetAddress, key ed25519.PrivateKey) error {
+	_, feePerByte, err := cw.tpool.FeeEstimate()
+	if err != nil {
+		return err
+	}
+	txns, err := announcementTransaction(addr, key, feePerByte, cw.wallet)
+	if err != nil {
+		return err
+	}
+	return cw.submitTransaction(txns)
+}
+
+// StorageProofSegment returns the segment index for which a storage proof must
+// be provided, given a contract and the block at the beginning of its proof
+// window.
 func StorageProofSegment(bid types.BlockID, fcid types.FileContractID, filesize uint64) uint64 {
 	if filesize == 0 {
 		return 0
