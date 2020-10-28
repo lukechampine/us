@@ -3,12 +3,13 @@ package host
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math"
 	"net"
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -221,18 +222,18 @@ func (sh *SessionHandler) Serve(conn net.Conn) (err error) {
 	defer func() { sh.unlockContract(s.ctx.Contract.ID()) }()
 	for {
 		s.extendDeadline(time.Hour)
-		if id, err := s.sess.ReadID(); errors.Cause(err) == renterhost.ErrRenterClosed {
+		if id, err := s.sess.ReadID(); errors.Is(err, renterhost.ErrRenterClosed) {
 			return nil
 		} else if err != nil {
-			return errors.Wrap(err, "could not read RPC ID")
+			return fmt.Errorf("could not read RPC ID: %w", err)
 		} else if rpcFn, ok := sh.rpcs[id]; !ok {
-			return s.writeError(errors.Errorf("invalid or unknown RPC %q", id.String()))
+			return s.writeError(fmt.Errorf("invalid or unknown RPC %q", id.String()))
 		} else {
 			recordEnd := s.recordMetricRPC(id)
 			err := rpcFn(s)
 			recordEnd(err)
 			if err != nil {
-				return errors.Wrapf(err, "RPC %q failed", id.String())
+				return fmt.Errorf("RPC %q failed: %w", id.String(), err)
 			}
 		}
 	}
@@ -272,19 +273,19 @@ func (sh *SessionHandler) rpcFormContract(s *session) error {
 		minFee:        minFee(sh.tpool),
 	}
 	if err := validateFormContract(&cb); err != nil {
-		return s.writeError(err)
-	} else if err := fundContractTransaction(&cb, sh.wallet); err != nil {
-		return s.writeError(err)
+		return fmt.Errorf("proposed contract was not acceptable: %w", s.writeError(err))
+	} else if err := fundContractTransaction(&cb, sh.wallet, sh.tpool); err != nil {
+		return fmt.Errorf("could not fund contract transaction: %w", s.writeError(err))
 	} else if err := s.writeResponse(&cb.hostAdditions); err != nil {
-		return err
+		return fmt.Errorf("could not send our additions: %w", err)
 	} else if err := s.readResponse(&cb.renterSigs); err != nil {
-		return err
+		return fmt.Errorf("could not read renter's signatures: %w", err)
 	} else if err := finalizeContract(&cb, sh.wallet, sh.contracts); err != nil {
-		return s.writeError(err)
+		return fmt.Errorf("could not finalize contract: %w", s.writeError(err))
 	} else if err := sh.tpool.AcceptTransactionSet(append(cb.parents, cb.transaction)); err != nil {
-		return s.writeError(err)
+		return fmt.Errorf("transaction pool rejected contract transaction: %w", s.writeError(err))
 	} else if err := s.writeResponse(&cb.hostSigs); err != nil {
-		return err
+		return fmt.Errorf("could not send our signatures: %w", err)
 	}
 	return nil
 }
@@ -319,7 +320,7 @@ func (sh *SessionHandler) rpcRenewAndClearContract(s *session) error {
 		return s.writeError(err)
 	} else if err := validateRenewContract(&cb, s.ctx.Contract); err != nil {
 		return s.writeError(err)
-	} else if err := fundRenewalTransaction(&cb, sh.wallet); err != nil {
+	} else if err := fundRenewalTransaction(&cb, sh.wallet, sh.tpool); err != nil {
 		return s.writeError(err)
 	} else if err := s.writeResponse(&cb.hostAdditions); err != nil {
 		return err

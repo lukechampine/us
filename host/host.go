@@ -3,6 +3,8 @@ package host
 
 import (
 	"crypto/ed25519"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
@@ -70,6 +72,7 @@ type SettingsReporter interface {
 type TransactionPool interface {
 	AcceptTransactionSet(txns []types.Transaction) error
 	FeeEstimate() (min, max types.Currency, err error)
+	UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 }
 
 // A Contract is a file contract paired with various metadata.
@@ -103,6 +106,59 @@ func (c *Contract) ID() types.FileContractID {
 // RenterKey returns the renter's public key.
 func (c *Contract) RenterKey() types.SiaPublicKey {
 	return c.Revision.UnlockConditions.PublicKeys[0]
+}
+
+// MarshalJSON implements json.Marshaler.
+func (c Contract) MarshalJSON() ([]byte, error) {
+	var errString string
+	if c.FatalError != nil {
+		errString = c.FatalError.Error()
+	}
+	return json.Marshal(struct {
+		Revision              types.FileContractRevision    `json:"revision"`
+		Signatures            [2]types.TransactionSignature `json:"signatures"`
+		FormationSet          []types.Transaction           `json:"formationSet"`
+		FinalizationSet       []types.Transaction           `json:"finalizationSet"`
+		ProofSet              []types.Transaction           `json:"proofSet"`
+		FormationConfirmed    bool                          `json:"formationConfirmed"`
+		FinalizationConfirmed bool                          `json:"finalizationConfirmed"`
+		ProofConfirmed        bool                          `json:"proofConfirmed"`
+		FormationHeight       types.BlockHeight             `json:"formationHeight"`
+		FinalizationHeight    types.BlockHeight             `json:"finalizationHeight"`
+		ProofHeight           types.BlockHeight             `json:"proofHeight"`
+		ProofSegment          uint64                        `json:"proofSegment"`
+		FatalError            string                        `json:"fatalError"`
+	}{c.Revision, c.Signatures, c.FormationSet, c.FinalizationSet,
+		c.ProofSet, c.FormationConfirmed, c.FinalizationConfirmed,
+		c.ProofConfirmed, c.FormationHeight, c.FinalizationHeight,
+		c.ProofHeight, c.ProofSegment, errString})
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (c *Contract) UnmarshalJSON(b []byte) error {
+	var errString string
+	err := json.Unmarshal(b, &struct {
+		Revision              *types.FileContractRevision    `json:"revision"`
+		Signatures            *[2]types.TransactionSignature `json:"signatures"`
+		FormationSet          *[]types.Transaction           `json:"formationSet"`
+		FinalizationSet       *[]types.Transaction           `json:"finalizationSet"`
+		ProofSet              *[]types.Transaction           `json:"proofSet"`
+		FormationConfirmed    *bool                          `json:"formationConfirmed"`
+		FinalizationConfirmed *bool                          `json:"finalizationConfirmed"`
+		ProofConfirmed        *bool                          `json:"proofConfirmed"`
+		FormationHeight       *types.BlockHeight             `json:"formationHeight"`
+		FinalizationHeight    *types.BlockHeight             `json:"finalizationHeight"`
+		ProofHeight           *types.BlockHeight             `json:"proofHeight"`
+		ProofSegment          *uint64                        `json:"proofSegment"`
+		FatalError            *string                        `json:"fatalError"`
+	}{&c.Revision, &c.Signatures, &c.FormationSet, &c.FinalizationSet,
+		&c.ProofSet, &c.FormationConfirmed, &c.FinalizationConfirmed,
+		&c.ProofConfirmed, &c.FormationHeight, &c.FinalizationHeight,
+		&c.ProofHeight, &c.ProofSegment, &errString})
+	if errString != "" {
+		c.FatalError = errors.New(errString) // TODO: this breaks sentinel errors
+	}
+	return err
 }
 
 // A MetricsRecorder records various metrics relating to a renter-host protocol

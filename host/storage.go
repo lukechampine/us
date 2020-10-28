@@ -1,7 +1,8 @@
 package host
 
 import (
-	"github.com/pkg/errors"
+	"errors"
+
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/merkle"

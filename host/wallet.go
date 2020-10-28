@@ -12,7 +12,7 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
-func fundTransaction(txn *types.Transaction, cost types.Currency, w Wallet) (renterhost.RPCFormContractAdditions, error) {
+func fundTransaction(txn *types.Transaction, cost types.Currency, w Wallet, tp TransactionPool) (renterhost.RPCFormContractAdditions, error) {
 	if cost.IsZero() {
 		return renterhost.RPCFormContractAdditions{}, nil
 	}
@@ -20,26 +20,33 @@ func fundTransaction(txn *types.Transaction, cost types.Currency, w Wallet) (ren
 	if _, err := w.FundTransaction(txn, cost); err != nil {
 		return renterhost.RPCFormContractAdditions{}, err
 	}
+	parents, err := tp.UnconfirmedParents(*txn)
+	if err != nil {
+		return renterhost.RPCFormContractAdditions{}, err
+	}
 	return renterhost.RPCFormContractAdditions{
+		Parents: parents,
 		Inputs:  txn.SiacoinInputs[oldInputs:],
 		Outputs: txn.SiacoinOutputs[oldOutputs:],
 	}, nil
 }
 
-func fundContractTransaction(cb *contractBuilder, w Wallet) (err error) {
+func fundContractTransaction(cb *contractBuilder, w Wallet, tp TransactionPool) (err error) {
 	cost := cb.contract.ValidHostPayout().Sub(cb.settings.ContractPrice) // NOTE: validateFormContract prevents underflow here
-	cb.hostAdditions, err = fundTransaction(&cb.transaction, cost, w)
+	cb.hostAdditions, err = fundTransaction(&cb.transaction, cost, w, tp)
+	cb.parents = append(cb.parents, cb.hostAdditions.Parents...)
 	return
 }
 
-func fundRenewalTransaction(cb *contractBuilder, w Wallet) (err error) {
+func fundRenewalTransaction(cb *contractBuilder, w Wallet, tp TransactionPool) (err error) {
 	var basePrice types.Currency
 	if cb.contract.WindowEnd > cb.finalRevision.NewWindowEnd {
 		timeExtension := uint64(cb.contract.WindowEnd - cb.finalRevision.NewWindowEnd)
 		basePrice = cb.settings.StoragePrice.Mul64(cb.contract.FileSize).Mul64(timeExtension)
 	}
 	cost := cb.contract.ValidHostPayout().Sub(cb.settings.ContractPrice).Sub(basePrice) // NOTE: validateRenewContract prevents underflow here
-	cb.hostAdditions, err = fundTransaction(&cb.transaction, cost, w)
+	cb.hostAdditions, err = fundTransaction(&cb.transaction, cost, w, tp)
+	cb.parents = append(cb.parents, cb.hostAdditions.Parents...)
 	return
 }
 

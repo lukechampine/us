@@ -3,10 +3,10 @@ package host
 import (
 	"crypto/ed25519"
 	"encoding/binary"
+	"errors"
 	"math/bits"
 	"strings"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"golang.org/x/crypto/blake2b"
