@@ -14,11 +14,12 @@ import (
 	"time"
 )
 
+// Errors relating to stream or mux shutdown.
 var (
-	errClosedConn       = errors.New("underlying connection was closed")
-	errClosedStream     = errors.New("stream was gracefully closed")
-	errPeerClosedStream = errors.New("peer closed stream gracefully")
-	errPeerClosedConn   = errors.New("peer closed underlying connection")
+	ErrClosedConn       = errors.New("underlying connection was closed")
+	ErrClosedStream     = errors.New("stream was gracefully closed")
+	ErrPeerClosedStream = errors.New("peer closed stream gracefully")
+	ErrPeerClosedConn   = errors.New("peer closed underlying connection")
 )
 
 // A Mux multiplexes multiple duplex Streams onto a single net.Conn.
@@ -52,7 +53,7 @@ func (m *Mux) setErr(err error) error {
 		errors.Is(err, syscall.ECONNRESET) ||
 		errors.Is(err, syscall.EPIPE) ||
 		errors.Is(err, syscall.EPROTOTYPE) {
-		err = errPeerClosedConn
+		err = ErrPeerClosedConn
 	}
 
 	// set sticky error, close conn, and wake everyone up
@@ -194,8 +195,8 @@ func (m *Mux) readLoop() {
 
 // Close closes the underlying net.Conn.
 func (m *Mux) Close() error {
-	err := m.setErr(errClosedConn)
-	if err == errClosedConn || err == errPeerClosedConn {
+	err := m.setErr(ErrClosedConn)
+	if err == ErrClosedConn || err == ErrPeerClosedConn {
 		err = nil
 	}
 	return err
@@ -367,7 +368,7 @@ func (s *Stream) consumeFrame(h frameHeader, payload []byte) {
 	}
 	// handle final/error frame
 	if h.flags&flagFinal != 0 {
-		err := errPeerClosedStream
+		err := ErrPeerClosedStream
 		if h.flags&flagError != 0 {
 			err = errors.New(string(payload))
 		}
@@ -436,14 +437,14 @@ func (s *Stream) Close() error {
 		flags: flagFinal,
 	}
 	err := s.m.consumeFrame(h, nil, s.wd)
-	if err == errPeerClosedStream {
+	if err == ErrPeerClosedStream {
 		err = nil
 	}
 
 	// cancel outstanding Read/Write calls
 	s.cond.L.Lock()
 	defer s.cond.L.Unlock()
-	s.err = errClosedStream
+	s.err = ErrClosedStream
 	s.cond.Broadcast()
 	return err
 }

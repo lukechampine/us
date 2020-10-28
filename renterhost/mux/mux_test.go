@@ -76,7 +76,7 @@ func TestMux(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := <-serverCh; err != nil && err != errPeerClosedStream {
+	if err := <-serverCh; err != nil && err != ErrPeerClosedStream {
 		t.Fatal(err)
 	}
 }
@@ -161,7 +161,7 @@ func TestManyStreams(t *testing.T) {
 
 	if err := m.Close(); err != nil {
 		t.Fatal(err)
-	} else if err := <-serverCh; err != nil && err != errPeerClosedConn {
+	} else if err := <-serverCh; err != nil && err != ErrPeerClosedConn {
 		t.Fatal(err)
 	}
 }
@@ -295,7 +295,7 @@ func TestDeadline(t *testing.T) {
 
 	if err := m.Close(); err != nil {
 		t.Fatal(err)
-	} else if err := <-serverCh; err != nil && err != errPeerClosedConn && err != errPeerClosedStream {
+	} else if err := <-serverCh; err != nil && err != ErrPeerClosedConn && err != ErrPeerClosedStream {
 		t.Fatal(err)
 	}
 }
@@ -358,7 +358,7 @@ func TestCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := <-serverCh; err != nil && err != errPeerClosedStream {
+	if err := <-serverCh; err != nil && err != ErrPeerClosedStream {
 		t.Fatal(err)
 	}
 
@@ -415,7 +415,7 @@ func TestCompatibility(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := <-serverCh; err != nil && err != errPeerClosedStream {
+		if err := <-serverCh; err != nil && err != ErrPeerClosedStream {
 			t.Fatal(err)
 		}
 	}
@@ -449,7 +449,7 @@ func BenchmarkMux(b *testing.B) {
 		}()
 	}()
 	defer func() {
-		if err := <-serverCh; err != nil && err != errPeerClosedConn {
+		if err := <-serverCh; err != nil && err != ErrPeerClosedConn {
 			b.Fatal(err)
 		}
 	}()
@@ -514,7 +514,7 @@ func BenchmarkStreams(b *testing.B) {
 				}()
 			}()
 			defer func() {
-				if err := <-serverCh; err != nil && err != errPeerClosedConn {
+				if err := <-serverCh; err != nil && err != ErrPeerClosedConn {
 					b.Fatal(err)
 				}
 			}()
