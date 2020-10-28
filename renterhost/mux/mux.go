@@ -28,7 +28,9 @@ type Mux struct {
 	aead     cipher.AEAD
 	settings connSettings
 
-	cond    sync.Cond // guards + synchronizes subsequent fields
+	mu   sync.Mutex
+	cond sync.Cond // uses mu
+
 	streams map[uint32]*Stream
 	nextID  uint32
 	err     error // sticky and fatal
@@ -38,12 +40,13 @@ type Mux struct {
 		header   frameHeader
 		payload  []byte
 		timedOut bool
+		cond     sync.Cond // uses mu
 	}
 }
 
 func (m *Mux) setErr(err error) error {
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.err != nil {
 		return m.err
 	}
@@ -66,33 +69,27 @@ func (m *Mux) setErr(err error) error {
 	}
 	m.conn.Close()
 	m.cond.Broadcast()
+	m.write.cond.Broadcast()
 	return err
 }
 
 func (m *Mux) consumeFrame(h frameHeader, payload []byte, deadline time.Time) error {
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
-	m.write.timedOut = false
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if !deadline.IsZero() {
 		if !time.Now().Before(deadline) {
 			return os.ErrDeadlineExceeded
 		}
-		timer := time.AfterFunc(time.Until(deadline), func() {
-			m.cond.L.Lock()
-			m.write.timedOut = true
-			m.cond.Broadcast()
-			m.cond.L.Unlock()
-		})
+		timer := time.AfterFunc(time.Until(deadline), m.write.cond.Broadcast) // nice
 		defer timer.Stop()
 	}
-
 	// wait for current frame to be consumed
-	for m.write.header.id != 0 && m.err == nil && !m.write.timedOut {
-		m.cond.Wait()
+	for m.write.header.id != 0 && m.err == nil && (deadline.IsZero() || time.Now().Before(deadline)) {
+		m.write.cond.Wait()
 	}
 	if m.err != nil {
 		return m.err
-	} else if m.write.timedOut {
+	} else if !deadline.IsZero() && !time.Now().Before(deadline) {
 		return os.ErrDeadlineExceeded
 	}
 	// queue our frame and wake the writeLoop
@@ -119,12 +116,12 @@ func (m *Mux) writeLoop() {
 	writeBuf := make([]byte, m.settings.maxFrameSize())
 	for {
 		// wait for a frame
-		m.cond.L.Lock()
+		m.mu.Lock()
 		for m.write.header.id == 0 && m.err == nil && time.Now().Before(nextKeepalive) {
 			m.cond.Wait()
 		}
 		if m.err != nil {
-			m.cond.L.Unlock()
+			m.mu.Unlock()
 			return
 		}
 		// if we have a normal frame, send that; otherwise, send a keepalive
@@ -133,7 +130,7 @@ func (m *Mux) writeLoop() {
 			h, payload = frameHeader{id: idKeepalive}, nil
 		}
 		frame := encryptFrame(writeBuf, h, payload, m.settings.RequestedPacketSize, m.aead)
-		m.cond.L.Unlock()
+		m.mu.Unlock()
 
 		// reset keepalive
 		timer.Stop()
@@ -147,11 +144,11 @@ func (m *Mux) writeLoop() {
 		}
 
 		// clear the payload and wake (*Mux).consumeFrame
-		m.cond.L.Lock()
+		m.mu.Lock()
 		m.write.header = frameHeader{}
 		m.write.payload = nil
-		m.cond.Broadcast()
-		m.cond.L.Unlock()
+		m.write.cond.Signal()
+		m.mu.Unlock()
 	}
 }
 
@@ -175,7 +172,7 @@ func (m *Mux) readLoop() {
 		default:
 			// look for matching Stream
 			if curStream == nil || h.id != curStream.id {
-				m.cond.L.Lock()
+				m.mu.Lock()
 				if curStream = m.streams[h.id]; curStream == nil {
 					// no existing stream with this ID; create a new one
 					curStream = &Stream{
@@ -186,7 +183,7 @@ func (m *Mux) readLoop() {
 					m.streams[h.id] = curStream
 					m.cond.Broadcast() // wake (*Mux).AcceptStream
 				}
-				m.cond.L.Unlock()
+				m.mu.Unlock()
 			}
 			curStream.consumeFrame(h, payload)
 		}
@@ -204,8 +201,8 @@ func (m *Mux) Close() error {
 
 // AcceptStream waits for and returns the next peer-initiated Stream.
 func (m *Mux) AcceptStream() (*Stream, error) {
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for {
 		if m.err != nil {
 			return nil, m.err
@@ -222,8 +219,8 @@ func (m *Mux) AcceptStream() (*Stream, error) {
 
 // DialStream creates a new Stream.
 func (m *Mux) DialStream() (*Stream, error) {
-	m.cond.L.Lock()
-	defer m.cond.L.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -251,10 +248,11 @@ func newMux(conn net.Conn, aead cipher.AEAD, settings connSettings) *Mux {
 		conn:     conn,
 		aead:     aead,
 		settings: settings,
-		cond:     sync.Cond{L: new(sync.Mutex)},
 		streams:  make(map[uint32]*Stream),
 		nextID:   1 << 8, // avoid collisions with reserved IDs
 	}
+	m.cond.L = &m.mu
+	m.write.cond.L = &m.mu
 	go m.readLoop()
 	go m.writeLoop()
 	return m
