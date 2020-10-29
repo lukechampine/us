@@ -64,6 +64,8 @@ func readFrame(r io.Reader, buf []byte) (frameHeader, []byte, error) {
 	return h, payload, nil
 }
 
+var ourVersion = []byte{1}
+
 func initiateVersionHandshake(conn net.Conn) error {
 	theirVersion := make([]byte, 1)
 	if _, err := conn.Write(ourVersion); err != nil {
@@ -103,6 +105,12 @@ func (cs connSettings) maxPayloadSize() int {
 }
 
 const connSettingsSize = 24
+
+var defaultConnSettings = connSettings{
+	RequestedPacketSize: 1440, // IPv6 MTU
+	MaxFrameSizePackets: 10,
+	MaxTimeout:          20 * time.Minute,
+}
 
 func initiateSettingsHandshake(conn net.Conn, ours connSettings, aead cipher.AEAD) (connSettings, error) {
 	// encode + write request

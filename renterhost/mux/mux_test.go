@@ -76,7 +76,7 @@ func TestMux(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := <-serverCh; err != nil && err != errPeerClosedStream {
+	if err := <-serverCh; err != nil && err != ErrPeerClosedStream {
 		t.Fatal(err)
 	}
 }
@@ -161,7 +161,7 @@ func TestManyStreams(t *testing.T) {
 
 	if err := m.Close(); err != nil {
 		t.Fatal(err)
-	} else if err := <-serverCh; err != nil && err != errPeerClosedConn {
+	} else if err := <-serverCh; err != nil && err != ErrPeerClosedConn {
 		t.Fatal(err)
 	}
 }
@@ -295,7 +295,7 @@ func TestDeadline(t *testing.T) {
 
 	if err := m.Close(); err != nil {
 		t.Fatal(err)
-	} else if err := <-serverCh; err != nil && err != errPeerClosedConn && err != errPeerClosedStream {
+	} else if err := <-serverCh; err != nil && err != ErrPeerClosedConn && err != ErrPeerClosedStream {
 		t.Fatal(err)
 	}
 }
@@ -358,7 +358,7 @@ func TestCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := <-serverCh; err != nil && err != errPeerClosedStream {
+	if err := <-serverCh; err != nil && err != ErrPeerClosedStream {
 		t.Fatal(err)
 	}
 
@@ -415,73 +415,14 @@ func TestCompatibility(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := <-serverCh; err != nil && err != errPeerClosedStream {
+		if err := <-serverCh; err != nil && err != ErrPeerClosedStream {
 			t.Fatal(err)
 		}
 	}
 }
 
 func BenchmarkMux(b *testing.B) {
-	serverKey := ed25519.NewKeyFromSeed(frand.Bytes(ed25519.SeedSize))
-	l, err := net.Listen("tcp", ":0")
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer l.Close()
-	serverCh := make(chan error, 1)
-	go func() {
-		serverCh <- func() error {
-			conn, err := l.Accept()
-			if err != nil {
-				return err
-			}
-			m, err := Accept(conn, serverKey)
-			if err != nil {
-				return err
-			}
-			defer m.Close()
-			s, err := m.AcceptStream()
-			if err != nil {
-				return err
-			}
-			io.Copy(ioutil.Discard, s)
-			return s.Close()
-		}()
-	}()
-	defer func() {
-		if err := <-serverCh; err != nil && err != errPeerClosedConn {
-			b.Fatal(err)
-		}
-	}()
-
-	conn, err := net.Dial("tcp", l.Addr().String())
-	if err != nil {
-		b.Fatal(err)
-	}
-	m, err := Dial(conn, serverKey.Public().(ed25519.PublicKey))
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer m.Close()
-	s, err := m.DialStream()
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer s.Close()
-
-	buf := make([]byte, defaultConnSettings.maxPayloadSize())
-	b.ResetTimer()
-	b.SetBytes(int64(len(buf)))
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		if _, err := s.Write(buf); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkStreams(b *testing.B) {
-	for _, numStreams := range []int{2, 10, 100} {
+	for _, numStreams := range []int{1, 2, 10, 100, 500, 1000} {
 		b.Run(fmt.Sprint(numStreams), func(b *testing.B) {
 			serverKey := ed25519.NewKeyFromSeed(frand.Bytes(ed25519.SeedSize))
 			l, err := net.Listen("tcp", ":0")
@@ -514,7 +455,7 @@ func BenchmarkStreams(b *testing.B) {
 				}()
 			}()
 			defer func() {
-				if err := <-serverCh; err != nil && err != errPeerClosedConn {
+				if err := <-serverCh; err != nil && err != ErrPeerClosedConn {
 					b.Fatal(err)
 				}
 			}()
@@ -529,12 +470,13 @@ func BenchmarkStreams(b *testing.B) {
 			}
 			defer m.Close()
 
-			// open 100 streams in separate goroutines
+			// open each stream in a separate goroutine
 			bufSize := defaultConnSettings.maxPayloadSize()
 			buf := make([]byte, bufSize)
 			b.ResetTimer()
 			b.SetBytes(int64(bufSize * numStreams))
 			b.ReportAllocs()
+			start := time.Now()
 			var wg sync.WaitGroup
 			wg.Add(numStreams)
 			for j := 0; j < numStreams; j++ {
@@ -553,6 +495,7 @@ func BenchmarkStreams(b *testing.B) {
 				}()
 			}
 			wg.Wait()
+			b.ReportMetric(float64(b.N*numStreams)/time.Since(start).Seconds(), "conns/sec")
 		})
 	}
 }
@@ -611,56 +554,81 @@ func BenchmarkConn(b *testing.B) {
 }
 
 func BenchmarkSiaMux(b *testing.B) {
-	// create client and server
-	sk, pk := mux.GenerateED25519KeyPair()
-	l, err := net.Listen("tcp", ":0")
-	if err != nil {
-		b.Fatal(err)
-	}
-	go func() {
-		conn, err := l.Accept()
-		if err != nil {
-			panic(err)
-		}
-		server, err := mux.NewServerMux(context.Background(), conn, pk, sk, persist.NewLogger(ioutil.Discard), func(*mux.Mux) {}, func(*mux.Mux) {})
-		if err != nil {
-			panic(err)
-		}
-		for {
-			stream, err := server.AcceptStream()
+	for _, numStreams := range []int{1, 2, 10, 100, 500, 1000} {
+		b.Run(fmt.Sprint(numStreams), func(b *testing.B) {
+			sk, pk := mux.GenerateED25519KeyPair()
+			l, err := net.Listen("tcp", ":0")
 			if err != nil {
-				return
+				b.Fatal(err)
 			}
-			io.Copy(ioutil.Discard, stream)
-			stream.Close()
-		}
-	}()
-	conn, err := net.Dial("tcp", l.Addr().String())
-	if err != nil {
-		b.Fatal(err)
-	}
-	client, err := mux.NewClientMux(context.Background(), conn, pk, persist.NewLogger(ioutil.Discard), func(*mux.Mux) {}, func(*mux.Mux) {})
-	if err != nil {
-		b.Fatal(err)
-	}
+			defer l.Close()
+			serverCh := make(chan error, 1)
+			go func() {
+				serverCh <- func() error {
+					conn, err := l.Accept()
+					if err != nil {
+						return err
+					}
+					server, err := mux.NewServerMux(context.Background(), conn, pk, sk, persist.NewLogger(ioutil.Discard), func(*mux.Mux) {}, func(*mux.Mux) {})
+					if err != nil {
+						panic(err)
+					}
+					defer server.Close()
+					for {
+						s, err := server.AcceptStream()
+						if err != nil {
+							return err
+						}
+						go func() {
+							io.Copy(ioutil.Discard, s)
+							s.Close()
+						}()
+					}
+				}()
+			}()
+			defer func() {
+				if err := <-serverCh; err != nil && err != io.EOF {
+					b.Fatal(err)
+				}
+			}()
 
-	// open a stream
-	stream, err := client.NewStream()
-	if err != nil {
-		b.Fatal(err)
-		return
-	}
-	defer stream.Close()
+			conn, err := net.Dial("tcp", l.Addr().String())
+			if err != nil {
+				b.Fatal(err)
+			}
+			client, err := mux.NewClientMux(context.Background(), conn, pk, persist.NewLogger(ioutil.Discard), func(*mux.Mux) {}, func(*mux.Mux) {})
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer client.Close()
 
-	msgSize := defaultConnSettings.maxPayloadSize()
-	data := make([]byte, msgSize)
-	b.SetBytes(int64(len(data)))
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		if _, err := stream.Write(data); err != nil {
-			b.Fatal(err)
-		}
+			// open each stream in a separate goroutine
+			bufSize := defaultConnSettings.maxPayloadSize()
+			buf := make([]byte, bufSize)
+			b.ResetTimer()
+			b.SetBytes(int64(bufSize * numStreams))
+			b.ReportAllocs()
+			start := time.Now()
+			var wg sync.WaitGroup
+			wg.Add(numStreams)
+			for j := 0; j < numStreams; j++ {
+				go func() {
+					defer wg.Done()
+					stream, err := client.NewStream()
+					if err != nil {
+						panic(err)
+					}
+					defer stream.Close()
+					for i := 0; i < b.N; i++ {
+						if _, err := stream.Write(buf); err != nil {
+							panic(err)
+						}
+					}
+				}()
+			}
+			wg.Wait()
+			b.ReportMetric(float64(b.N*numStreams)/time.Since(start).Seconds(), "conns/sec")
+		})
 	}
 }
 
