@@ -470,7 +470,7 @@ func BenchmarkMux(b *testing.B) {
 			}
 			defer m.Close()
 
-			// open 100 streams in separate goroutines
+			// open each stream in a separate goroutine
 			bufSize := defaultConnSettings.maxPayloadSize()
 			buf := make([]byte, bufSize)
 			b.ResetTimer()
@@ -602,7 +602,7 @@ func BenchmarkSiaMux(b *testing.B) {
 			}
 			defer client.Close()
 
-			// open 100 streams in separate goroutines
+			// open each stream in a separate goroutine
 			bufSize := defaultConnSettings.maxPayloadSize()
 			buf := make([]byte, bufSize)
 			b.ResetTimer()
