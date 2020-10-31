@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.com/NebulousLabs/Sia/persist"
+	"gitlab.com/NebulousLabs/log"
 	"gitlab.com/NebulousLabs/siamux/mux"
 	"golang.org/x/crypto/chacha20poly1305"
 	"lukechampine.com/frand"
@@ -315,7 +315,7 @@ func TestCompatibility(t *testing.T) {
 				return err
 			}
 			defer conn.Close()
-			server, err := mux.NewServerMux(context.Background(), conn, pk, sk, persist.NewLogger(ioutil.Discard), func(*mux.Mux) {}, func(*mux.Mux) {})
+			server, err := mux.NewServerMux(context.Background(), conn, pk, sk, log.DiscardLogger, func(*mux.Mux) {}, func(*mux.Mux) {})
 			if err != nil {
 				return err
 			}
@@ -398,7 +398,7 @@ func TestCompatibility(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer conn.Close()
-		m, err := mux.NewClientMux(context.Background(), conn, pk, persist.NewLogger(ioutil.Discard), func(*mux.Mux) {}, func(*mux.Mux) {})
+		m, err := mux.NewClientMux(context.Background(), conn, pk, log.DiscardLogger, func(*mux.Mux) {}, func(*mux.Mux) {})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -569,7 +569,7 @@ func BenchmarkSiaMux(b *testing.B) {
 					if err != nil {
 						return err
 					}
-					server, err := mux.NewServerMux(context.Background(), conn, pk, sk, persist.NewLogger(ioutil.Discard), func(*mux.Mux) {}, func(*mux.Mux) {})
+					server, err := mux.NewServerMux(context.Background(), conn, pk, sk, log.DiscardLogger, func(*mux.Mux) {}, func(*mux.Mux) {})
 					if err != nil {
 						panic(err)
 					}
@@ -596,7 +596,7 @@ func BenchmarkSiaMux(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			client, err := mux.NewClientMux(context.Background(), conn, pk, persist.NewLogger(ioutil.Discard), func(*mux.Mux) {}, func(*mux.Mux) {})
+			client, err := mux.NewClientMux(context.Background(), conn, pk, log.DiscardLogger, func(*mux.Mux) {}, func(*mux.Mux) {})
 			if err != nil {
 				b.Fatal(err)
 			}

@@ -478,3 +478,23 @@ func NewRangeProofVerifier(start, end int) *RangeProofVerifier {
 		end:   end,
 	}
 }
+
+// ConvertProofOrdering converts "left-to-right" proofs into the "leaf-to-root"
+// ordering used in consensus storage proofs.
+func ConvertProofOrdering(proof []crypto.Hash, index int) []crypto.Hash {
+	// strategy: split proof into lefts and rights, then iterate over bits in
+	// leaf-to-root order, selecting either a left or right hash as appropriate.
+	lefts := proof[:bits.OnesCount(uint(index))]
+	rights := proof[len(lefts):]
+	reordered := make([]crypto.Hash, 0, len(proof))
+	for i := 0; len(reordered) < len(proof); i++ {
+		if index&(1<<i) != 0 {
+			reordered = append(reordered, lefts[len(lefts)-1])
+			lefts = lefts[:len(lefts)-1]
+		} else if len(rights) > 0 {
+			reordered = append(reordered, rights[0])
+			rights = rights[1:]
+		}
+	}
+	return reordered
+}

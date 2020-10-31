@@ -24,19 +24,19 @@ func TestMigrate(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		h, c := createHostWithContract(t)
 		defer h.Close()
-		hkr[h.PublicKey()] = h.Settings().NetAddress
+		hkr[h.PublicKey] = h.Settings.NetAddress
 		hs1.AddHost(c)
 		hs2.AddHost(c)
 	}
 	// add one host only to hs1
 	h, c := createHostWithContract(t)
 	defer h.Close()
-	hkr[h.PublicKey()] = h.Settings().NetAddress
+	hkr[h.PublicKey] = h.Settings.NetAddress
 	hs1.AddHost(c)
 	// add one host only to hs2
 	h, c = createHostWithContract(t)
 	defer h.Close()
-	hkr[h.PublicKey()] = h.Settings().NetAddress
+	hkr[h.PublicKey] = h.Settings.NetAddress
 	hs2.AddHost(c)
 
 	// create fs1 with hs1

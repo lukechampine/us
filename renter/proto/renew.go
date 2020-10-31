@@ -61,14 +61,10 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 		newCollateral = s.host.Collateral.Mul(bytes)
 	}
 
-	// the collateral can't be greater than MaxCollateral, and it can't be zero
-	// either (because due to a siad bug, the host will try to add an output
-	// worth 0, which makes the transaction invalid)
+	// the collateral can't be greater than MaxCollateral
 	totalCollateral := baseCollateral.Add(newCollateral)
 	if totalCollateral.Cmp(s.host.MaxCollateral) > 0 {
 		totalCollateral = s.host.MaxCollateral
-	} else if totalCollateral.IsZero() {
-		totalCollateral = types.NewCurrency64(1)
 	}
 
 	// Calculate payouts: the host gets their contract fee, plus the cost of the
@@ -126,7 +122,9 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	// create and fund a transaction containing fc
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
-		MinerFees:     []types.Currency{fee},
+	}
+	if !fee.IsZero() {
+		txn.MinerFees = append(txn.MinerFees, fee)
 	}
 	toSign, err := w.FundTransaction(&txn, renterCost)
 	if err != nil {

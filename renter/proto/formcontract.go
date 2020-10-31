@@ -65,12 +65,9 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 		bytes := renterPayout.Div(blockBytes)
 		hostCollateral = s.host.Collateral.Mul(bytes).Mul64(uint64(endHeight - startHeight))
 	}
-	// hostCollateral can't be greater than MaxCollateral, and (due to a host-
-	// side bug) it can't be zero either.
+	// hostCollateral can't be greater than MaxCollateral
 	if hostCollateral.Cmp(s.host.MaxCollateral) > 0 {
 		hostCollateral = s.host.MaxCollateral
-	} else if hostCollateral.IsZero() {
-		hostCollateral = types.NewCurrency64(1)
 	}
 
 	// calculate payouts
@@ -115,7 +112,9 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	// create and fund a transaction containing fc
 	txn := types.Transaction{
 		FileContracts: []types.FileContract{fc},
-		MinerFees:     []types.Currency{fee},
+	}
+	if !fee.IsZero() {
+		txn.MinerFees = append(txn.MinerFees, fee)
 	}
 	toSign, err := w.FundTransaction(&txn, totalCost)
 	if err != nil {
