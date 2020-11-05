@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/Sia/encoding"
+	"gitlab.com/NebulousLabs/encoding"
 	bolt "go.etcd.io/bbolt"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
@@ -85,6 +85,9 @@ func (db *EphemeralMetaDB) AddShard(s DBShard) (uint64, error) {
 func (db *EphemeralMetaDB) Shard(id uint64) (DBShard, error) {
 	db.mu.Lock()
 	defer db.mu.Unlock()
+	if id == 0 {
+		return DBShard{}, ErrKeyNotFound
+	}
 	return db.shards[id-1], nil
 }
 
@@ -115,7 +118,7 @@ func (db *EphemeralMetaDB) SetChunkShard(id uint64, i int, s uint64) error {
 // Chunk implements MetaDB.
 func (db *EphemeralMetaDB) Chunk(id uint64) (DBChunk, error) {
 	if id == 0 {
-		panic("GetChunk: unset id")
+		panic("Chunk: unset id")
 	}
 	db.mu.Lock()
 	defer db.mu.Unlock()

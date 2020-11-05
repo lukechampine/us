@@ -382,6 +382,177 @@ func (mcu MinimumChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c DB
 	return nil
 }
 
+// OverdriveChunkUploader uploads the shards of a chunk in parallel, using up to
+// N overdrive hosts.
+type OverdriveChunkUploader struct {
+	Hosts     *HostSet
+	Overdrive int
+}
+
+// UploadChunk implements ChunkUploader.
+func (ocu OverdriveChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
+	if ocu.Overdrive < 0 {
+		panic("overdrive cannot be negative")
+	}
+
+	// choose hosts, preserving any that are already present
+	newHosts := make(map[hostdb.HostPublicKey]struct{})
+	for h := range ocu.Hosts.sessions {
+		newHosts[h] = struct{}{}
+	}
+	rem := len(shards)
+	skip := make([]bool, len(shards))
+	for i, sid := range c.Shards {
+		if sid != 0 {
+			s, err := db.Shard(sid)
+			if err != nil {
+				return err
+			}
+			if ocu.Hosts.HasHost(s.HostKey) {
+				skip[i] = true
+				rem--
+				delete(newHosts, s.HostKey)
+			}
+		}
+	}
+	if rem > len(newHosts) {
+		rem = len(newHosts)
+	}
+
+	// spawn workers
+	numWorkers := rem + ocu.Overdrive
+	if numWorkers > len(newHosts) {
+		numWorkers = len(newHosts)
+	}
+	type req struct {
+		shardIndex int
+		hostKey    hostdb.HostPublicKey
+		shard      *[renterhost.SectorSize]byte
+		nonce      [24]byte
+		block      bool // wait to acquire
+	}
+	type resp struct {
+		req  req
+		root crypto.Hash
+		err  error
+	}
+	reqChan := make(chan req, numWorkers)
+	respChan := make(chan resp, numWorkers)
+	var wg sync.WaitGroup
+	wg.Add(numWorkers)
+	ctx, cancel := context.WithCancel(ctx)
+	defer func() {
+		// cancel any outstanding uploads and wait for them to exit
+		close(reqChan)
+		cancel()
+		wg.Wait()
+	}()
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for req := range reqChan {
+				sess, err := ocu.Hosts.tryAcquire(req.hostKey)
+				if err == errHostAcquired && req.block {
+					sess, err = ocu.Hosts.acquire(req.hostKey)
+				}
+				if err != nil {
+					respChan <- resp{req, crypto.Hash{}, err}
+					continue
+				}
+				root, err := uploadCtx(ctx, sess, req.shard)
+				ocu.Hosts.release(req.hostKey)
+				if err != nil {
+					respChan <- resp{req, crypto.Hash{}, err}
+					continue
+				}
+				respChan <- resp{req, root, err}
+			}
+		}()
+	}
+
+	// construct sectors
+	sectors := make([]*[renterhost.SectorSize]byte, len(c.Shards))
+	nonces := make([][24]byte, len(sectors))
+	for i, shard := range shards {
+		if skip[i] {
+			continue
+		}
+		nonces[i] = renter.RandomNonce()
+		var sb renter.SectorBuilder
+		sb.Append(shard, key, nonces[i])
+		sectors[i] = sb.Finish()
+	}
+
+	// start by requesting one upload per worker, all non-blocking.
+	var reqQueue []req
+	i := 0
+	for h := range newHosts {
+	again:
+		shardIndex := i % len(c.Shards)
+		i++
+		if skip[shardIndex] {
+			goto again
+		}
+		reqQueue = append(reqQueue, req{
+			shardIndex: shardIndex,
+			hostKey:    h,
+			shard:      sectors[shardIndex],
+			nonce:      nonces[shardIndex],
+			block:      false,
+		})
+	}
+	for _, req := range reqQueue[:numWorkers] {
+		reqChan <- req
+	}
+	reqQueue = reqQueue[numWorkers:]
+	inflight := numWorkers
+
+	// for those that return errors, add the next host to the queue, non-blocking.
+	// for those that block, add the same host to the queue, blocking.
+	success := make([]bool, len(c.Shards))
+	var errs HostErrorSet
+	for rem > 0 && inflight > 0 {
+		resp := <-respChan
+		inflight--
+		if resp.err == nil {
+			if success[resp.req.shardIndex] {
+				continue // an earlier worker already succeeded
+			}
+			// NOTE: in theory, we could attempt to continue storing the
+			// remaining successful shards, but in practice, if
+			// SetChunkShard fails, it indicates a serious problem with the
+			// db and subsequent calls are not likely to succeed.
+			if ssid, err := db.AddShard(DBShard{resp.req.hostKey, resp.root, 0, resp.req.nonce}); err != nil {
+				return err
+			} else if err := db.SetChunkShard(c.ID, resp.req.shardIndex, ssid); err != nil {
+				return err
+			}
+			rem--
+			success[resp.req.shardIndex] = true
+		} else {
+			if resp.err == errHostAcquired {
+				// host could not be acquired without blocking; add it to the back
+				// of the queue, but next time, block
+				resp.req.block = true
+				reqQueue = append(reqQueue, resp.req)
+			} else {
+				// uploading to this host failed; don't try it again
+				errs = append(errs, &HostError{resp.req.hostKey, resp.err})
+			}
+			// try the next host in the queue
+			if len(reqQueue) > 0 {
+				reqChan <- reqQueue[0]
+				reqQueue = reqQueue[1:]
+				inflight++
+			}
+		}
+	}
+	if rem > 0 {
+		return fmt.Errorf("could not upload to enough hosts: %w", errs)
+	}
+	return nil
+}
+
 // A ChunkDownloader downloads the shards of a chunk.
 type ChunkDownloader interface {
 	DownloadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, off, n int64) ([][]byte, error)
