@@ -192,7 +192,7 @@ func (s *Session) sufficientFunds(price types.Currency) bool {
 // an active RPC; in this case, the RPC will return ErrInterrupted if it was
 // blocked on i/o.
 func (s *Session) Interrupt() {
-	atomic.SwapInt32(&s.interrupted, 1)
+	atomic.StoreInt32(&s.interrupted, 1)
 	s.conn.Close()
 }
 
