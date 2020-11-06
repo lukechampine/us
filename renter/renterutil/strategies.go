@@ -710,6 +710,126 @@ func (pcd ParallelChunkDownloader) DownloadChunk(ctx context.Context, db MetaDB,
 	return shards, nil
 }
 
+// OverdriveChunkDownloader downloads the shards of a chunk in parallel.
+type OverdriveChunkDownloader struct {
+	Hosts     *HostSet
+	Overdrive int
+}
+
+// DownloadChunk implements ChunkDownloader.
+func (ocd OverdriveChunkDownloader) DownloadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, off, n int64) ([][]byte, error) {
+	if ocd.Overdrive < 0 {
+		panic("overdrive cannot be negative")
+	}
+	numWorkers := int(c.MinShards) + ocd.Overdrive
+	if numWorkers > len(c.Shards) {
+		numWorkers = len(c.Shards)
+	}
+
+	minChunkSize := merkle.SegmentSize * int64(c.MinShards)
+	start := (off / minChunkSize) * merkle.SegmentSize
+	end := ((off + n) / minChunkSize) * merkle.SegmentSize
+	if (off+n)%minChunkSize != 0 {
+		end += merkle.SegmentSize
+	}
+	offset, length := start, end-start
+
+	// download shards in parallel, stopping when we have any c.MinShards of
+	// them
+	type req struct {
+		shardIndex int
+		block      bool // wait to acquire
+	}
+	type resp struct {
+		req   req
+		shard []byte
+		err   *HostError
+	}
+	reqChan := make(chan req, numWorkers)
+	respChan := make(chan resp, numWorkers)
+	var wg sync.WaitGroup
+	wg.Add(numWorkers)
+	ctx, cancel := context.WithCancel(ctx)
+	defer func() {
+		close(reqChan)
+		cancel()
+		wg.Wait()
+	}()
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for req := range reqChan {
+				shard, err := db.Shard(c.Shards[req.shardIndex])
+				if err != nil {
+					respChan <- resp{req, nil, &HostError{shard.HostKey, err}}
+					continue
+				}
+				sess, err := ocd.Hosts.tryAcquire(shard.HostKey)
+				if err == errHostAcquired && req.block {
+					sess, err = ocd.Hosts.acquire(shard.HostKey)
+				}
+				if err != nil {
+					respChan <- resp{req, nil, &HostError{shard.HostKey, err}}
+					continue
+				}
+
+				section, err := downloadCtx(ctx, sess, key, shard, offset, length)
+				ocd.Hosts.release(shard.HostKey)
+				if err != nil {
+					respChan <- resp{req, nil, &HostError{shard.HostKey, err}}
+					continue
+				}
+				respChan <- resp{req, section, nil}
+			}
+		}()
+	}
+
+	// initialize queue in random order
+	reqQueue := make([]req, len(c.Shards))
+	for i, shardIndex := range frand.Perm(len(reqQueue)) {
+		reqQueue[i] = req{shardIndex, false}
+	}
+	// send initial requests
+	for _, req := range reqQueue[:numWorkers] {
+		reqChan <- req
+	}
+	reqQueue = reqQueue[numWorkers:]
+
+	// await responses and replace failed requests as necessary
+	shards := make([][]byte, len(c.Shards))
+	for i := range shards {
+		shards[i] = make([]byte, 0, length)
+	}
+	var goodShards int
+	var errs HostErrorSet
+	for goodShards < int(c.MinShards) && goodShards+len(errs) < len(c.Shards) {
+		resp := <-respChan
+		if resp.err == nil {
+			goodShards++
+			shards[resp.req.shardIndex] = resp.shard
+		} else {
+			if resp.err.Err == errHostAcquired {
+				// host could not be acquired without blocking; add it to the back
+				// of the queue, but next time, block
+				resp.req.block = true
+				reqQueue = append(reqQueue, resp.req)
+			} else {
+				// downloading from this host failed; don't try it again
+				errs = append(errs, resp.err)
+			}
+			// try the next host in the queue
+			if len(reqQueue) > 0 {
+				reqChan <- reqQueue[0]
+				reqQueue = reqQueue[1:]
+			}
+		}
+	}
+	if goodShards < int(c.MinShards) {
+		return nil, fmt.Errorf("too many hosts did not supply their shard (needed %v, got %v): %w", c.MinShards, goodShards, errs)
+	}
+	return shards, nil
+}
+
 // A ChunkUpdater updates or replaces an existing chunk, returning the ID of the
 // new chunk.
 type ChunkUpdater interface {
