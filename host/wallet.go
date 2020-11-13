@@ -12,28 +12,30 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
-func fundTransaction(txn *types.Transaction, cost types.Currency, w Wallet, tp TransactionPool) (renterhost.RPCFormContractAdditions, error) {
+func fundTransaction(txn *types.Transaction, cost types.Currency, w Wallet, tp TransactionPool) (renterhost.RPCFormContractAdditions, func(), error) {
 	if cost.IsZero() {
-		return renterhost.RPCFormContractAdditions{}, nil
+		return renterhost.RPCFormContractAdditions{}, nil, nil
 	}
 	oldInputs, oldOutputs := len(txn.SiacoinInputs), len(txn.SiacoinOutputs)
-	if _, err := w.FundTransaction(txn, cost); err != nil {
-		return renterhost.RPCFormContractAdditions{}, err
+	_, discard, err := w.FundTransaction(txn, cost)
+	if err != nil {
+		return renterhost.RPCFormContractAdditions{}, nil, err
 	}
 	parents, err := tp.UnconfirmedParents(*txn)
 	if err != nil {
-		return renterhost.RPCFormContractAdditions{}, err
+		discard()
+		return renterhost.RPCFormContractAdditions{}, nil, err
 	}
 	return renterhost.RPCFormContractAdditions{
 		Parents: parents,
 		Inputs:  txn.SiacoinInputs[oldInputs:],
 		Outputs: txn.SiacoinOutputs[oldOutputs:],
-	}, nil
+	}, discard, nil
 }
 
 func fundContractTransaction(cb *contractBuilder, w Wallet, tp TransactionPool) (err error) {
 	cost := cb.contract.ValidHostPayout().Sub(cb.settings.ContractPrice) // NOTE: validateFormContract prevents underflow here
-	cb.hostAdditions, err = fundTransaction(&cb.transaction, cost, w, tp)
+	cb.hostAdditions, cb.discard, err = fundTransaction(&cb.transaction, cost, w, tp)
 	cb.parents = append(cb.parents, cb.hostAdditions.Parents...)
 	return
 }
@@ -45,7 +47,7 @@ func fundRenewalTransaction(cb *contractBuilder, w Wallet, tp TransactionPool) (
 		basePrice = cb.settings.StoragePrice.Mul64(cb.contract.FileSize).Mul64(timeExtension)
 	}
 	cost := cb.contract.ValidHostPayout().Sub(cb.settings.ContractPrice).Sub(basePrice) // NOTE: validateRenewContract prevents underflow here
-	cb.hostAdditions, err = fundTransaction(&cb.transaction, cost, w, tp)
+	cb.hostAdditions, cb.discard, err = fundTransaction(&cb.transaction, cost, w, tp)
 	cb.parents = append(cb.parents, cb.hostAdditions.Parents...)
 	return
 }
@@ -62,16 +64,18 @@ func signTransaction(txn *types.Transaction, inputs []types.SiacoinInput, w Wall
 	return txn.TransactionSignatures[len(txn.TransactionSignatures)-len(toSign):], err
 }
 
-func finalizeSimpleTxn(txn types.Transaction, w Wallet) ([]types.Transaction, error) {
-	if toSign, err := w.FundTransaction(&txn, txn.SiacoinOutputSum()); err != nil {
-		return nil, err
+func finalizeSimpleTxn(txn types.Transaction, w Wallet) ([]types.Transaction, func(), error) {
+	toSign, discard, err := w.FundTransaction(&txn, txn.SiacoinOutputSum())
+	if err != nil {
+		return nil, nil, err
 	} else if err := w.SignTransaction(&txn, toSign); err != nil {
-		return nil, err
+		discard()
+		return nil, nil, err
 	}
-	return []types.Transaction{txn}, nil
+	return []types.Transaction{txn}, discard, nil
 }
 
-func finalRevisionTransaction(c Contract, feePerByte types.Currency, w Wallet) ([]types.Transaction, error) {
+func finalRevisionTransaction(c Contract, feePerByte types.Currency, w Wallet) ([]types.Transaction, func(), error) {
 	const estTxnSize = 2048
 	return finalizeSimpleTxn(types.Transaction{
 		FileContractRevisions: []types.FileContractRevision{c.Revision},
@@ -80,7 +84,7 @@ func finalRevisionTransaction(c Contract, feePerByte types.Currency, w Wallet) (
 	}, w)
 }
 
-func storageProofTransaction(sp types.StorageProof, feePerByte types.Currency, w Wallet) ([]types.Transaction, error) {
+func storageProofTransaction(sp types.StorageProof, feePerByte types.Currency, w Wallet) ([]types.Transaction, func(), error) {
 	// TODO: A transaction containing a storage proof is not allowed to contain
 	// any other type of output, which means we can't include a typical change
 	// output; instead, we must construct a parent transaction that creates an
@@ -88,10 +92,10 @@ func storageProofTransaction(sp types.StorageProof, feePerByte types.Currency, w
 	// transaction with no fee.
 	return []types.Transaction{{
 		StorageProofs: []types.StorageProof{sp},
-	}}, nil
+	}}, func() {}, nil
 }
 
-func announcementTransaction(addr modules.NetAddress, key ed25519.PrivateKey, feePerByte types.Currency, w Wallet) ([]types.Transaction, error) {
+func announcementTransaction(addr modules.NetAddress, key ed25519.PrivateKey, feePerByte types.Currency, w Wallet) ([]types.Transaction, func(), error) {
 	const estTxnSize = 2048
 	ann := encoding.MarshalAll(modules.PrefixHostAnnouncement, addr, types.SiaPublicKey{
 		Algorithm: types.SignatureEd25519,

@@ -116,10 +116,11 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 	if !fee.IsZero() {
 		txn.MinerFees = append(txn.MinerFees, fee)
 	}
-	toSign, err := w.FundTransaction(&txn, totalCost)
+	toSign, discard, err := w.FundTransaction(&txn, totalCost)
 	if err != nil {
 		return ContractRevision{}, nil, err
 	}
+	defer discard()
 	// the host expects the contract to have no TransactionSignatures
 	addedSignatures := txn.TransactionSignatures
 	txn.TransactionSignatures = nil

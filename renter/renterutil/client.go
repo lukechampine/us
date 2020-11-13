@@ -66,14 +66,14 @@ func (c *SiadClient) Address() (types.UnlockHash, error) {
 
 // FundTransaction adds the specified signatures to the transaction using
 // private keys known to the wallet.
-func (c *SiadClient) FundTransaction(txn *types.Transaction, amount types.Currency) ([]crypto.Hash, error) {
+func (c *SiadClient) FundTransaction(txn *types.Transaction, amount types.Currency) ([]crypto.Hash, func(), error) {
 	if amount.IsZero() {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	wug, err := c.siad.WalletUnspentGet()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// filter out siafund outputs
 	outputs := wug.Outputs[:0]
@@ -91,7 +91,7 @@ func (c *SiadClient) FundTransaction(txn *types.Transaction, amount types.Curren
 		}
 	}
 	if balance.Cmp(amount) < 0 {
-		return nil, wallet.ErrInsufficientFunds
+		return nil, nil, wallet.ErrInsufficientFunds
 	} else if confirmedBalance.Cmp(amount) >= 0 {
 		// sufficient confirmed balance; filter out unconfirmed outputs
 		outputs = outputs[:0]
@@ -131,7 +131,7 @@ func (c *SiadClient) FundTransaction(txn *types.Transaction, amount types.Curren
 	for _, o := range fundingOutputs {
 		wucg, err := c.siad.WalletUnlockConditionsGet(o.UnlockHash)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
 			ParentID:         types.SiacoinOutputID(o.ID),
@@ -144,14 +144,14 @@ func (c *SiadClient) FundTransaction(txn *types.Transaction, amount types.Curren
 	if change := outputSum.Sub(amount); !change.IsZero() {
 		changeAddr, err := c.Address()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
 			UnlockHash: changeAddr,
 			Value:      change,
 		})
 	}
-	return toSign, nil
+	return toSign, func() {}, nil // TODO
 }
 
 // SignTransaction adds the specified signatures to the transaction using

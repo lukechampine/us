@@ -23,8 +23,19 @@ func wrapErrWithReplace(err *error, fnName string) {
 
 // A Wallet provides addresses and outputs, and can sign transactions.
 type Wallet interface {
+	// Address returns an address controlled by the wallet.
 	Address() (types.UnlockHash, error)
-	FundTransaction(txn *types.Transaction, amount types.Currency) ([]crypto.Hash, error)
+	// FundTransaction adds inputs to txn worth at least amount, adding a change
+	// output if needed. It returns the added input IDs, for use with
+	// SignTransaction. It also returns a function that will "unclaim" the
+	// inputs; this function must be called once the transaction has been
+	// broadcast or discarded.
+	FundTransaction(txn *types.Transaction, amount types.Currency) ([]crypto.Hash, func(), error)
+	// SignTransaction signs the specified transaction using keys derived from the
+	// wallet seed. If toSign is nil, SignTransaction will automatically add
+	// TransactionSignatures for each input owned by the seed. If toSign is not nil,
+	// it a list of indices of TransactionSignatures already present in txn;
+	// SignTransaction will fill in the Signature field of each.
 	SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error
 }
 
@@ -125,9 +136,12 @@ func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool)
 	}
 
 	// pay for the fee
-	if toSign, err := w.FundTransaction(&txn, fee); err != nil {
+	toSign, discard, err := w.FundTransaction(&txn, fee)
+	if err != nil {
 		return err
-	} else if err := w.SignTransaction(&txn, toSign); err != nil {
+	}
+	defer discard()
+	if err := w.SignTransaction(&txn, toSign); err != nil {
 		return errors.Wrap(err, "failed to sign transaction")
 	}
 

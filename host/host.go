@@ -58,7 +58,7 @@ type SectorStore interface {
 // A Wallet provides addresses and funds and signs transactions.
 type Wallet interface {
 	Address() (types.UnlockHash, error)
-	FundTransaction(txn *types.Transaction, cost types.Currency) ([]crypto.Hash, error)
+	FundTransaction(txn *types.Transaction, cost types.Currency) ([]crypto.Hash, func(), error)
 	SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error
 }
 
