@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -551,7 +552,24 @@ func TestKVCancel(t *testing.T) {
 }
 
 func TestKVBuffering(t *testing.T) {
-	t.Skip("TODO: store multiple values in one sector")
+	kv := createTestingKV(t, 3, 2, 3)
+	sbb := kv.NewSmallBlobBuffer()
+	keys := []string{"foo", "bar", "baz"}
+	for _, k := range keys {
+		sbb.AddBlob([]byte(k), []byte(k+strings.Repeat("_val", 20)))
+	}
+	ctx := context.Background()
+	err := sbb.Upload(ctx, kv.Uploader.(ParallelChunkUploader).Hosts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range keys {
+		if data, err := kv.GetBytes(ctx, []byte(k)); err != nil {
+			t.Fatal(err)
+		} else if string(data) != k+strings.Repeat("_val", 20) {
+			t.Fatalf("bad data: %q", data)
+		}
+	}
 }
 
 type errorAfterNReader struct {

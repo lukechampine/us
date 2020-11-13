@@ -3,7 +3,10 @@ package renterutil
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"sync"
 
 	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
@@ -169,6 +172,182 @@ func (kv PseudoKV) repairChunk(ctx context.Context, b DBBlob, c DBChunk, r io.Re
 	rsc.Encode(buf, shards)
 	if err := kv.Uploader.UploadChunk(ctx, kv.DB, c, b.Seed, shards); err != nil {
 		return err
+	}
+	return nil
+}
+
+// A SmallBlobBuffer packs multiple blobs into one sector (per host) for
+// simultaneous upload.
+type SmallBlobBuffer struct {
+	kv     PseudoKV
+	shards []renter.SectorBuilder
+	blobs  []DBBlob
+	lens   []int
+}
+
+// Remaining is the number of bytes that can be added to the buffer. Calling
+// AddBlob with a value exceeding this size will result in a panic.
+func (sbb *SmallBlobBuffer) Remaining() int {
+	return sbb.kv.M * sbb.shards[0].Remaining()
+}
+
+// AddBlob adds a key-value pair to the buffer. It panics if the value is too
+// large to fit in the buffer.
+func (sbb *SmallBlobBuffer) AddBlob(key []byte, val []byte) {
+	shards := make([][]byte, len(sbb.shards))
+	for i := range shards {
+		shards[i] = sbb.shards[i].SliceForAppend()
+	}
+	renter.NewRSCode(sbb.kv.M, sbb.kv.N).Encode(val, shards)
+	seed := frand.Entropy256()
+	for i := range shards {
+		sbb.shards[i].Append(shards[i], seed, renter.RandomNonce())
+	}
+	sbb.blobs = append(sbb.blobs, DBBlob{
+		Key:  key,
+		Seed: seed,
+	})
+	sbb.lens = append(sbb.lens, len(val))
+}
+
+// NewSmallBlobBuffer initializes a SmallBlobBuffer backed by kv.
+func (kv PseudoKV) NewSmallBlobBuffer() *SmallBlobBuffer {
+	return &SmallBlobBuffer{
+		kv:     kv,
+		shards: make([]renter.SectorBuilder, kv.N),
+	}
+}
+
+// Upload uploads all blobs in the buffer and adds them to the KV.
+func (sbb *SmallBlobBuffer) Upload(ctx context.Context, hosts *HostSet) error {
+	if len(sbb.shards) > len(hosts.sessions) {
+		return errors.New("more shards than hosts")
+	}
+	// choose hosts
+	newHosts := make(map[hostdb.HostPublicKey]struct{})
+	for h := range hosts.sessions {
+		newHosts[h] = struct{}{}
+	}
+	chooseHost := func() (h hostdb.HostPublicKey) {
+		for h = range newHosts {
+			delete(newHosts, h)
+			break
+		}
+		return
+	}
+	rem := len(sbb.shards)
+
+	// spawn workers
+	type req struct {
+		shardIndex int
+		hostKey    hostdb.HostPublicKey
+		shard      *[renterhost.SectorSize]byte
+		block      bool // wait to acquire
+	}
+	type resp struct {
+		req req
+		err error
+	}
+	reqChan := make(chan req, rem)
+	respChan := make(chan resp, rem)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	for i := 0; i < rem; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for req := range reqChan {
+				sess, err := hosts.tryAcquire(req.hostKey)
+				if err == errHostAcquired && req.block {
+					sess, err = hosts.acquire(req.hostKey)
+				}
+				if err != nil {
+					respChan <- resp{req, err}
+					continue
+				}
+
+				root, err := uploadCtx(ctx, sess, req.shard)
+				hosts.release(req.hostKey)
+				if err != nil {
+					respChan <- resp{req, err}
+					continue
+				}
+				sbb.shards[req.shardIndex].SetMerkleRoot(root)
+				respChan <- resp{req, nil}
+			}
+		}()
+	}
+
+	// start by requesting uploads to rem hosts, non-blocking.
+	var inflight int
+	for shardIndex := range sbb.shards {
+		reqChan <- req{
+			shardIndex: shardIndex,
+			hostKey:    chooseHost(),
+			shard:      sbb.shards[shardIndex].Finish(),
+			block:      false,
+		}
+		inflight++
+	}
+
+	// for those that return errors, add the next host to the queue, non-blocking.
+	// for those that block, add the same host to the queue, blocking.
+	var reqQueue []req
+	var errs HostErrorSet
+	finalHosts := make([]hostdb.HostPublicKey, len(sbb.shards))
+	for inflight > 0 {
+		resp := <-respChan
+		inflight--
+		if resp.err == nil {
+			finalHosts[resp.req.shardIndex] = resp.req.hostKey
+			rem--
+		} else {
+			if resp.err == errHostAcquired {
+				// host could not be acquired without blocking; add it to the back
+				// of the queue, but next time, block
+				resp.req.block = true
+				reqQueue = append(reqQueue, resp.req)
+			} else {
+				// uploading to this host failed; don't try it again
+				errs = append(errs, &HostError{resp.req.hostKey, resp.err})
+				// add a different host to the queue, if able
+				if len(newHosts) > 0 {
+					resp.req.hostKey = chooseHost()
+					resp.req.block = false
+					reqQueue = append(reqQueue, resp.req)
+				}
+			}
+			// try the next host in the queue
+			if len(reqQueue) > 0 {
+				reqChan <- reqQueue[0]
+				reqQueue = reqQueue[1:]
+				inflight++
+			}
+		}
+	}
+	close(reqChan)
+	if rem > 0 {
+		return fmt.Errorf("could not upload to enough hosts: %w", errs)
+	}
+
+	// insert all blobs into db
+	for blobIndex, blob := range sbb.blobs {
+		c, err := sbb.kv.DB.AddChunk(sbb.kv.M, sbb.kv.N, uint64(sbb.lens[blobIndex]))
+		if err != nil {
+			return err
+		}
+		for shardIndex := range sbb.shards {
+			ss := sbb.shards[shardIndex].Slices()[blobIndex]
+			if sid, err := sbb.kv.DB.AddShard(DBShard{finalHosts[shardIndex], ss.MerkleRoot, ss.SegmentIndex, ss.Nonce}); err != nil {
+				return err
+			} else if err := sbb.kv.DB.SetChunkShard(c.ID, shardIndex, sid); err != nil {
+				return err
+			}
+		}
+		blob.Chunks = append(blob.Chunks, c.ID)
+		if err := sbb.kv.DB.AddBlob(blob); err != nil {
+			return err
+		}
 	}
 	return nil
 }

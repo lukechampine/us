@@ -78,7 +78,7 @@ type SerialChunkUploader struct {
 
 // UploadChunk implements ChunkUploader.
 func (scu SerialChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
-	// choose hosts, preserving any that at already present
+	// choose hosts, preserving any that are already present
 	newHosts := make(map[hostdb.HostPublicKey]struct{})
 	for h := range scu.Hosts.sessions {
 		newHosts[h] = struct{}{}
@@ -150,7 +150,7 @@ func (pcu ParallelChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c D
 	if len(shards) > len(pcu.Hosts.sessions) {
 		return errors.New("more shards than hosts")
 	}
-	// choose hosts, preserving any that at already present
+	// choose hosts, preserving any that are already present
 	newHosts := make(map[hostdb.HostPublicKey]struct{})
 	for h := range pcu.Hosts.sessions {
 		newHosts[h] = struct{}{}
@@ -316,7 +316,7 @@ type MinimumChunkUploader struct {
 
 // UploadChunk implements ChunkUploader.
 func (mcu MinimumChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error {
-	// choose hosts, preserving any that at already present
+	// choose hosts, preserving any that are already present
 	newHosts := make(map[hostdb.HostPublicKey]struct{})
 	for h := range mcu.Hosts.sessions {
 		newHosts[h] = struct{}{}
