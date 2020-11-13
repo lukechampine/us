@@ -234,12 +234,12 @@ func New(store Store) *SeedWallet {
 	}
 }
 
-// A HotWallet pairs a SeedWallet with a Seed, making it more convenient to
-// generate new addresses and sign transactions. However, be aware that storing
-// a Seed in memory is less secure than storing it on a hardware wallet.
+// A HotWallet pairs a SeedWallet with a Seed, providing a more convenient API
+// for generating addresses and signing transactions.
 type HotWallet struct {
 	*SeedWallet
 	seed Seed
+	used map[types.SiacoinOutputID]struct{}
 	mu   sync.Mutex
 }
 
@@ -256,11 +256,16 @@ func (w *HotWallet) Address() (types.UnlockHash, error) {
 	return info.UnlockHash(), nil
 }
 
-// FundTransaction is a helper function that adds inputs to txn sufficient to
-// cover the specified amount. It may also add a change output to the transaction.
-func (w *HotWallet) FundTransaction(txn *types.Transaction, amount types.Currency) ([]crypto.Hash, error) {
+// FundTransaction adds inputs to txn worth at least amount, adding a change
+// output if needed. It returns the added input IDs, for use with
+// SignTransaction. It also returns a function that will "unclaim" the inputs;
+// this function must be called once the transaction has been broadcast or
+// discarded.
+func (w *HotWallet) FundTransaction(txn *types.Transaction, amount types.Currency) ([]crypto.Hash, func(), error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if amount.IsZero() {
-		return nil, nil
+		return nil, nil, nil
 	}
 	// UnspentOutputs(true) returns the outputs that exist after Limbo
 	// transactions are applied. This is not ideal, because the transactions
@@ -268,9 +273,25 @@ func (w *HotWallet) FundTransaction(txn *types.Transaction, amount types.Currenc
 	// return any outputs that were created in Limbo transactions, but it *will*
 	// return outputs that have been *spent* in Limbo transactions. So what we
 	// really want is the intersection of these sets, keeping only the confirmed
-	// outputs that were not spent in Limbo transactions.
+	// outputs that were not spent in Limbo transactions. We also filter out any
+	// outputs in the 'used' set, i.e. outputs that are have been claimed by
+	// another FundTransaction call (but have not yet been broadcast).
 	limboOutputs := w.UnspentOutputs(true)
+	unused := limboOutputs[:0]
+	for _, lo := range limboOutputs {
+		if _, ok := w.used[lo.ID]; !ok {
+			unused = append(unused, lo)
+		}
+	}
+	limboOutputs = unused
 	confirmedOutputs := w.UnspentOutputs(false)
+	unused = confirmedOutputs[:0]
+	for _, co := range confirmedOutputs {
+		if _, ok := w.used[co.ID]; !ok {
+			unused = append(unused, co)
+		}
+	}
+	confirmedOutputs = unused
 	var fundingOutputs []UnspentOutput
 	for _, lo := range limboOutputs {
 		for _, co := range confirmedOutputs {
@@ -290,7 +311,7 @@ func (w *HotWallet) FundTransaction(txn *types.Transaction, amount types.Currenc
 	}
 	if balance.Cmp(amount) < 0 {
 		if limboBalance.Cmp(amount) < 0 {
-			return nil, ErrInsufficientFunds
+			return nil, nil, ErrInsufficientFunds
 		}
 		// confirmed outputs are not sufficient, but limbo outputs are
 		fundingOutputs = limboOutputs
@@ -311,7 +332,7 @@ func (w *HotWallet) FundTransaction(txn *types.Transaction, amount types.Currenc
 	for _, o := range fundingOutputs {
 		info, ok := w.AddressInfo(o.UnlockHash)
 		if !ok {
-			return nil, errors.New("missing unlock conditions for address")
+			return nil, nil, errors.New("missing unlock conditions for address")
 		}
 		txn.SiacoinInputs = append(txn.SiacoinInputs, types.SiacoinInput{
 			ParentID:         o.ID,
@@ -322,13 +343,25 @@ func (w *HotWallet) FundTransaction(txn *types.Transaction, amount types.Currenc
 	}
 	// add change output, if needed
 	if change := outputSum.Sub(amount); !change.IsZero() {
-		changeAddr, _ := w.Address()
+		index := w.SeedIndex()
+		info := SeedAddressInfo{
+			UnlockConditions: StandardUnlockConditions(w.seed.PublicKey(index)),
+			KeyIndex:         index,
+		}
+		w.AddAddress(info)
 		txn.SiacoinOutputs = append(txn.SiacoinOutputs, types.SiacoinOutput{
-			UnlockHash: changeAddr,
+			UnlockHash: info.UnlockHash(),
 			Value:      change,
 		})
 	}
-	return toSign, nil
+	discard := func() {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		for _, o := range fundingOutputs {
+			delete(w.used, o.ID)
+		}
+	}
+	return toSign, discard, nil
 }
 
 // SignTransaction signs the specified transaction using keys derived from the

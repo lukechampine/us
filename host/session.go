@@ -272,6 +272,7 @@ func (sh *SessionHandler) rpcFormContract(s *session) error {
 		currentHeight: s.ctx.BlockHeight,
 		minFee:        minFee(sh.tpool),
 	}
+	defer cb.cleanup()
 	if err := validateFormContract(&cb); err != nil {
 		return fmt.Errorf("proposed contract was not acceptable: %w", s.writeError(err))
 	} else if err := fundContractTransaction(&cb, sh.wallet, sh.tpool); err != nil {
@@ -316,6 +317,7 @@ func (sh *SessionHandler) rpcRenewAndClearContract(s *session) error {
 		currentHeight: sh.contracts.Height(),
 		minFee:        minFee(sh.tpool),
 	}
+	defer cb.cleanup()
 	if err := validateFinalRevision(&cb, s.ctx.Contract, req.FinalValidProofValues, req.FinalMissedProofValues); err != nil {
 		return s.writeError(err)
 	} else if err := validateRenewContract(&cb, s.ctx.Contract); err != nil {

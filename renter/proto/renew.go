@@ -126,10 +126,11 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	if !fee.IsZero() {
 		txn.MinerFees = append(txn.MinerFees, fee)
 	}
-	toSign, err := w.FundTransaction(&txn, renterCost)
+	toSign, discard, err := w.FundTransaction(&txn, renterCost)
 	if err != nil {
 		return ContractRevision{}, nil, err
 	}
+	defer discard()
 	// the host expects the contract to have no TransactionSignatures
 	addedSignatures := txn.TransactionSignatures
 	txn.TransactionSignatures = nil

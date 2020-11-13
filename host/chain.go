@@ -92,10 +92,11 @@ func (cw *ChainWatcher) Announce(addr modules.NetAddress, key ed25519.PrivateKey
 	if err != nil {
 		return err
 	}
-	txns, err := announcementTransaction(addr, key, feePerByte, cw.wallet)
+	txns, discard, err := announcementTransaction(addr, key, feePerByte, cw.wallet)
 	if err != nil {
 		return err
 	}
+	defer discard()
 	return cw.submitTransaction(txns)
 }
 
@@ -128,22 +129,22 @@ func (cw *ChainWatcher) submitTransaction(txns []types.Transaction) error {
 	return err
 }
 
-func (cw *ChainWatcher) finalizeContract(c Contract) ([]types.Transaction, error) {
+func (cw *ChainWatcher) finalizeContract(c Contract) ([]types.Transaction, func(), error) {
 	_, feePerByte, err := cw.tpool.FeeEstimate()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return finalRevisionTransaction(c, feePerByte, cw.wallet)
 }
 
-func (cw *ChainWatcher) proveContract(c Contract) ([]types.Transaction, error) {
+func (cw *ChainWatcher) proveContract(c Contract) ([]types.Transaction, func(), error) {
 	_, feePerByte, err := cw.tpool.FeeEstimate()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sp, err := buildStorageProof(c.ID(), c.ProofSegment, cw.sectors)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return storageProofTransaction(sp, feePerByte, cw.wallet)
 }
@@ -156,15 +157,27 @@ func (cw *ChainWatcher) watchLoop() {
 			case !c.FormationConfirmed:
 				c.FatalError = cw.submitTransaction(c.FormationSet)
 			case !c.FinalizationConfirmed:
-				if len(c.FinalizationSet) == 0 {
-					c.FinalizationSet, c.FatalError = cw.finalizeContract(c)
+				txnSet, discard, err := cw.finalizeContract(c)
+				if err != nil {
+					c.FatalError = err
+					continue
 				}
-				c.FatalError = cw.submitTransaction(c.FinalizationSet)
+				c.FatalError = cw.submitTransaction(txnSet)
+				discard()
+				if c.FatalError == nil {
+					c.FinalizationSet = txnSet
+				}
 			case !c.ProofConfirmed:
-				if len(c.ProofSet) == 0 {
-					c.ProofSet, c.FatalError = cw.proveContract(c)
+				txnSet, discard, err := cw.proveContract(c)
+				if err != nil {
+					c.FatalError = err
+					continue
 				}
-				c.FatalError = cw.submitTransaction(c.ProofSet)
+				c.FatalError = cw.submitTransaction(txnSet)
+				discard()
+				if c.FatalError == nil {
+					c.ProofSet = txnSet
+				}
 			}
 			cw.contracts.UpdateContractTransactions(c.ID(), c.FinalizationSet, c.ProofSet, c.FatalError)
 		}

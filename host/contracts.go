@@ -48,6 +48,7 @@ type contractBuilder struct {
 	settings      hostdb.HostSettings
 	currentHeight types.BlockHeight
 	minFee        types.Currency
+	discard       func() // release txn inputs
 
 	hostAdditions renterhost.RPCFormContractAdditions
 	renterSigs    renterhost.RPCFormContractSignatures
@@ -57,6 +58,12 @@ type contractBuilder struct {
 	finalRevision   types.FileContractRevision
 	renterRenewSigs renterhost.RPCRenewAndClearContractSignatures
 	hostRenewSigs   renterhost.RPCRenewAndClearContractSignatures
+}
+
+func (cb *contractBuilder) cleanup() {
+	if cb.discard != nil {
+		cb.discard()
+	}
 }
 
 func validateFormContract(cb *contractBuilder) error {
