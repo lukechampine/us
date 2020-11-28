@@ -8,8 +8,8 @@ import (
 	"crypto/sha512"
 	"strconv"
 
+	"filippo.io/edwards25519"
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"lukechampine.com/us/ed25519hash/internal/edwards25519"
 )
 
 // Verify reports whether sig is a valid signature of hash by pub.
@@ -22,32 +22,26 @@ func Verify(pub ed25519.PublicKey, hash crypto.Hash, sig []byte) bool {
 		return false
 	}
 
-	var A edwards25519.ExtendedGroupElement
-	var publicKeyBytes [32]byte
-	copy(publicKeyBytes[:], pub)
-	if !A.FromBytes(&publicKeyBytes) {
+	A, err := new(edwards25519.Point).SetBytes(pub)
+	if err != nil {
 		return false
 	}
-	edwards25519.FeNeg(&A.X, &A.X)
-	edwards25519.FeNeg(&A.T, &A.T)
+	A.Negate(A)
 
 	buf := make([]byte, 96)
 	copy(buf[:32], sig[:32])
 	copy(buf[32:], pub)
 	copy(buf[64:], hash[:])
-	digest := sha512.Sum512(buf)
+	hramDigest := sha512.Sum512(buf)
+	hramDigestReduced := new(edwards25519.Scalar).SetUniformBytes(hramDigest[:])
 
-	var hReduced [32]byte
-	edwards25519.ScReduce(&hReduced, &digest)
+	b, err := new(edwards25519.Scalar).SetCanonicalBytes(sig[32:])
+	if err != nil {
+		return false
+	}
 
-	var R edwards25519.ProjectiveGroupElement
-	var b [32]byte
-	copy(b[:], sig[32:])
-	edwards25519.GeDoubleScalarMultVartime(&R, &hReduced, &A, &b)
-
-	var checkR [32]byte
-	R.ToBytes(&checkR)
-	return bytes.Equal(sig[:32], checkR[:])
+	encodedR := new(edwards25519.Point).VarTimeDoubleScalarBaseMult(hramDigestReduced, A, b).Bytes()
+	return bytes.Equal(sig[:32], encodedR)
 }
 
 // Sign signs a hash with priv.
@@ -61,40 +55,28 @@ func sign(signature []byte, priv ed25519.PrivateKey, hash crypto.Hash) []byte {
 		panic("ed25519: bad private key length: " + strconv.Itoa(l))
 	}
 
-	digest1 := sha512.Sum512(priv[:32])
-
-	var expandedSecretKey [32]byte
-	copy(expandedSecretKey[:], digest1[:32])
-	expandedSecretKey[0] &= 248
-	expandedSecretKey[31] &= 63
-	expandedSecretKey[31] |= 64
+	keyDigest := sha512.Sum512(priv[:32])
+	expandedSecretKey := new(edwards25519.Scalar).SetBytesWithClamping(keyDigest[:32])
 
 	buf := make([]byte, 96)
-	copy(buf[:32], digest1[32:])
+	copy(buf[:32], keyDigest[32:])
 	copy(buf[32:], hash[:])
 	messageDigest := sha512.Sum512(buf[:64])
 
-	var messageDigestReduced [32]byte
-	edwards25519.ScReduce(&messageDigestReduced, &messageDigest)
-	var R edwards25519.ExtendedGroupElement
-	edwards25519.GeScalarMultBase(&R, &messageDigestReduced)
-
-	var encodedR [32]byte
-	R.ToBytes(&encodedR)
+	messageDigestReduced := new(edwards25519.Scalar).SetUniformBytes(messageDigest[:])
+	encodedR := new(edwards25519.Point).ScalarBaseMult(messageDigestReduced).Bytes()
 
 	copy(buf[:32], encodedR[:])
 	copy(buf[32:], priv[32:])
 	copy(buf[64:], hash[:])
 	hramDigest := sha512.Sum512(buf[:96])
+	hramDigestReduced := new(edwards25519.Scalar).SetUniformBytes(hramDigest[:])
 
-	var hramDigestReduced [32]byte
-	edwards25519.ScReduce(&hramDigestReduced, &hramDigest)
+	s := hramDigestReduced.Multiply(hramDigestReduced, expandedSecretKey)
+	s.Add(s, messageDigestReduced)
 
-	var s [32]byte
-	edwards25519.ScMulAdd(&s, &hramDigestReduced, &expandedSecretKey, &messageDigestReduced)
-
-	copy(signature[:32], encodedR[:])
-	copy(signature[32:], s[:])
+	copy(signature[:32], encodedR)
+	copy(signature[32:], s.Bytes())
 	return signature
 }
 

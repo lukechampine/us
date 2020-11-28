@@ -7,26 +7,7 @@ import (
 	"testing"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
-	"lukechampine.com/us/ed25519hash/internal/edwards25519"
 )
-
-func TestUnmarshalMarshal(t *testing.T) {
-	pub, _, _ := ed25519.GenerateKey(nil)
-
-	var A edwards25519.ExtendedGroupElement
-	var pubBytes [32]byte
-	copy(pubBytes[:], pub)
-	if !A.FromBytes(&pubBytes) {
-		t.Fatalf("ExtendedGroupElement.FromBytes failed")
-	}
-
-	var pub2 [32]byte
-	A.ToBytes(&pub2)
-
-	if pubBytes != pub2 {
-		t.Errorf("FromBytes(%v)->ToBytes does not round-trip, got %x\n", pubBytes, pub2)
-	}
-}
 
 func TestSignVerify(t *testing.T) {
 	public, private, _ := ed25519.GenerateKey(nil)
