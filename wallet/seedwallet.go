@@ -354,6 +354,10 @@ func (w *HotWallet) FundTransaction(txn *types.Transaction, amount types.Currenc
 			Value:      change,
 		})
 	}
+
+	for _, o := range fundingOutputs {
+		w.used[o.ID] = struct{}{}
+	}
 	discard := func() {
 		w.mu.Lock()
 		defer w.mu.Unlock()
