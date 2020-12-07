@@ -265,7 +265,7 @@ func (w *HotWallet) FundTransaction(txn *types.Transaction, amount types.Currenc
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if amount.IsZero() {
-		return nil, nil, nil
+		return nil, func() {}, nil
 	}
 	// UnspentOutputs(true) returns the outputs that exist after Limbo
 	// transactions are applied. This is not ideal, because the transactions
