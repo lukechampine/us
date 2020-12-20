@@ -29,11 +29,18 @@ func VerifyBatch(keys []ed25519.PublicKey, hashes [][32]byte, sigs [][]byte) boo
 	// guard against this, we multiply the whole equation by the cofactor. See
 	// https://hdevalence.ca/blog/2020-10-04-its-25519am for more details.
 
-	// save some heap allocations by allocating all scalar and point values
-	// together
+	// Ultimately, we'll be computing the summation via VarTimeMultiScalarMult,
+	// which takes two slices: a []*Scalar and a []*Point. So we need those
+	// slices to contain:
+	//
+	// scalars: -sum(z_i * s_i),    z_0,  z_1, ...   z_0*k_0,  z_1*k_1,  ...
+	// points:         B,           R_0,  R_1, ...     A_0,      A_1,    ...
+	//
+	// As an optimization, we allocate all of the scalar and point values
+	// up-front, rather than allocating each slice element individually. We also
+	// split these slices up into their various components to make things a bit
+	// more readable.
 	svals := make([]edwards25519.Scalar, 1+len(sigs)+len(keys))
-	pvals := make([]edwards25519.Point, 1+len(sigs)+len(keys))
-
 	scalars := make([]*edwards25519.Scalar, 1+len(sigs)+len(keys))
 	for i := range scalars {
 		scalars[i] = &svals[i]
@@ -42,59 +49,65 @@ func VerifyBatch(keys []ed25519.PublicKey, hashes [][32]byte, sigs [][]byte) boo
 	Rcoeffs := scalars[1:][:len(sigs)] // z_i
 	Acoeffs := scalars[1+len(sigs):]   // z_i * k_i
 
-	points := make([]*edwards25519.Point, 1+len(keys)+len(sigs))
+	pvals := make([]edwards25519.Point, 1+len(sigs)+len(keys))
+	points := make([]*edwards25519.Point, 1+len(sigs)+len(keys))
 	for i := range points {
 		points[i] = &pvals[i]
 	}
-	points[0].Set(edwards25519.NewGeneratorPoint())
+	B := points[0]
 	Rs := points[1:][:len(sigs)]
 	As := points[1+len(sigs):]
 
-	for i := range sigs {
-		pub := keys[i]
-		hash := hashes[i]
-		sig := sigs[i]
-
-		// decompress A
-		if l := len(pub); l != ed25519.PublicKeySize {
-			return false
-		} else if _, err := As[i].SetBytes(pub); err != nil {
-			return false
-		}
-
-		// decompress R
+	// First, set B and decompress all points R_i and A_i.
+	B.Set(edwards25519.NewGeneratorPoint())
+	for i, sig := range sigs {
 		if len(sig) != ed25519.SignatureSize || sig[63]&224 != 0 {
 			return false
 		} else if _, err := Rs[i].SetBytes(sig[:32]); err != nil {
 			return false
 		}
+	}
+	for i, pub := range keys {
+		if l := len(pub); l != ed25519.PublicKeySize {
+			return false
+		} else if _, err := As[i].SetBytes(pub); err != nil {
+			return false
+		}
+	}
 
-		// generate z
-		buf := make([]byte, 96)
+	// Next, generate the random 128-bit coefficients z_i.
+	buf := make([]byte, 32)
+	for i := range Rcoeffs {
 		frand.Read(buf[:16])
-		z, _ := Rcoeffs[i].SetCanonicalBytes(buf[:32])
+		Rcoeffs[i].SetCanonicalBytes(buf)
+	}
 
-		// decode s
+	// Compute the coefficient for B.
+	for i, sig := range sigs {
 		s, err := new(edwards25519.Scalar).SetCanonicalBytes(sig[32:])
 		if err != nil {
 			return false
 		}
-		Bcoeff.MultiplyAdd(s, z, Bcoeff)
-
-		// compute k
-		copy(buf[:32], sig[:32])
-		copy(buf[32:], pub)
-		copy(buf[64:], hash[:])
-		hramDigest := sha512.Sum512(buf)
-		k := Acoeffs[i].SetUniformBytes(hramDigest[:])
-		Acoeffs[i] = k.Multiply(k, z)
+		Bcoeff.MultiplyAdd(Rcoeffs[i], s, Bcoeff) // Bcoeff += z_i * s_i
 	}
-	Bcoeff.Negate(Bcoeff) // this term is negative
+	Bcoeff.Negate(Bcoeff) // this term is subtracted in the summation
 
-	// multiply each point by its scalar coefficient, and sum the products
-	check := new(edwards25519.Point).VarTimeMultiScalarMult(scalars, points)
-	check.MultByCofactor(check)
-	return check.Equal(edwards25519.NewIdentityPoint()) == 1
+	// Compute the coefficients for each A_i.
+	buf = make([]byte, 96)
+	for i := range Acoeffs {
+		copy(buf[:32], sigs[i][:32])
+		copy(buf[32:], keys[i])
+		copy(buf[64:], hashes[i][:])
+		hram := sha512.Sum512(buf)
+		k := new(edwards25519.Scalar).SetUniformBytes(hram[:])
+		Acoeffs[i].Multiply(Rcoeffs[i], k)
+	}
+
+	// Multiply all the points by their coefficients, sum the results, and
+	// multiply by the cofactor.
+	sum := new(edwards25519.Point).VarTimeMultiScalarMult(scalars, points)
+	sum.MultByCofactor(sum)
+	return sum.Equal(edwards25519.NewIdentityPoint()) == 1
 }
 
 // VerifySingleKeyBatch verifies a set of signatures that were all produced by
@@ -110,10 +123,9 @@ func VerifySingleKeyBatch(pub ed25519.PublicKey, hashes [][32]byte, sigs [][]byt
 	//
 	// we compute:
 	//
-	//   [sum(z_i * k_i)]A_i
+	//   [sum(z_i * k_i)]A
 
 	svals := make([]edwards25519.Scalar, 1+len(sigs)+1)
-	pvals := make([]edwards25519.Point, 1+len(sigs)+1)
 	scalars := make([]*edwards25519.Scalar, 1+len(sigs)+1)
 	for i := range scalars {
 		scalars[i] = &svals[i]
@@ -121,6 +133,7 @@ func VerifySingleKeyBatch(pub ed25519.PublicKey, hashes [][32]byte, sigs [][]byt
 	Bcoeff := scalars[0]
 	Rcoeffs := scalars[1:][:len(sigs)]
 	Acoeff := scalars[1+len(sigs)]
+	pvals := make([]edwards25519.Point, 1+len(sigs)+1)
 	points := make([]*edwards25519.Point, 1+len(sigs)+1)
 	for i := range points {
 		points[i] = &pvals[i]
@@ -133,31 +146,29 @@ func VerifySingleKeyBatch(pub ed25519.PublicKey, hashes [][32]byte, sigs [][]byt
 	} else if _, err := A.SetBytes(pub); err != nil {
 		return false
 	}
-	for i := range sigs {
-		hash := hashes[i]
-		sig := sigs[i]
+	for i, sig := range sigs {
 		if len(sig) != ed25519.SignatureSize || sig[63]&224 != 0 {
 			return false
 		} else if _, err := Rs[i].SetBytes(sig[:32]); err != nil {
 			return false
 		}
-		buf := make([]byte, 96)
-		frand.Read(buf[:16])
-		z, _ := Rcoeffs[i].SetCanonicalBytes(buf[:32])
 		s, err := new(edwards25519.Scalar).SetCanonicalBytes(sig[32:])
 		if err != nil {
 			return false
 		}
-		Bcoeff.MultiplyAdd(s, z, Bcoeff)
+		buf := make([]byte, 96)
+		frand.Read(buf[:16])
+		Rcoeffs[i].SetCanonicalBytes(buf[:32])
+		Bcoeff.MultiplyAdd(Rcoeffs[i], s, Bcoeff)
 		copy(buf[:32], sig[:32])
 		copy(buf[32:], pub)
-		copy(buf[64:], hash[:])
-		hramDigest := sha512.Sum512(buf)
-		k := new(edwards25519.Scalar).SetUniformBytes(hramDigest[:])
-		Acoeff.MultiplyAdd(k, z, Acoeff)
+		copy(buf[64:], hashes[i][:])
+		hram := sha512.Sum512(buf)
+		k := new(edwards25519.Scalar).SetUniformBytes(hram[:])
+		Acoeff.MultiplyAdd(Rcoeffs[i], k, Acoeff)
 	}
 	Bcoeff.Negate(Bcoeff)
-	check := new(edwards25519.Point).VarTimeMultiScalarMult(scalars, points)
-	check.MultByCofactor(check)
-	return check.Equal(edwards25519.NewIdentityPoint()) == 1
+	sum := new(edwards25519.Point).VarTimeMultiScalarMult(scalars, points)
+	sum.MultByCofactor(sum)
+	return sum.Equal(edwards25519.NewIdentityPoint()) == 1
 }

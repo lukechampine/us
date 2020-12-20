@@ -72,8 +72,7 @@ func sign(signature []byte, priv ed25519.PrivateKey, hash crypto.Hash) []byte {
 	hramDigest := sha512.Sum512(buf[:96])
 	hramDigestReduced := new(edwards25519.Scalar).SetUniformBytes(hramDigest[:])
 
-	s := hramDigestReduced.Multiply(hramDigestReduced, expandedSecretKey)
-	s.Add(s, messageDigestReduced)
+	s := hramDigestReduced.MultiplyAdd(hramDigestReduced, expandedSecretKey, messageDigestReduced)
 
 	copy(signature[:32], encodedR)
 	copy(signature[32:], s.Bytes())
