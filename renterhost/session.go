@@ -12,6 +12,7 @@ import (
 	"io/ioutil"
 	"net"
 	"strings"
+	"sync"
 
 	"github.com/aead/chacha20/chacha"
 	"github.com/pkg/errors"
@@ -65,12 +66,16 @@ type Session struct {
 	inbuf     objBuffer
 	outbuf    objBuffer
 	challenge [16]byte
-	err       error // set when Session is prematurely closed
-	closed    bool
 	isRenter  bool
+
+	mu     sync.Mutex
+	err    error // set when Session is prematurely closed
+	closed bool
 }
 
 func (s *Session) setErr(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err != nil && s.err == nil {
 		if ne, ok := err.(net.Error); !ok || !ne.Temporary() {
 			s.conn.Close()
@@ -81,11 +86,19 @@ func (s *Session) setErr(err error) {
 
 // PrematureCloseErr returns the error that resulted in the Session being closed
 // prematurely.
-func (s *Session) PrematureCloseErr() error { return s.err }
+func (s *Session) PrematureCloseErr() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
+}
 
 // IsClosed returns whether the Session is closed. Check PrematureCloseErr to
 // determine whether the Session was closed gracefully.
-func (s *Session) IsClosed() bool { return s.closed || s.err != nil }
+func (s *Session) IsClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed || s.err != nil
+}
 
 // SetChallenge sets the current session challenge.
 func (s *Session) SetChallenge(challenge [16]byte) {
@@ -110,8 +123,8 @@ func (s *Session) VerifyChallenge(sig []byte, pub ed25519.PublicKey) bool {
 }
 
 func (s *Session) writeMessage(obj ProtocolObject) error {
-	if s.err != nil {
-		return s.err
+	if err := s.PrematureCloseErr(); err != nil {
+		return err
 	}
 	// generate random nonce
 	nonce := make([]byte, 256)[:s.aead.NonceSize()] // avoid heap alloc
@@ -142,8 +155,8 @@ func (s *Session) writeMessage(obj ProtocolObject) error {
 }
 
 func (s *Session) readMessage(obj ProtocolObject, maxLen uint64) error {
-	if s.err != nil {
-		return s.err
+	if err := s.PrematureCloseErr(); err != nil {
+		return err
 	}
 	if maxLen < MinMessageSize {
 		maxLen = MinMessageSize
@@ -347,12 +360,14 @@ func (s *Session) RawResponse(maxLen uint64) (*ResponseReader, error) {
 // Close gracefully terminates the RPC loop and closes the connection.
 func (s *Session) Close() (err error) {
 	defer wrapErr(&err, "Close")
-	if s.closed || s.err != nil {
+	if s.IsClosed() {
 		return nil
 	}
+	s.mu.Lock()
 	s.closed = true
+	s.mu.Unlock()
 	if s.isRenter {
-		s.WriteRequest(loopExit, nil)
+		s.writeMessage(&loopExit)
 	}
 	return s.conn.Close()
 }
