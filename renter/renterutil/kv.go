@@ -32,11 +32,20 @@ func (kv PseudoKV) Put(ctx context.Context, key []byte, r io.Reader) error {
 	if err := kv.DB.AddBlob(b); err != nil {
 		return err
 	}
-	bu := ParallelBlobUploader{
-		U: kv.Uploader,
-		M: kv.M,
-		N: kv.N,
-		P: kv.P,
+	var bu BlobUploader
+	if kv.P == 1 {
+		bu = SerialBlobUploader{
+			U: kv.Uploader,
+			M: kv.M,
+			N: kv.N,
+		}
+	} else {
+		bu = ParallelBlobUploader{
+			U: kv.Uploader,
+			M: kv.M,
+			N: kv.N,
+			P: kv.P,
+		}
 	}
 	return bu.UploadBlob(ctx, kv.DB, b, r)
 }
