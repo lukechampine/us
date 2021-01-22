@@ -100,9 +100,16 @@ func (kv PseudoKV) GetRange(ctx context.Context, key []byte, w io.Writer, off, n
 	if err != nil {
 		return err
 	}
-	bd := ParallelBlobDownloader{
-		D: kv.Downloader,
-		P: kv.P,
+	var bd BlobDownloader
+	if kv.P == 1 {
+		bd = SerialBlobDownloader{
+			D: kv.Downloader,
+		}
+	} else {
+		bd = ParallelBlobDownloader{
+			D: kv.Downloader,
+			P: kv.P,
+		}
 	}
 	return bd.DownloadBlob(ctx, kv.DB, b, w, off, n)
 }
