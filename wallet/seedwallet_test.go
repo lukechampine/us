@@ -39,8 +39,10 @@ func (m *mockCS) sendTxn(txn types.Transaction) {
 		AppliedBlocks: []types.Block{{
 			Transactions: []types.Transaction{txn},
 		}},
-		SiacoinOutputDiffs: outputs,
-		ID:                 frand.Entropy256(),
+		ConsensusChangeDiffs: modules.ConsensusChangeDiffs{
+			SiacoinOutputDiffs: outputs,
+		},
+		ID: frand.Entropy256(),
 	}
 	m.subscriber.ProcessConsensusChange(cc)
 	m.height++
@@ -58,11 +60,13 @@ func (m *mockCS) mineBlock(fees types.Currency, addr types.UnlockHash) {
 	b.MinerPayouts[0].Value = b.CalculateSubsidy(0)
 	cc := modules.ConsensusChange{
 		AppliedBlocks: []types.Block{b},
-		DelayedSiacoinOutputDiffs: []modules.DelayedSiacoinOutputDiff{{
-			SiacoinOutput:  b.MinerPayouts[0],
-			ID:             b.MinerPayoutID(0),
-			MaturityHeight: types.MaturityDelay,
-		}},
+		ConsensusChangeDiffs: modules.ConsensusChangeDiffs{
+			DelayedSiacoinOutputDiffs: []modules.DelayedSiacoinOutputDiff{{
+				SiacoinOutput:  b.MinerPayouts[0],
+				ID:             b.MinerPayoutID(0),
+				MaturityHeight: types.MaturityDelay,
+			}},
+		},
 		ID: frand.Entropy256(),
 	}
 	for _, dsco := range m.dscos[m.height] {
@@ -99,11 +103,13 @@ func (m *mockCS) formContract(payout types.Currency, addr types.UnlockHash) {
 	}
 	cc := modules.ConsensusChange{
 		AppliedBlocks: []types.Block{b},
-		FileContractDiffs: []modules.FileContractDiff{{
-			FileContract: b.Transactions[0].FileContracts[0],
-			ID:           b.Transactions[0].FileContractID(0),
-			Direction:    modules.DiffApply,
-		}},
+		ConsensusChangeDiffs: modules.ConsensusChangeDiffs{
+			FileContractDiffs: []modules.FileContractDiff{{
+				FileContract: b.Transactions[0].FileContracts[0],
+				ID:           b.Transactions[0].FileContractID(0),
+				Direction:    modules.DiffApply,
+			}},
+		},
 		ID: frand.Entropy256(),
 	}
 	m.subscriber.ProcessConsensusChange(cc)
@@ -139,16 +145,18 @@ func (m *mockCS) reviseContract(id types.FileContractID) {
 	}
 	cc := modules.ConsensusChange{
 		AppliedBlocks: []types.Block{b},
-		FileContractDiffs: []modules.FileContractDiff{
-			{
-				FileContract: m.filecontracts[id],
-				ID:           id,
-				Direction:    modules.DiffRevert,
-			},
-			{
-				FileContract: fc,
-				ID:           id,
-				Direction:    modules.DiffApply,
+		ConsensusChangeDiffs: modules.ConsensusChangeDiffs{
+			FileContractDiffs: []modules.FileContractDiff{
+				{
+					FileContract: m.filecontracts[id],
+					ID:           id,
+					Direction:    modules.DiffRevert,
+				},
+				{
+					FileContract: fc,
+					ID:           id,
+					Direction:    modules.DiffApply,
+				},
 			},
 		},
 		ID: frand.Entropy256(),
@@ -299,7 +307,7 @@ func TestWallet(t *testing.T) {
 		txnSig := StandardTransactionSignature(crypto.Hash(sci.ParentID))
 		AppendTransactionSignature(&txn, txnSig, seed.SecretKey(0))
 	}
-	if err := txn.StandaloneValid(types.ASICHardforkHeight + 1); err != nil {
+	if err := txn.StandaloneValid(types.FoundationHardforkHeight + 1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -503,7 +511,7 @@ func TestHotWallet(t *testing.T) {
 	// sign the transaction
 	if err := w.SignTransaction(&txn, nil); err != nil {
 		t.Fatal(err)
-	} else if err := txn.StandaloneValid(types.ASICHardforkHeight + 1); err != nil {
+	} else if err := txn.StandaloneValid(types.FoundationHardforkHeight + 1); err != nil {
 		t.Fatal(err)
 	}
 	// simulate broadcasting by putting the transaction in limbo

@@ -78,7 +78,7 @@ func FundTransaction(amount, feePerByte types.Currency, inputs []ValuedInput) (u
 func AppendTransactionSignature(txn *types.Transaction, txnSig types.TransactionSignature, key ed25519.PrivateKey) {
 	txn.TransactionSignatures = append(txn.TransactionSignatures, txnSig)
 	sigIndex := len(txn.TransactionSignatures) - 1
-	txn.TransactionSignatures[sigIndex].Signature = ed25519hash.Sign(key, txn.SigHash(sigIndex, types.ASICHardforkHeight+1))
+	txn.TransactionSignatures[sigIndex].Signature = ed25519hash.Sign(key, txn.SigHash(sigIndex, types.FoundationHardforkHeight+1))
 }
 
 // UnconfirmedParents returns the parents of txn that are in limbo.
