@@ -46,7 +46,9 @@ type MetaDB interface {
 	AddBlob(b DBBlob) error
 	Blob(key []byte) (DBBlob, error)
 	DeleteBlob(key []byte) error
-	ForEachBlob(func(key []byte) error) error
+
+	// ForEachBlob calls fn on each key. fn must not modify the DB.
+	ForEachBlob(fn func(key []byte) error) error
 
 	AddChunk(m, n int, length uint64) (DBChunk, error)
 	Chunk(id uint64) (DBChunk, error)
