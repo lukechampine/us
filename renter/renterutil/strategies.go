@@ -1293,3 +1293,42 @@ func (ssd SerialSectorDeleter) DeleteSectors(ctx context.Context, db MetaDB, sec
 	}
 	return nil
 }
+
+// ParallelSectorDeleter deletes sectors from hosts in parallel.
+type ParallelSectorDeleter struct {
+	Hosts *HostSet
+}
+
+// DeleteSectors implements SectorDeleter.
+func (psd ParallelSectorDeleter) DeleteSectors(ctx context.Context, db MetaDB, sectors map[hostdb.HostPublicKey][]crypto.Hash) error {
+	errCh := make(chan *HostError)
+	for hostKey, roots := range sectors {
+		go func(hostKey hostdb.HostPublicKey, roots []crypto.Hash) {
+			errCh <- func() *HostError {
+				h, err := psd.Hosts.acquire(hostKey)
+				if err != nil {
+					return &HostError{hostKey, err}
+				}
+				// TODO: no-op if roots already deleted
+				// TODO: respect ctx
+				err = h.DeleteSectors(roots)
+				psd.Hosts.release(hostKey)
+				if err != nil {
+					return &HostError{hostKey, err}
+				}
+				// TODO: mark sectors as deleted in db
+				return nil
+			}()
+		}(hostKey, roots)
+	}
+	var errs HostErrorSet
+	for range sectors {
+		if err := <-errCh; err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if errs != nil {
+		return fmt.Errorf("could not delete from all hosts: %w", errs)
+	}
+	return nil
+}

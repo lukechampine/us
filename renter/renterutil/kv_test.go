@@ -57,7 +57,7 @@ func createTestingKV(tb testing.TB, numHosts, m, n int) PseudoKV {
 		P:          3, // TODO: is this a sane default?
 		Uploader:   ParallelChunkUploader{Hosts: hs},
 		Downloader: ParallelChunkDownloader{Hosts: hs},
-		Deleter:    SerialSectorDeleter{Hosts: hs},
+		Deleter:    ParallelSectorDeleter{Hosts: hs},
 	}
 	tb.Cleanup(func() { kv.Close() })
 
