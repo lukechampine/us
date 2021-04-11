@@ -1,7 +1,9 @@
 package renter
 
 import (
-	"github.com/pkg/errors"
+	"errors"
+	"fmt"
+
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/frand"
@@ -182,12 +184,12 @@ func NewShardUploader(m *MetaFile, c Contract, hkr HostKeyResolver, currentHeigh
 	// get host IP
 	hostIP, err := hkr.ResolveHostKey(c.HostKey)
 	if err != nil {
-		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
+		return nil, fmt.Errorf("%v: could not resolve host key: %w", hostKey.ShortKey(), err)
 	}
 	// create uploader
 	u, err := proto.NewSession(hostIP, c.HostKey, c.ID, c.RenterKey, currentHeight)
 	if err != nil {
-		return nil, errors.Wrapf(err, "%v: could not initiate upload protocol with host", hostKey.ShortKey())
+		return nil, fmt.Errorf("%v: could not initiate upload protocol with host: %w", hostKey.ShortKey(), err)
 	}
 	return &ShardUploader{
 		Uploader: u,

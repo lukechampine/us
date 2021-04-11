@@ -8,6 +8,8 @@ import (
 	"crypto/ed25519"
 	"crypto/subtle"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -15,7 +17,7 @@ import (
 	"sync"
 
 	"github.com/aead/chacha20/chacha"
-	"github.com/pkg/errors"
+
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"golang.org/x/crypto/blake2b"
@@ -26,7 +28,9 @@ import (
 )
 
 func wrapErr(err *error, fnName string) {
-	*err = errors.Wrap(*err, fnName)
+	if *err != nil {
+		*err = fmt.Errorf("%s: %w", fnName, *err)
+	}
 }
 
 // MinMessageSize is the minimum size of an RPC message. If an encoded message
@@ -168,9 +172,9 @@ func (s *Session) readMessage(obj ProtocolObject, maxLen uint64) error {
 	}
 	msgSize := s.inbuf.readUint64()
 	if msgSize > maxLen {
-		return errors.Errorf("message size (%v bytes) exceeds maxLen of %v bytes", msgSize, maxLen)
+		return fmt.Errorf("message size (%v bytes) exceeds maxLen of %v bytes", msgSize, maxLen)
 	} else if msgSize < uint64(s.aead.NonceSize()+s.aead.Overhead()) {
-		return errors.Errorf("message size (%v bytes) is too small (nonce + MAC is %v bytes)", msgSize, s.aead.NonceSize()+s.aead.Overhead())
+		return fmt.Errorf("message size (%v bytes) is too small (nonce + MAC is %v bytes)", msgSize, s.aead.NonceSize()+s.aead.Overhead())
 	}
 
 	s.inbuf.reset()
@@ -192,12 +196,16 @@ func (s *Session) readMessage(obj ProtocolObject, maxLen uint64) error {
 
 // WriteRequest sends an encrypted RPC request, comprising an RPC ID and a
 // request object.
-func (s *Session) WriteRequest(rpcID Specifier, req ProtocolObject) (err error) {
-	err = errors.Wrap(s.writeMessage(&rpcID), "WriteRequestID")
-	if err == nil && req != nil {
-		err = errors.Wrap(s.writeMessage(req), "WriteRequest")
+func (s *Session) WriteRequest(rpcID Specifier, req ProtocolObject) error {
+	if err := s.writeMessage(&rpcID); err != nil {
+		return fmt.Errorf("WriteRequestID: %w", err)
 	}
-	return
+	if req != nil {
+		if err := s.writeMessage(req); err != nil {
+			return fmt.Errorf("WriteRequest: %w", err)
+		}
+	}
+	return nil
 }
 
 // ReadID reads an RPC request ID. If the renter sends the session termination
@@ -307,9 +315,9 @@ func (s *Session) RawResponse(maxLen uint64) (*ResponseReader, error) {
 	}
 	msgSize := s.inbuf.readUint64()
 	if msgSize > maxLen {
-		return nil, errors.Errorf("message size (%v bytes) exceeds maxLen of %v bytes", msgSize, maxLen)
+		return nil, fmt.Errorf("message size (%v bytes) exceeds maxLen of %v bytes", msgSize, maxLen)
 	} else if msgSize < uint64(s.aead.NonceSize()+s.aead.Overhead()) {
-		return nil, errors.Errorf("message size (%v bytes) is too small (nonce + MAC is %v bytes)", msgSize, s.aead.NonceSize()+s.aead.Overhead())
+		return nil, fmt.Errorf("message size (%v bytes) is too small (nonce + MAC is %v bytes)", msgSize, s.aead.NonceSize()+s.aead.Overhead())
 	}
 	msgSize -= uint64(s.aead.NonceSize() + s.aead.Overhead())
 
@@ -433,11 +441,11 @@ func NewRenterSession(conn io.ReadWriteCloser, pub ed25519.PublicKey) (_ *Sessio
 		Ciphers:   []Specifier{cipherChaCha20Poly1305},
 	}
 	if err := req.writeTo(conn); err != nil {
-		return nil, errors.Wrap(err, "couldn't write handshake")
+		return nil, fmt.Errorf("couldn't write handshake: %w", err)
 	}
 	var resp loopKeyExchangeResponse
 	if err := resp.readFrom(conn); err != nil {
-		return nil, errors.Wrap(err, "couldn't read host's handshake")
+		return nil, fmt.Errorf("couldn't read host's handshake: %w", err)
 	}
 	// validate the signature before doing anything else
 	if !ed25519hash.Verify(pub, hashKeys(req.PublicKey, resp.PublicKey), resp.Signature) {

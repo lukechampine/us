@@ -3,10 +3,10 @@ package proto
 import (
 	"bytes"
 	"crypto/ed25519"
+	"errors"
 	"io/ioutil"
 	"testing"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"gitlab.com/NebulousLabs/encoding"
@@ -24,6 +24,7 @@ func (stubWallet) Address() (_ types.UnlockHash, _ error) { return }
 func (stubWallet) FundTransaction(*types.Transaction, types.Currency) ([]crypto.Hash, func(), error) {
 	return nil, func() {}, nil
 }
+
 func (stubWallet) SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error {
 	txn.TransactionSignatures = append(txn.TransactionSignatures, make([]types.TransactionSignature, len(toSign))...)
 	return nil
@@ -173,7 +174,7 @@ func TestRenew(t *testing.T) {
 	}
 
 	// attempting to lock the old contract should return ErrContractFinalized
-	if err := renter.Lock(oldID, oldKey, 0); errors.Cause(err) != ErrContractFinalized {
+	if err := renter.Lock(oldID, oldKey, 0); !errors.Is(err, ErrContractFinalized) {
 		t.Fatal("expected ErrContractFinalized, got", err)
 	}
 	renter.Close()

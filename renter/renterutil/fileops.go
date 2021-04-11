@@ -2,11 +2,12 @@ package renterutil
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"time"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
@@ -296,7 +297,7 @@ func (fs *PseudoFS) flushSectors() error {
 		}
 	}
 	if len(errs) != 0 {
-		return errors.Wrap(errs, "could not upload to some hosts")
+		return fmt.Errorf("could not upload to some hosts: %w", errs)
 	}
 
 	// update files
@@ -471,15 +472,15 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 	}
 	close(reqChan)
 	if goodShards < f.m.MinShards {
-		return 0, errors.Wrapf(errs, "too many hosts did not supply their shard (needed %v, got %v)",
-			f.m.MinShards, goodShards)
+		return 0, fmt.Errorf("too many hosts did not supply their shard (needed %v, got %v): %w",
+			f.m.MinShards, goodShards, errs)
 	}
 
 	// recover data shards directly into p
 	skip := int(off % f.m.MinChunkSize())
 	err := f.m.ErasureCode().Recover(bytes.NewBuffer(p[:0]), shards, skip, len(p))
 	if err != nil {
-		return 0, errors.Wrap(err, "could not recover chunk")
+		return 0, fmt.Errorf("could not recover chunk: %w", err)
 	}
 
 	// apply any pending writes

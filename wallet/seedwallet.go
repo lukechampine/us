@@ -1,10 +1,10 @@
 package wallet
 
 import (
+	"errors"
 	"reflect"
 	"sync"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"

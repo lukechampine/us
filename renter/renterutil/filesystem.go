@@ -4,6 +4,8 @@ package renterutil // import "lukechampine.com/us/renter/renterutil"
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
@@ -83,12 +84,12 @@ func (fs *PseudoFS) Chmod(name string, mode os.FileMode) error {
 
 	m, err := renter.ReadMetaFile(path)
 	if err != nil {
-		return errors.Wrapf(err, "chmod %v", path)
+		return fmt.Errorf("chmod %v: %w", path, err)
 	}
 	m.Mode = mode
 	m.ModTime = time.Now()
 	if err := renter.WriteMetaFile(path, m); err != nil {
-		return errors.Wrapf(err, "chmod %v", path)
+		return fmt.Errorf("chmod %v: %w", path, err)
 	}
 	return nil
 }
@@ -97,7 +98,7 @@ func (fs *PseudoFS) Chmod(name string, mode os.FileMode) error {
 // (before umask), truncating it if it already exists. The returned file has
 // mode O_RDWR.
 func (fs *PseudoFS) Create(name string, minShards int) (*PseudoFile, error) {
-	return fs.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0666, minShards)
+	return fs.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0o666, minShards)
 }
 
 // Mkdir creates a new directory with the specified name and permission bits
@@ -154,7 +155,7 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 					}
 				}
 				if len(missing) > 0 {
-					return nil, errors.Errorf("insufficient contracts: need a contract from each of these hosts: %v",
+					return nil, fmt.Errorf("insufficient contracts: need a contract from each of these hosts: %v",
 						strings.Join(missing, " "))
 				}
 			}
@@ -196,7 +197,7 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 		var err error
 		m, err = renter.ReadMetaFile(path)
 		if err != nil {
-			return nil, errors.Wrapf(err, "open %v", name)
+			return nil, fmt.Errorf("open %v: %w", path, err)
 		}
 		// check whether we have a session for each of the file's hosts
 		var missing []string
@@ -208,13 +209,13 @@ func (fs *PseudoFS) OpenFile(name string, flag int, perm os.FileMode, minShards 
 		if flag&rwmask == os.O_RDONLY {
 			// only need m.MinShards hosts in order to read
 			if have := len(m.Hosts) - len(missing); have < m.MinShards {
-				return nil, errors.Errorf("insufficient contracts: need a contract from at least %v of these hosts: %v",
+				return nil, fmt.Errorf("insufficient contracts: need a contract from at least %v of these hosts: %v",
 					m.MinShards-have, strings.Join(missing, " "))
 			}
 		} else {
 			// need all hosts in order to write
 			if len(missing) > 0 {
-				return nil, errors.Errorf("insufficient contracts: need a contract from each of these hosts: %v",
+				return nil, fmt.Errorf("insufficient contracts: need a contract from each of these hosts: %v",
 					strings.Join(missing, " "))
 			}
 		}
@@ -441,7 +442,7 @@ func (fs *PseudoFS) Stat(name string) (os.FileInfo, error) {
 	path += metafileExt
 	index, err := renter.ReadMetaIndex(path)
 	if err != nil {
-		return nil, errors.Wrapf(err, "stat %v", name)
+		return nil, fmt.Errorf("stat %v: %w", name, err)
 	}
 	return pseudoFileInfo{name, index}, nil
 }
@@ -513,9 +514,11 @@ const rwmask = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
 func (pf PseudoFile) writeable() bool {
 	return pf.flags&rwmask == os.O_WRONLY || pf.flags&rwmask == os.O_RDWR
 }
+
 func (pf PseudoFile) readable() bool {
 	return pf.flags&rwmask == os.O_RDONLY || pf.flags&rwmask == os.O_RDWR
 }
+
 func (pf PseudoFile) appendOnly() bool {
 	return pf.flags&os.O_APPEND == os.O_APPEND
 }

@@ -2,11 +2,11 @@ package wallet
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"math/big"
 	"sort"
 	"unsafe"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/ed25519hash"
 )

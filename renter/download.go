@@ -2,9 +2,10 @@ package renter
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
@@ -128,7 +129,7 @@ func (d *ShardDownloader) CopySection(w io.Writer, offset, length int64) error {
 // slice is only valid until the next call to DownloadAndDecrypt.
 func (d *ShardDownloader) DownloadAndDecrypt(chunkIndex int64) ([]byte, error) {
 	if chunkIndex >= int64(len(d.Slices)) {
-		return nil, errors.Errorf("unknown chunk index %v", chunkIndex)
+		return nil, fmt.Errorf("unknown chunk index %v", chunkIndex)
 	}
 	s := d.Slices[chunkIndex]
 	offset := s.SegmentIndex * merkle.SegmentSize
@@ -167,12 +168,12 @@ func NewShardDownloader(m *MetaFile, c Contract, hkr HostKeyResolver) (*ShardDow
 	// get host IP
 	hostIP, err := hkr.ResolveHostKey(c.HostKey)
 	if err != nil {
-		return nil, errors.Wrapf(err, "%v: could not resolve host key", hostKey.ShortKey())
+		return nil, fmt.Errorf("%v: could not resolve host key: %w", hostKey.ShortKey(), err)
 	}
 	// create downloader
 	d, err := proto.NewSession(hostIP, c.HostKey, c.ID, c.RenterKey, 0)
 	if err != nil {
-		return nil, errors.Wrapf(err, "%v: could not initiate download protocol with host", hostKey.ShortKey())
+		return nil, fmt.Errorf("%v: could not initiate download protocol with host: %w", hostKey.ShortKey(), err)
 	}
 	return &ShardDownloader{
 		Downloader: d,

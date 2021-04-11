@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -13,7 +14,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -51,11 +51,13 @@ var (
 // readCtx or rejectCtx depending on whether we encountered an I/O error or the
 // host sent an explicit error message.
 func wrapResponseErr(err error, readCtx, rejectCtx string) error {
-	err = errors.Cause(err)
-	if _, ok := err.(*renterhost.RPCError); ok {
-		return errors.Wrap(err, rejectCtx)
+	if errors.As(err, new(*renterhost.RPCError)) {
+		return fmt.Errorf("%s: %w", rejectCtx, err)
 	}
-	return errors.Wrap(err, readCtx)
+	if err != nil {
+		return fmt.Errorf("%s: %w", readCtx, err)
+	}
+	return nil
 }
 
 type statsConn struct {
@@ -211,7 +213,7 @@ func (s *Session) Lock(id types.FileContractID, key ed25519.PrivateKey, timeout 
 	s.sess.SetChallenge(resp.NewChallenge)
 	// verify claimed revision
 	if len(resp.Signatures) != 2 {
-		return errors.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
+		return fmt.Errorf("host returned wrong number of signatures (expected 2, got %v)", len(resp.Signatures))
 	}
 	revHash := renterhost.HashRevision(resp.Revision)
 	if !ed25519hash.Verify(ed25519hash.ExtractPublicKey(key), revHash, resp.Signatures[0].Signature) {
@@ -262,7 +264,7 @@ func (s *Session) Settings() (_ hostdb.HostSettings, err error) {
 	if err := s.call(renterhost.RPCSettingsID, nil, &resp); err != nil {
 		return hostdb.HostSettings{}, err
 	} else if err := json.Unmarshal(resp.Settings, &s.host.HostSettings); err != nil {
-		return hostdb.HostSettings{}, errors.Wrap(err, "couldn't unmarshal json")
+		return hostdb.HostSettings{}, fmt.Errorf("couldn't unmarshal json: %w", err)
 	}
 	return s.host.HostSettings, nil
 }
@@ -441,17 +443,17 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 		// Read the signature, which may or may not be present.
 		lenbuf := make([]byte, 8)
 		if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
-			return errors.Wrap(err, "couldn't read signature len")
+			return fmt.Errorf("couldn't read signature len: %w", err)
 		}
 		if n := binary.LittleEndian.Uint64(lenbuf); n > 0 {
 			hostSig = make([]byte, n)
 			if _, err := io.ReadFull(msgReader, hostSig); err != nil {
-				return errors.Wrap(err, "couldn't read signature")
+				return fmt.Errorf("couldn't read signature: %w", err)
 			}
 		}
 		// stream the sector data into w and the proof verifier
 		if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
-			return errors.Wrap(err, "couldn't read data len")
+			return fmt.Errorf("couldn't read data len: %w", err)
 		} else if binary.LittleEndian.Uint64(lenbuf) != uint64(sec.Length) {
 			return errors.New("host sent wrong amount of sector data")
 		}
@@ -462,11 +464,11 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 		// the proof verifier Reads one segment at a time, so bufio is crucial
 		// for performance here
 		if _, err := rpv.ReadFrom(bufio.NewReaderSize(tee, 1<<16)); err != nil {
-			return errors.Wrap(err, "couldn't stream sector data")
+			return fmt.Errorf("couldn't stream sector data: %w", err)
 		}
 		// read the Merkle proof
 		if _, err := io.ReadFull(msgReader, lenbuf); err != nil {
-			return errors.Wrap(err, "couldn't read proof len")
+			return fmt.Errorf("couldn't read proof len: %w", err)
 		}
 		if binary.LittleEndian.Uint64(lenbuf) != uint64(merkle.ProofSize(merkle.SegmentsPerSector, proofStart, proofEnd)) {
 			return errors.New("invalid proof size")
@@ -474,7 +476,7 @@ func (s *Session) Read(w io.Writer, sections []renterhost.RPCReadRequestSection)
 		proof := make([]crypto.Hash, binary.LittleEndian.Uint64(lenbuf))
 		for i := range proof {
 			if _, err := io.ReadFull(msgReader, proof[i][:]); err != nil {
-				return errors.Wrap(err, "couldn't read Merkle proof")
+				return fmt.Errorf("couldn't read Merkle proof: %w", err)
 			}
 		}
 		// verify the message tag and the Merkle proof
@@ -642,7 +644,7 @@ func (s *Session) Write(actions []renterhost.RPCWriteAction) (err error) {
 		Signature: ed25519hash.Sign(s.key, revisionHash),
 	}
 	if err := s.sess.WriteResponse(renterSig, nil); err != nil {
-		return errors.Wrap(err, "couldn't write signature response")
+		return fmt.Errorf("couldn't write signature response: %w", err)
 	}
 	var hostSig renterhost.RPCWriteResponse
 	if err := s.sess.ReadResponse(&hostSig, 4096); err != nil {
