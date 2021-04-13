@@ -5,7 +5,6 @@ go 1.13
 require (
 	filippo.io/edwards25519 v1.0.0-beta.2
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da
-	github.com/pkg/errors v0.9.1
 	gitlab.com/NebulousLabs/Sia v1.5.4
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	gitlab.com/NebulousLabs/log v0.0.0-20200604091839-0ba4a941cdc2

@@ -2,9 +2,10 @@
 package proto // import "lukechampine.com/us/renter/proto"
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
@@ -12,12 +13,14 @@ import (
 )
 
 func wrapErr(err *error, fnName string) {
-	*err = errors.WithMessage(*err, fnName)
+	if *err != nil {
+		*err = fmt.Errorf("%s: %w", fnName, *err)
+	}
 }
 
 func wrapErrWithReplace(err *error, fnName string) {
 	if *err != nil {
-		*err = errors.Wrap(errors.Unwrap(*err), fnName)
+		*err = fmt.Errorf("%s: %w", fnName, errors.Unwrap(*err))
 	}
 }
 
@@ -124,7 +127,7 @@ func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool)
 	// calculate transaction fee
 	_, maxFee, err := tpool.FeeEstimate()
 	if err != nil {
-		return errors.Wrap(err, "could not estimate transaction fee")
+		return fmt.Errorf("could not estimate transaction fee: %w", err)
 	}
 	fee := maxFee.Mul64(estTxnSize)
 
@@ -142,7 +145,7 @@ func SubmitContractRevision(c ContractRevision, w Wallet, tpool TransactionPool)
 	}
 	defer discard()
 	if err := w.SignTransaction(&txn, toSign); err != nil {
-		return errors.Wrap(err, "failed to sign transaction")
+		return fmt.Errorf("failed to sign transaction: %w", err)
 	}
 
 	// submit the funded and signed transaction

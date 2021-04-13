@@ -8,6 +8,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -15,7 +17,7 @@ import (
 	"unsafe"
 
 	"github.com/aead/chacha20/chacha"
-	"github.com/pkg/errors"
+
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
@@ -115,11 +117,11 @@ func (s *KeySeed) XORKeyStream(msg []byte, nonce []byte, startIndex uint64) {
 func (m *MetaIndex) Validate() error {
 	switch {
 	case m.Version != MetaFileVersion:
-		return errors.Errorf("incompatible version (%v, want %v)", m.Version, MetaFileVersion)
+		return fmt.Errorf("incompatible version (%v, want %v)", m.Version, MetaFileVersion)
 	case m.MinShards == 0:
-		return errors.Errorf("MinShards cannot be 0")
+		return fmt.Errorf("MinShards cannot be 0")
 	case m.MinShards > len(m.Hosts):
-		return errors.Errorf("MinShards (%v) must not exceed number of hosts (%v)", m.Version, len(m.Hosts))
+		return fmt.Errorf("MinShards (%v) must not exceed number of hosts (%v)", m.Version, len(m.Hosts))
 	}
 	return nil
 }
@@ -197,12 +199,12 @@ func NewMetaFile(mode os.FileMode, size int64, hosts []hostdb.HostPublicKey, min
 func WriteMetaFile(filename string, m *MetaFile) error {
 	// validate before writing
 	if err := validateShards(m.Shards); err != nil {
-		return errors.Wrap(err, "invalid shards")
+		return fmt.Errorf("invalid shards: %w", err)
 	}
 
 	f, err := os.Create(filename + "_tmp")
 	if err != nil {
-		return errors.Wrap(err, "could not create archive")
+		return fmt.Errorf("could not create archive: %w", err)
 	}
 	defer f.Close()
 	zip := gzip.NewWriter(f)
@@ -216,9 +218,9 @@ func WriteMetaFile(filename string, m *MetaFile) error {
 		Mode: 0666,
 	})
 	if err != nil {
-		return errors.Wrap(err, "could not write index header")
+		return fmt.Errorf("could not write index header: %w", err)
 	} else if _, err = tw.Write(index); err != nil {
-		return errors.Wrap(err, "could not write index")
+		return fmt.Errorf("could not write index: %w", err)
 	}
 
 	// write shards
@@ -230,7 +232,7 @@ func WriteMetaFile(filename string, m *MetaFile) error {
 			Mode: 0666,
 		})
 		if err != nil {
-			return errors.Wrap(err, "could not write shard header")
+			return fmt.Errorf("could not write shard header: %w", err)
 		}
 		for _, ss := range m.Shards[i] {
 			copy(encSlice, ss.MerkleRoot[:])
@@ -238,22 +240,22 @@ func WriteMetaFile(filename string, m *MetaFile) error {
 			binary.LittleEndian.PutUint32(encSlice[36:], ss.NumSegments)
 			copy(encSlice[40:], ss.Nonce[:])
 			if _, err = tw.Write(encSlice); err != nil {
-				return errors.Wrap(err, "could not add shard to archive")
+				return fmt.Errorf("could not add shard to archive: %w", err)
 			}
 		}
 	}
 
 	// flush, close, and atomically rename
 	if err := tw.Close(); err != nil {
-		return errors.Wrap(err, "could not write tar data")
+		return fmt.Errorf("could not write tar data: %w", err)
 	} else if err := zip.Close(); err != nil {
-		return errors.Wrap(err, "could not write gzip data")
+		return fmt.Errorf("could not write gzip data: %w", err)
 	} else if err := f.Sync(); err != nil {
-		return errors.Wrap(err, "could not sync archive file")
+		return fmt.Errorf("could not sync archive file: %w", err)
 	} else if err := f.Close(); err != nil {
-		return errors.Wrap(err, "could not close archive file")
+		return fmt.Errorf("could not close archive file: %w", err)
 	} else if err := os.Rename(filename+"_tmp", filename); err != nil {
-		return errors.Wrap(err, "could not atomically replace archive file")
+		return fmt.Errorf("could not atomically replace archive file: %w", err)
 	}
 
 	return nil
@@ -263,12 +265,12 @@ func WriteMetaFile(filename string, m *MetaFile) error {
 func ReadMetaFile(filename string) (*MetaFile, error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		return nil, errors.Wrap(err, "could not open archive")
+		return nil, fmt.Errorf("could not open archive: %w", err)
 	}
 	defer f.Close()
 	zip, err := gzip.NewReader(f)
 	if err != nil {
-		return nil, errors.Wrap(err, "could not read gzip header")
+		return nil, fmt.Errorf("could not read gzip header: %w", err)
 	}
 	tr := tar.NewReader(zip)
 
@@ -282,13 +284,13 @@ func ReadMetaFile(filename string) (*MetaFile, error) {
 			}
 			break
 		} else if err != nil {
-			return nil, errors.Wrap(err, "could not read archive entry")
+			return nil, fmt.Errorf("could not read archive entry: %w", err)
 		}
 
 		if hdr.Name == indexFilename {
 			// read index
 			if err = json.NewDecoder(tr).Decode(&m.MetaIndex); err != nil {
-				return nil, errors.Wrap(err, "could not decode index")
+				return nil, fmt.Errorf("could not decode index: %w", err)
 			}
 		} else {
 			// read shard
@@ -296,7 +298,7 @@ func ReadMetaFile(filename string) (*MetaFile, error) {
 			buf := make([]byte, SectorSliceSize)
 			for i := range shard {
 				if _, err := io.ReadFull(tr, buf); err != nil {
-					return nil, errors.Wrap(err, "could not read shard")
+					return nil, fmt.Errorf("could not read shard: %w", err)
 				}
 				copy(shard[i].MerkleRoot[:], buf[:32])
 				shard[i].SegmentIndex = binary.LittleEndian.Uint32(buf[32:36])
@@ -310,25 +312,25 @@ func ReadMetaFile(filename string) (*MetaFile, error) {
 		}
 	}
 	if err := zip.Close(); err != nil {
-		return nil, errors.Wrap(err, "archive is corrupted")
+		return nil, fmt.Errorf("archive is corrupted: %w", err)
 	}
 
 	// now that we have the index and all shards in memory, order the shards
 	// according the Hosts list in the index
 	if len(shards) != len(m.Hosts) {
-		return nil, errors.Errorf("invalid metafile: number of shards (%v) does not match number of hosts (%v)", len(shards), len(m.Hosts))
+		return nil, fmt.Errorf("invalid metafile: number of shards (%v) does not match number of hosts (%v)", len(shards), len(m.Hosts))
 	}
 	m.Shards = make([][]SectorSlice, len(m.Hosts))
 	for hpk, shard := range shards {
 		i := m.HostIndex(hpk)
 		if i == -1 {
-			return nil, errors.Errorf("invalid shard filename: host %q not present in index", hpk)
+			return nil, fmt.Errorf("invalid shard filename: host %q not present in index", hpk)
 		}
 		m.Shards[i] = shard
 	}
 
 	if err := validateShards(m.Shards); err != nil {
-		return nil, errors.Wrap(err, "invalid shards")
+		return nil, fmt.Errorf("invalid shards: %w", err)
 	}
 
 	return m, nil
@@ -338,13 +340,13 @@ func ReadMetaFile(filename string) (*MetaFile, error) {
 func ReadMetaIndex(filename string) (MetaIndex, error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		return MetaIndex{}, errors.Wrap(err, "could not open archive")
+		return MetaIndex{}, fmt.Errorf("could not open archive: %w", err)
 	}
 	defer f.Close()
 
 	zip, err := gzip.NewReader(f)
 	if err != nil {
-		return MetaIndex{}, errors.Wrap(err, "could not read gzip header")
+		return MetaIndex{}, fmt.Errorf("could not read gzip header: %w", err)
 	}
 	defer zip.Close()
 
@@ -355,13 +357,13 @@ func ReadMetaIndex(filename string) (MetaIndex, error) {
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			return MetaIndex{}, errors.Wrap(err, "could not read archive entry")
+			return MetaIndex{}, fmt.Errorf("could not read archive entry: %w", err)
 		} else if hdr.Name != indexFilename {
 			continue // skip entry
 		}
 
 		if err := json.NewDecoder(tr).Decode(&index); err != nil {
-			return MetaIndex{}, errors.Wrap(err, "could not decode index")
+			return MetaIndex{}, fmt.Errorf("could not decode index: %w", err)
 		}
 		// done
 		return index, nil
@@ -394,13 +396,13 @@ func MetaFileCanDownload(filename string) (bool, error) {
 func readMetaFileShards(filename string) (MetaIndex, int, error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		return MetaIndex{}, 0, errors.Wrap(err, "could not open archive")
+		return MetaIndex{}, 0, fmt.Errorf("could not open archive: %w", err)
 	}
 	defer f.Close()
 
 	zip, err := gzip.NewReader(f)
 	if err != nil {
-		return MetaIndex{}, 0, errors.Wrap(err, "could not read gzip header")
+		return MetaIndex{}, 0, fmt.Errorf("could not read gzip header: %w", err)
 	}
 	defer zip.Close()
 
@@ -413,11 +415,11 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			return MetaIndex{}, 0, errors.Wrap(err, "could not read archive entry")
+			return MetaIndex{}, 0, fmt.Errorf("could not read archive entry: %w", err)
 		}
 		if hdr.Name == indexFilename {
 			if err := json.NewDecoder(tr).Decode(&index); err != nil {
-				return MetaIndex{}, 0, errors.Wrap(err, "could not decode index")
+				return MetaIndex{}, 0, fmt.Errorf("could not decode index: %w", err)
 			}
 			haveIndex = true
 		} else {
@@ -427,7 +429,7 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 			buf := make([]byte, SectorSliceSize)
 			for i := 0; i < numSlices; i++ {
 				if _, err := io.ReadFull(tr, buf); err != nil {
-					return MetaIndex{}, 0, errors.Wrap(err, "could not read shard")
+					return MetaIndex{}, 0, fmt.Errorf("could not read shard: %w", err)
 				}
 				numSegments += int64(binary.LittleEndian.Uint32(buf[36:40]))
 			}
@@ -438,7 +440,7 @@ func readMetaFileShards(filename string) (MetaIndex, int, error) {
 		return MetaIndex{}, 0, errors.New("archive does not contain an index")
 	}
 	if err := index.Validate(); err != nil {
-		return MetaIndex{}, 0, errors.Wrap(err, "invalid index")
+		return MetaIndex{}, 0, fmt.Errorf("invalid index: %w", err)
 	}
 
 	// count full shards
@@ -462,7 +464,7 @@ func validateShards(shards [][]SectorSlice) error {
 		for j := 1; j < len(shards); j++ {
 			s2 := shards[j][chunkIndex]
 			if s.NumSegments != s2.NumSegments {
-				return errors.Errorf("shards %v and %v differ at chunk %v", 0, j, chunkIndex)
+				return fmt.Errorf("shards %v and %v differ at chunk %v", 0, j, chunkIndex)
 			}
 		}
 	}

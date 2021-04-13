@@ -6,11 +6,11 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/renterhost"
@@ -134,7 +134,7 @@ func Scan(ctx context.Context, addr modules.NetAddress, pubkey HostPublicKey) (h
 		err := func() error {
 			s, err := renterhost.NewRenterSession(conn, pubkey.Ed25519())
 			if err != nil {
-				return errors.Wrap(err, "could not initiate RPC session")
+				return fmt.Errorf("could not initiate RPC session: %w", err)
 			}
 			defer s.Close()
 			var resp renterhost.RPCSettingsResponse
@@ -147,7 +147,10 @@ func Scan(ctx context.Context, addr modules.NetAddress, pubkey HostPublicKey) (h
 			}
 			return nil
 		}()
-		ch <- res{host, errors.Wrap(err, "could not read signed host settings")}
+		if err != nil {
+			err = fmt.Errorf("could not read signed host settings: %w", err)
+		}
+		ch <- res{host, err}
 	}()
 	select {
 	case <-ctx.Done():

@@ -3,11 +3,12 @@ package renterhost
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"unsafe"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"golang.org/x/crypto/blake2b"
@@ -111,7 +112,7 @@ func (b *objBuffer) writePrefix(i int) {
 func (b *objBuffer) readPrefix(elemSize int) int {
 	n := b.readUint64()
 	if n > uint64(b.buf.Len()/elemSize) {
-		b.err = errors.Errorf("marshalled object contains invalid length prefix (%v elems x %v bytes/elem > %v bytes left in message)", n, elemSize, b.buf.Len())
+		b.err = fmt.Errorf("marshalled object contains invalid length prefix (%v elems x %v bytes/elem > %v bytes left in message)", n, elemSize, b.buf.Len())
 		return 0
 	}
 	return int(n)
@@ -1244,12 +1245,12 @@ func (req *loopKeyExchangeRequest) readFrom(r io.Reader) error {
 	var id Specifier
 	copy(id[:], buf[:16])
 	if id != loopEnter {
-		return errors.Errorf("renter sent wrong specifier %q", id.String())
+		return fmt.Errorf("renter sent wrong specifier %q", id.String())
 	}
 	copy(req.PublicKey[:], buf[16:48])
 	numCiphers := binary.LittleEndian.Uint64(buf[48:])
 	if numCiphers > 16 {
-		return errors.Errorf("renter sent too many ciphers (%v)", numCiphers)
+		return fmt.Errorf("renter sent too many ciphers (%v)", numCiphers)
 	}
 	// second read, if necessary, to get ciphers
 	ciphersSize := int(numCiphers) * sizeofSpecifier
@@ -1285,7 +1286,7 @@ func (resp *loopKeyExchangeResponse) readFrom(r io.Reader) error {
 	copy(resp.PublicKey[:], buf[:32])
 	sigLen := binary.LittleEndian.Uint64(buf[32:])
 	if sigLen != 64 {
-		return errors.Errorf("host sent non-ed25519 signature (%v bytes)", sigLen)
+		return fmt.Errorf("host sent non-ed25519 signature (%v bytes)", sigLen)
 	}
 	resp.Signature = buf[8+32:][:64]
 	copy(resp.Cipher[:], buf[8+32+64:])

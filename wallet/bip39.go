@@ -3,9 +3,9 @@ package wallet
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"strings"
-
-	"github.com/pkg/errors"
 )
 
 // NOTE: This is not a full implementation of BIP39; only 12-word phrases (128
@@ -46,7 +46,7 @@ func decodeBIP39Phrase(phrase string) ([16]byte, error) {
 	}
 	for _, word := range words {
 		if _, ok := wordMap[word]; !ok {
-			return [16]byte{}, errors.Errorf("unrecognized word %q in seed phrase", word)
+			return [16]byte{}, fmt.Errorf("unrecognized word %q in seed phrase", word)
 		}
 	}
 

@@ -2,10 +2,11 @@ package proto
 
 import (
 	"crypto/ed25519"
+	"errors"
+	"fmt"
 	"math"
 	"time"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/types"
 
@@ -40,7 +41,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	// get a renter address for the file contract's valid/missed outputs
 	refundAddr, err := w.Address()
 	if err != nil {
-		return ContractRevision{}, nil, errors.Wrap(err, "could not get an address to use")
+		return ContractRevision{}, nil, fmt.Errorf("could not get an address to use: %w", err)
 	}
 
 	// calculate "base" price and collateral -- the storage cost and collateral
@@ -114,7 +115,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	// to pay for everything *except* the host's collateral contribution.
 	_, maxFee, err := tpool.FeeEstimate()
 	if err != nil {
-		return ContractRevision{}, nil, errors.Wrap(err, "could not estimate transaction fee")
+		return ContractRevision{}, nil, fmt.Errorf("could not estimate transaction fee: %w", err)
 	}
 	fee := maxFee.Mul64(estTxnSize)
 	renterCost := fc.Payout.Sub(totalCollateral).Add(fee)
@@ -177,7 +178,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 	txn.TransactionSignatures = addedSignatures
 	err = w.SignTransaction(&txn, toSign)
 	if err != nil {
-		err = errors.Wrap(err, "failed to sign transaction")
+		err = fmt.Errorf("failed to sign transaction: %w", err)
 		s.sess.WriteResponse(nil, err)
 		return ContractRevision{}, nil, err
 	}

@@ -1,19 +1,22 @@
 package renterutil
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/types"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 	"lukechampine.com/us/renter/proto"
 )
 
-var errNoHost = errors.New("no record of that host")
-var errHostAcquired = errors.New("host is currently acquired")
+var (
+	errNoHost       = errors.New("no record of that host")
+	errHostAcquired = errors.New("host is currently acquired")
+)
 
 // A HostError associates an error with a given host.
 type HostError struct {
@@ -182,7 +185,7 @@ func (set *HostSet) AddHost(c renter.Contract) {
 		}
 		hostIP, err := set.hkr.ResolveHostKey(c.HostKey)
 		if err != nil {
-			return errors.Wrap(err, "could not resolve host key")
+			return fmt.Errorf("could not resolve host key: %w", err)
 		}
 		// create and lock the session manually so that we can use our custom
 		// lock timeout

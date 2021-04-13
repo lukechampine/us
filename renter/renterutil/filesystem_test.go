@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"testing"
 
-	"github.com/pkg/errors"
 	"gitlab.com/NebulousLabs/Sia/crypto"
 	"gitlab.com/NebulousLabs/Sia/modules"
 	"gitlab.com/NebulousLabs/Sia/types"
@@ -26,6 +26,7 @@ func (stubWallet) Address() (_ types.UnlockHash, _ error) { return }
 func (stubWallet) FundTransaction(*types.Transaction, types.Currency) ([]crypto.Hash, func(), error) {
 	return nil, func() {}, nil
 }
+
 func (stubWallet) SignTransaction(txn *types.Transaction, toSign []crypto.Hash) error {
 	txn.TransactionSignatures = append(txn.TransactionSignatures, make([]types.TransactionSignature, len(toSign))...)
 	return nil
@@ -117,9 +118,9 @@ func TestHostErrorSet(t *testing.T) {
 	}
 	// should get a HostErrorSet when we sync
 	err = pf.Sync()
-	hes, ok := errors.Cause(err).(HostErrorSet)
-	if !ok || hes == nil {
-		t.Fatal("expected HostSetError, got", errors.Cause(err))
+	var hes HostErrorSet
+	if !errors.As(err, &hes) {
+		t.Fatal("expected HostSetError, got", err)
 	} else if len(hes) != 3 {
 		t.Fatal("expected HostSetError to have three hosts, got", len(hes))
 	}
@@ -183,7 +184,7 @@ func TestFileSystemBasic(t *testing.T) {
 		t.Error("incorrect name")
 	} else if stat.Size() != int64(len(data)) {
 		t.Error("incorrect size", stat.Size(), len(data))
-	} else if stat.Mode() != 0666 {
+	} else if stat.Mode() != 0o666 {
 		t.Error("incorrect mode")
 	}
 
@@ -194,7 +195,7 @@ func TestFileSystemBasic(t *testing.T) {
 	}
 
 	// chmod file
-	err = fs.Chmod("foo", 0676)
+	err = fs.Chmod("foo", 0o676)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +215,7 @@ func TestFileSystemBasic(t *testing.T) {
 		t.Error("incorrect name")
 	} else if stat.Size() != int64(len(data)) {
 		t.Error("incorrect size", stat.Size(), len(data))
-	} else if stat.Mode() != 0676 {
+	} else if stat.Mode() != 0o676 {
 		t.Error("incorrect mode")
 	}
 
