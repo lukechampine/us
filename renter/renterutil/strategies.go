@@ -17,24 +17,27 @@ import (
 	"lukechampine.com/us/renterhost"
 )
 
-func acquireCtx(ctx context.Context, hosts *HostSet, hostKey hostdb.HostPublicKey, block bool) (*proto.Session, error) {
+func acquireCtx(ctx context.Context, hosts *HostSet, hostKey hostdb.HostPublicKey, block bool) (sess *proto.Session, err error) {
+	// NOTE: we can't smear ctx throughout the HostSet without changing a LOT of
+	// code, so this "leaky" aproach will have to do for now. (It's "leaky"
+	// because the goroutine can stick around long after the ctx is canceled.)
+
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	var (
-		sess *proto.Session
-		err  error
-	)
 	done := make(chan struct{})
 	go func() {
 		sess, err = hosts.tryAcquire(hostKey)
 		if err == errHostAcquired && block {
 			sess, err = hosts.acquire(hostKey)
 		}
-		if sess != nil && ctx.Err() != nil {
-			hosts.release(hostKey)
+		select {
+		case done <- struct{}{}:
+		case <-ctx.Done():
+			if err == nil {
+				hosts.release(hostKey)
+			}
 		}
-		close(done)
 	}()
 	select {
 	case <-ctx.Done():
