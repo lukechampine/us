@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"gitlab.com/NebulousLabs/Sia/crypto"
+	"gitlab.com/NebulousLabs/Sia/modules/host/contractmanager"
 	"lukechampine.com/frand"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/merkle"
@@ -1306,7 +1307,7 @@ func (ssd SerialSectorDeleter) DeleteSectors(ctx context.Context, db MetaDB, sec
 		// TODO: respect ctx
 		err = h.DeleteSectors(roots)
 		ssd.Hosts.release(hostKey)
-		if err != nil {
+		if err != nil && !errors.Is(err, contractmanager.ErrSectorNotFound) {
 			return err
 		}
 		// TODO: mark sectors as deleted in db
@@ -1333,7 +1334,7 @@ func (psd ParallelSectorDeleter) DeleteSectors(ctx context.Context, db MetaDB, s
 				// TODO: respect ctx
 				err = h.DeleteSectors(roots)
 				psd.Hosts.release(hostKey)
-				if err != nil {
+				if err != nil && !errors.Is(err, contractmanager.ErrSectorNotFound) {
 					return &HostError{hostKey, err}
 				}
 				// TODO: mark sectors as deleted in db
