@@ -1303,7 +1303,6 @@ func (ssd SerialSectorDeleter) DeleteSectors(ctx context.Context, db MetaDB, sec
 		if err != nil {
 			return err
 		}
-		// TODO: no-op if roots already deleted
 		// TODO: respect ctx
 		err = h.DeleteSectors(roots)
 		ssd.Hosts.release(hostKey)
@@ -1330,7 +1329,6 @@ func (psd ParallelSectorDeleter) DeleteSectors(ctx context.Context, db MetaDB, s
 				if err != nil {
 					return &HostError{hostKey, err}
 				}
-				// TODO: no-op if roots already deleted
 				// TODO: respect ctx
 				err = h.DeleteSectors(roots)
 				psd.Hosts.release(hostKey)
