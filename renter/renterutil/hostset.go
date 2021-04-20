@@ -13,9 +13,9 @@ import (
 )
 
 var (
-	errNoHost        = errors.New("no record of that host")
-	errHostAcquired  = errors.New("host is currently acquired")
-	errHostSetClosed = errors.New("host set closed")
+	ErrNoHost        = errors.New("no record of that host")
+	ErrHostAcquired  = errors.New("host is currently acquired")
+	ErrHostSetClosed = errors.New("host set closed")
 )
 
 // A HostError associates an error with a given host.
@@ -98,7 +98,7 @@ func (set *HostSet) HasHost(hostKey hostdb.HostPublicKey) bool {
 	return ok
 }
 
-func reconnectAfterClose() error { return errHostSetClosed }
+func reconnectAfterClose() error { return ErrHostSetClosed }
 
 // Close closes all of the sessions in the set.
 func (set *HostSet) Close() error {
@@ -118,7 +118,7 @@ func (set *HostSet) Close() error {
 func (set *HostSet) acquire(host hostdb.HostPublicKey) (*proto.Session, error) {
 	ls, ok := set.sessions[host]
 	if !ok {
-		return nil, errNoHost
+		return nil, ErrNoHost
 	}
 	ls.mu.Lock()
 	if err := ls.reconnect(); err != nil {
@@ -131,10 +131,10 @@ func (set *HostSet) acquire(host hostdb.HostPublicKey) (*proto.Session, error) {
 func (set *HostSet) tryAcquire(host hostdb.HostPublicKey) (*proto.Session, error) {
 	ls, ok := set.sessions[host]
 	if !ok {
-		return nil, errNoHost
+		return nil, ErrNoHost
 	}
 	if !ls.mu.TryLock() {
-		return nil, errHostAcquired
+		return nil, ErrHostAcquired
 	}
 	if err := ls.reconnect(); err != nil {
 		ls.mu.Unlock()
