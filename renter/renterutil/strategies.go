@@ -171,7 +171,7 @@ func (scu SerialChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c DBC
 		nonce := renter.RandomNonce()
 		sb.Append(shard, key, nonce)
 		sector := sb.Finish()
-		h, err := scu.Hosts.acquire(hostKey)
+		h, err := acquireCtx(ctx, scu.Hosts, hostKey, true)
 		if err != nil {
 			return &HostError{hostKey, err}
 		}
@@ -407,7 +407,7 @@ func (mcu MinimumChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c DB
 		offset := uint32(sb.Len())
 		sb.Append(shard, key, nonce)
 		sector := sb.Finish()
-		h, err := mcu.Hosts.acquire(hostKey)
+		h, err := acquireCtx(ctx, mcu.Hosts, hostKey, true)
 		if err != nil {
 			return &HostError{hostKey, err}
 		}
@@ -629,8 +629,7 @@ func (scd SerialChunkDownloader) DownloadChunk(ctx context.Context, db MetaDB, c
 			end += merkle.SegmentSize
 		}
 		offset, length := start, end-start
-
-		sess, err := scd.Hosts.acquire(shard.HostKey)
+		sess, err := acquireCtx(ctx, scd.Hosts, shard.HostKey, true)
 		if err != nil {
 			errs = append(errs, &HostError{shard.HostKey, err})
 			continue
