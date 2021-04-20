@@ -99,6 +99,24 @@ func downloadCtx(ctx context.Context, sess *proto.Session, key renter.KeySeed, s
 	return
 }
 
+func deleteCtx(ctx context.Context, sess *proto.Session, roots []crypto.Hash) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	done := make(chan error)
+	go func() {
+		done <- sess.DeleteSectors(roots)
+	}()
+	select {
+	case <-ctx.Done():
+		sess.Interrupt()
+		<-done // wait for goroutine to exit
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
+}
+
 // A ChunkUploader uploads shards, associating them with a given chunk.
 type ChunkUploader interface {
 	UploadChunk(ctx context.Context, db MetaDB, c DBChunk, key renter.KeySeed, shards [][]byte) error
@@ -1299,13 +1317,11 @@ type SerialSectorDeleter struct {
 // DeleteSectors implements SectorDeleter.
 func (ssd SerialSectorDeleter) DeleteSectors(ctx context.Context, db MetaDB, sectors map[hostdb.HostPublicKey][]crypto.Hash) error {
 	for hostKey, roots := range sectors {
-		h, err := ssd.Hosts.acquire(hostKey)
+		h, err := acquireCtx(ctx, ssd.Hosts, hostKey, true)
 		if err != nil {
 			return err
 		}
-		// TODO: no-op if roots already deleted
-		// TODO: respect ctx
-		err = h.DeleteSectors(roots)
+		err = deleteCtx(ctx, h, roots)
 		ssd.Hosts.release(hostKey)
 		if err != nil && !errors.Is(err, contractmanager.ErrSectorNotFound) {
 			return err
@@ -1326,13 +1342,11 @@ func (psd ParallelSectorDeleter) DeleteSectors(ctx context.Context, db MetaDB, s
 	for hostKey, roots := range sectors {
 		go func(hostKey hostdb.HostPublicKey, roots []crypto.Hash) {
 			errCh <- func() *HostError {
-				h, err := psd.Hosts.acquire(hostKey)
+				h, err := acquireCtx(ctx, psd.Hosts, hostKey, true)
 				if err != nil {
 					return &HostError{hostKey, err}
 				}
-				// TODO: no-op if roots already deleted
-				// TODO: respect ctx
-				err = h.DeleteSectors(roots)
+				err = deleteCtx(ctx, h, roots)
 				psd.Hosts.release(hostKey)
 				if err != nil && !errors.Is(err, contractmanager.ErrSectorNotFound) {
 					return &HostError{hostKey, err}
