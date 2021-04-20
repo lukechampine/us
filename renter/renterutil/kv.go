@@ -274,7 +274,7 @@ func (sbb *SmallBlobBuffer) Upload(ctx context.Context, hosts *HostSet) error {
 			defer wg.Done()
 			for req := range reqChan {
 				sess, err := hosts.tryAcquire(req.hostKey)
-				if err == errHostAcquired && req.block {
+				if err == ErrHostAcquired && req.block {
 					sess, err = hosts.acquire(req.hostKey)
 				}
 				if err != nil {
@@ -318,7 +318,7 @@ func (sbb *SmallBlobBuffer) Upload(ctx context.Context, hosts *HostSet) error {
 			finalHosts[resp.req.shardIndex] = resp.req.hostKey
 			rem--
 		} else {
-			if resp.err == errHostAcquired {
+			if resp.err == ErrHostAcquired {
 				// host could not be acquired without blocking; add it to the back
 				// of the queue, but next time, block
 				resp.req.block = true

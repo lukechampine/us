@@ -31,7 +31,7 @@ func acquireCtx(ctx context.Context, hosts *HostSet, hostKey hostdb.HostPublicKe
 	done := make(chan struct{})
 	go func() {
 		sess, err = hosts.tryAcquire(hostKey)
-		if err == errHostAcquired && block {
+		if err == ErrHostAcquired && block {
 			sess, err = hosts.acquire(hostKey)
 		}
 		select {
@@ -326,7 +326,7 @@ func (pcu ParallelChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c D
 			}
 			rem--
 		} else {
-			if resp.err == errHostAcquired {
+			if resp.err == ErrHostAcquired {
 				// host could not be acquired without blocking; add it to the back
 				// of the queue, but next time, block
 				resp.req.block = true
@@ -575,7 +575,7 @@ func (ocu OverdriveChunkUploader) UploadChunk(ctx context.Context, db MetaDB, c 
 			rem--
 			success[resp.req.shardIndex] = true
 		} else {
-			if resp.err == errHostAcquired {
+			if resp.err == ErrHostAcquired {
 				// host could not be acquired without blocking; add it to the back
 				// of the queue, but next time, block
 				resp.req.block = true
@@ -726,7 +726,7 @@ func (pcd ParallelChunkDownloader) DownloadChunk(ctx context.Context, db MetaDB,
 		if resp.err == nil {
 			goodShards++
 		} else {
-			if resp.err.Err == errHostAcquired {
+			if resp.err.Err == ErrHostAcquired {
 				// host could not be acquired without blocking; add it to the back
 				// of the queue, but next time, block
 				reqQueue = append(reqQueue, req{
@@ -846,7 +846,7 @@ func (ocd OverdriveChunkDownloader) DownloadChunk(ctx context.Context, db MetaDB
 			goodShards++
 			shards[resp.req.shardIndex] = resp.shard
 		} else {
-			if resp.err.Err == errHostAcquired {
+			if resp.err.Err == ErrHostAcquired {
 				// host could not be acquired without blocking; add it to the back
 				// of the queue, but next time, block
 				resp.req.block = true

@@ -418,7 +418,7 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 			for req := range reqChan {
 				hostKey := f.m.Hosts[req.shardIndex]
 				s, err := fs.hosts.tryAcquire(hostKey)
-				if err == errHostAcquired && req.block {
+				if err == ErrHostAcquired && req.block {
 					s, err = fs.hosts.acquire(hostKey)
 				}
 				if err != nil {
@@ -451,7 +451,7 @@ func (fs *PseudoFS) fileReadAt(f *openMetaFile, p []byte, off int64) (int, error
 		if err == nil {
 			goodShards++
 		} else {
-			if err.Err == errHostAcquired {
+			if err.Err == ErrHostAcquired {
 				// host could not be acquired without blocking; add it to the back
 				// of the queue, but next time, block
 				reqQueue = append(reqQueue, req{
