@@ -206,7 +206,7 @@ func (s *Session) RenewContract(w Wallet, tpool TransactionPool, renterPayout ty
 
 	// Send signatures.
 	renterSigs := &renterhost.RPCRenewAndClearContractSignatures{
-		ContractSignatures:     addedSignatures,
+		ContractSignatures:     txn.TransactionSignatures,
 		RevisionSignature:      renterRevisionSig,
 		FinalRevisionSignature: ed25519hash.Sign(s.key, renterhost.HashRevision(finalOldRevision)),
 	}

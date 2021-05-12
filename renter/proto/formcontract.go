@@ -183,7 +183,7 @@ func (s *Session) FormContract(w Wallet, tpool TransactionPool, key ed25519.Priv
 
 	// Send signatures.
 	renterSigs := &renterhost.RPCFormContractSignatures{
-		ContractSignatures: addedSignatures,
+		ContractSignatures: txn.TransactionSignatures,
 		RevisionSignature:  renterRevisionSig,
 	}
 	if err := s.sess.WriteResponse(renterSigs, nil); err != nil {
