@@ -2,7 +2,7 @@ module lukechampine.com/us
 
 go 1.16
 
-retract v1.13.0 // pushed accidentally
+retract [v1.13.0, v1.13.1] // pushed accidentally
 
 require (
 	filippo.io/edwards25519 v1.0.0-beta.2
