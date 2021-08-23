@@ -1,6 +1,8 @@
 module lukechampine.com/us
 
-go 1.13
+go 1.16
+
+retract v1.13.0 // pushed accidentally
 
 require (
 	filippo.io/edwards25519 v1.0.0-beta.2
