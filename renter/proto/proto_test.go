@@ -4,7 +4,7 @@ import (
 	"io"
 	"testing"
 
-	"gitlab.com/NebulousLabs/Sia/types"
+	"go.sia.tech/siad/types"
 	"lukechampine.com/frand"
 )
 

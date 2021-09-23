@@ -7,7 +7,7 @@ import (
 	"sort"
 	"unsafe"
 
-	"gitlab.com/NebulousLabs/Sia/types"
+	"go.sia.tech/siad/types"
 	"lukechampine.com/us/ed25519hash"
 )
 

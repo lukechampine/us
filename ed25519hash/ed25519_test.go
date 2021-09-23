@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"gitlab.com/NebulousLabs/Sia/crypto"
+	"go.sia.tech/siad/crypto"
 )
 
 func TestSignVerify(t *testing.T) {

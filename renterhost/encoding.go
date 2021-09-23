@@ -9,8 +9,8 @@ import (
 	"math/big"
 	"unsafe"
 
-	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/Sia/types"
+	"go.sia.tech/siad/crypto"
+	"go.sia.tech/siad/types"
 	"golang.org/x/crypto/blake2b"
 )
 

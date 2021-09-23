@@ -9,7 +9,7 @@ import (
 	"strconv"
 
 	"filippo.io/edwards25519"
-	"gitlab.com/NebulousLabs/Sia/crypto"
+	"go.sia.tech/siad/crypto"
 )
 
 // Verify reports whether sig is a valid signature of hash by pub.

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.com/NebulousLabs/Sia/crypto"
+	"go.sia.tech/siad/crypto"
 	"lukechampine.com/us/hostdb"
 	"lukechampine.com/us/renter"
 )
