@@ -4,7 +4,7 @@ import (
 	"math/bits"
 	"unsafe"
 
-	"gitlab.com/NebulousLabs/Sia/crypto"
+	"go.sia.tech/siad/crypto"
 	"lukechampine.com/us/merkle/blake2b"
 )
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"testing/iotest"
 
-	"gitlab.com/NebulousLabs/Sia/crypto"
+	"go.sia.tech/siad/crypto"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
 	"lukechampine.com/us/renterhost"

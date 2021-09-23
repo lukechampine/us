@@ -7,7 +7,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"gitlab.com/NebulousLabs/Sia/crypto"
+	"go.sia.tech/siad/crypto"
 	"lukechampine.com/frand"
 	"lukechampine.com/us/merkle"
 	"lukechampine.com/us/renterhost"

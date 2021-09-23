@@ -4,8 +4,8 @@ import (
 	"crypto/ed25519"
 	"encoding/binary"
 
-	"gitlab.com/NebulousLabs/Sia/modules"
-	"gitlab.com/NebulousLabs/Sia/types"
+	"go.sia.tech/siad/modules"
+	"go.sia.tech/siad/types"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
 )

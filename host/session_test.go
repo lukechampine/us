@@ -5,8 +5,8 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"gitlab.com/NebulousLabs/Sia/crypto"
-	"gitlab.com/NebulousLabs/Sia/types"
+	"go.sia.tech/siad/crypto"
+	"go.sia.tech/siad/types"
 	"lukechampine.com/us/internal/ghost"
 	"lukechampine.com/us/renter/proto"
 	"lukechampine.com/us/renterhost"

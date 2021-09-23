@@ -4,7 +4,7 @@ us
 [![GoDoc](https://godoc.org/lukechampine.com/us?status.svg)](https://godoc.org/lukechampine.com/us)
 [![Go Report Card](https://goreportcard.com/badge/lukechampine.com/us)](https://goreportcard.com/report/lukechampine.com/us)
 
-`us` is an alternative interface to the [Sia](https://gitlab.com/NebulousLabs/Sia)
+`us` is an alternative interface to the [Sia](https://github.com/SiaFoundation/siad)
 network. It provides low-level, developer-oriented APIs and formats that
 facilitate the storage and retrieval of files on Sia.
 
