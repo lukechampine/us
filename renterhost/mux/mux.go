@@ -229,11 +229,9 @@ func (m *Mux) AcceptStream() (*Stream, error) {
 	}
 }
 
-// DialStream creates a new Stream.
-//
-// Unlike e.g. net.Dial, this does not perform any I/O; the peer will not be
-// aware of the new Stream until Write is called.
-func (m *Mux) DialStream() (*Stream, error) {
+// NewStream creates a new Stream. The peer will not be aware of the new Stream
+// until Write is called.
+func (m *Mux) NewStream() (*Stream, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.err != nil {
@@ -284,7 +282,18 @@ func Dial(conn net.Conn, theirKey ed25519.PublicKey) (*Mux, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encryption handshake failed: %w", err)
 	}
-	settings, err := initiateSettingsHandshake(conn, defaultConnSettings, aead)
+
+	// the siad implementation determines the initial packet size for the handshake
+	// based on the connection's IP address instead of hardcoding it.
+	ours := defaultConnSettings
+	host, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+	if err != nil {
+		return nil, fmt.Errorf("could not parse remote address: %w", err)
+	} else if net.ParseIP(host).To4() != nil {
+		ours.RequestedPacketSize = 1460 // IPv4 MTU
+	}
+
+	settings, err := initiateSettingsHandshake(conn, ours, aead)
 	if err != nil {
 		return nil, fmt.Errorf("settings handshake failed: %w", err)
 	}
@@ -320,6 +329,20 @@ type Stream struct {
 	err     error
 	readBuf []byte
 	rd, wd  time.Time // deadlines
+
+	// SiaMux handles the subscriber handshake asynchronously, it is expected
+	// that writes to the peer will continue uninterupted before the handshake
+	// is complete. The subscriber must be prependend to the first call to
+	// Write(), but the response may not be sent until future calls to Write()
+	// have completed. This means the response must be read from the read buffer
+	// before other calls to Read() can complete.
+	writeMu  sync.Mutex // guards the lazy write buffer
+	writeBuf []byte
+	// guards calls to Read(). Calls to Read() should take an RLock on the mutex.
+	// Calling exclusiveReader() should takes a WLock to prevent other calls
+	// to Read() while the exclusive reader is open. A mutex benchmarked better
+	// than the channel that the existing siamux uses.
+	readMu sync.RWMutex
 }
 
 // LocalAddr returns the underlying connection's LocalAddr.
@@ -364,7 +387,7 @@ func (s *Stream) SetWriteDeadline(t time.Time) error {
 }
 
 // consumeFrame stores a frame in s.read and waits for it to be consumed by
-// (*Stream).Read calls.
+// (*Stream).read calls.
 func (s *Stream) consumeFrame(h frameHeader, payload []byte) {
 	s.cond.L.Lock()
 	defer s.cond.L.Unlock()
@@ -391,8 +414,8 @@ func (s *Stream) consumeFrame(h frameHeader, payload []byte) {
 	}
 }
 
-// Read reads data from the Stream.
-func (s *Stream) Read(p []byte) (int, error) {
+// read reads data from the Stream.
+func (s *Stream) read(p []byte) (int, error) {
 	s.cond.L.Lock()
 	defer s.cond.L.Unlock()
 	if !s.rd.IsZero() {
@@ -417,7 +440,7 @@ func (s *Stream) Read(p []byte) (int, error) {
 }
 
 // Write writes data to the Stream.
-func (s *Stream) Write(p []byte) (int, error) {
+func (s *Stream) write(p []byte) (int, error) {
 	buf := bytes.NewBuffer(p)
 	for buf.Len() > 0 {
 		// check for error
@@ -437,6 +460,45 @@ func (s *Stream) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// lazyWrite prepends data to the next frame written to the stream.
+func (s *Stream) lazyWrite(p []byte) {
+	s.writeMu.Lock()
+	s.writeBuf = append(s.writeBuf, p...)
+	s.writeMu.Unlock()
+}
+
+// Read reads data from the Stream.
+func (s *Stream) Read(p []byte) (int, error) {
+	s.readMu.RLock()
+	defer s.readMu.RUnlock()
+	return s.read(p)
+}
+
+// Write writes data to the Stream.
+func (s *Stream) Write(p []byte) (n int, err error) {
+	s.writeMu.Lock()
+	var m int
+	if len(s.writeBuf) != 0 {
+		m = len(s.writeBuf)
+		p = append(s.writeBuf, p...)
+		s.writeBuf = nil
+	}
+	s.writeMu.Unlock()
+	n, err = s.write(p)
+	if n >= m {
+		n -= m
+	}
+	return
+}
+
+// exclusiveReader returns a reader with exclusive access to the stream's read
+// buffer. Direct reads from the stream are blocked until the returned reader
+// is closed.
+func (s *Stream) exclusiveReader() io.ReadCloser {
+	s.readMu.Lock()
+	return &exclusiveReader{s: s}
+}
+
 // Close closes the Stream. The underlying connection is not closed.
 func (s *Stream) Close() error {
 	h := frameHeader{
@@ -444,7 +506,7 @@ func (s *Stream) Close() error {
 		flags: flagFinal,
 	}
 	err := s.m.bufferFrame(h, nil, s.wd)
-	if err == ErrPeerClosedStream {
+	if errors.Is(err, ErrPeerClosedStream) {
 		err = nil
 	}
 
@@ -459,6 +521,30 @@ func (s *Stream) Close() error {
 	s.err = ErrClosedStream
 	s.cond.Broadcast()
 	return err
+}
+
+// exclusiveReader is a reader that provides exclusive read access to a stream's
+// underlying read buffer. Any other calls to Read() on the underlying stream
+// will be blocked until the exclusive reader is closed.
+type exclusiveReader struct {
+	s      *Stream
+	closed bool
+}
+
+// Read reads data from the underlying stream. Implements io.Reader.
+func (r *exclusiveReader) Read(p []byte) (int, error) {
+	if r.closed {
+		return 0, ErrClosedStream
+	}
+	return r.s.read(p)
+}
+
+// Close closes the reader and unlocks the underlying stream. The underlying
+// stream is not closed.
+func (r *exclusiveReader) Close() error {
+	r.closed = true
+	r.s.readMu.Unlock()
+	return nil
 }
 
 var _ net.Conn = (*Stream)(nil)
