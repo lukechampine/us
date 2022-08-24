@@ -33,7 +33,7 @@ func Verify(pub ed25519.PublicKey, hash crypto.Hash, sig []byte) bool {
 	copy(buf[32:], pub)
 	copy(buf[64:], hash[:])
 	hramDigest := sha512.Sum512(buf)
-	hramDigestReduced := new(edwards25519.Scalar).SetUniformBytes(hramDigest[:])
+	hramDigestReduced, _ := new(edwards25519.Scalar).SetUniformBytes(hramDigest[:])
 
 	b, err := new(edwards25519.Scalar).SetCanonicalBytes(sig[32:])
 	if err != nil {
@@ -56,21 +56,21 @@ func sign(signature []byte, priv ed25519.PrivateKey, hash crypto.Hash) []byte {
 	}
 
 	keyDigest := sha512.Sum512(priv[:32])
-	expandedSecretKey := new(edwards25519.Scalar).SetBytesWithClamping(keyDigest[:32])
+	expandedSecretKey, _ := new(edwards25519.Scalar).SetBytesWithClamping(keyDigest[:32])
 
 	buf := make([]byte, 96)
 	copy(buf[:32], keyDigest[32:])
 	copy(buf[32:], hash[:])
 	messageDigest := sha512.Sum512(buf[:64])
 
-	messageDigestReduced := new(edwards25519.Scalar).SetUniformBytes(messageDigest[:])
+	messageDigestReduced, _ := new(edwards25519.Scalar).SetUniformBytes(messageDigest[:])
 	encodedR := new(edwards25519.Point).ScalarBaseMult(messageDigestReduced).Bytes()
 
 	copy(buf[:32], encodedR[:])
 	copy(buf[32:], priv[32:])
 	copy(buf[64:], hash[:])
 	hramDigest := sha512.Sum512(buf[:96])
-	hramDigestReduced := new(edwards25519.Scalar).SetUniformBytes(hramDigest[:])
+	hramDigestReduced, _ := new(edwards25519.Scalar).SetUniformBytes(hramDigest[:])
 
 	s := hramDigestReduced.MultiplyAdd(hramDigestReduced, expandedSecretKey, messageDigestReduced)
 
