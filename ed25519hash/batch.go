@@ -99,7 +99,7 @@ func VerifyBatch(keys []ed25519.PublicKey, hashes [][32]byte, sigs [][]byte) boo
 		copy(buf[32:], keys[i])
 		copy(buf[64:], hashes[i][:])
 		hram := sha512.Sum512(buf)
-		k := new(edwards25519.Scalar).SetUniformBytes(hram[:])
+		k, _ := new(edwards25519.Scalar).SetUniformBytes(hram[:])
 		Acoeffs[i].Multiply(Rcoeffs[i], k)
 	}
 
@@ -164,7 +164,7 @@ func VerifySingleKeyBatch(pub ed25519.PublicKey, hashes [][32]byte, sigs [][]byt
 		copy(buf[32:], pub)
 		copy(buf[64:], hashes[i][:])
 		hram := sha512.Sum512(buf)
-		k := new(edwards25519.Scalar).SetUniformBytes(hram[:])
+		k, _ := new(edwards25519.Scalar).SetUniformBytes(hram[:])
 		Acoeff.MultiplyAdd(Rcoeffs[i], k, Acoeff)
 	}
 	Bcoeff.Negate(Bcoeff)

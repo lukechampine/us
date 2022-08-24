@@ -5,7 +5,7 @@ go 1.16
 retract [v1.13.0, v1.13.1] // pushed accidentally
 
 require (
-	filippo.io/edwards25519 v1.0.0-beta.2
+	filippo.io/edwards25519 v1.0.0
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe
 	gitlab.com/NebulousLabs/log v0.0.0-20200604091839-0ba4a941cdc2
