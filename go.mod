@@ -12,7 +12,7 @@ require (
 	gitlab.com/NebulousLabs/siamux v0.0.0-20210409140711-e667c5f458e4 // for testing mux compatibility
 	go.etcd.io/bbolt v1.3.6
 	go.sia.tech/siad v1.5.7
-	golang.org/x/crypto v0.1.0
-	golang.org/x/sys v0.1.0
+	golang.org/x/crypto v0.17.0
+	golang.org/x/sys v0.15.0
 	lukechampine.com/frand v1.4.2
 )
